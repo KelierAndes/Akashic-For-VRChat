@@ -24,6 +24,7 @@ public partial class ResourcesViewModel : ObservableObject
     private readonly IExternalPackageService _externalService;
     private readonly IAssetStoreService _storeService;
     private readonly IUnityPackageIconService _iconService;
+    private readonly IBoothService _boothService;
 
     private List<UnityPackageFileInfo> _allPackageFiles = [];
     private List<ExternalPackage> _allExternals = [];
@@ -154,13 +155,14 @@ public partial class ResourcesViewModel : ObservableObject
 
     public ResourcesViewModel(IVpmRegistryService registryService, IUnityPackageLibraryService libraryService,
         IExternalPackageService externalService, IAssetStoreService storeService,
-        IUnityPackageIconService iconService)
+        IUnityPackageIconService iconService, IBoothService boothService)
     {
         _registryService = registryService;
         _libraryService = libraryService;
         _externalService = externalService;
         _storeService = storeService;
         _iconService = iconService;
+        _boothService = boothService;
     }
 
     public string RepositorySummary => $"共 {RepositoryCount} 个存储库 · 列表顺序即解析优先级";
@@ -441,11 +443,54 @@ public partial class ResourcesViewModel : ObservableObject
 
     /// <summary>
     /// Fills the icon column in the background: Booth/Asset Store covers come from the cached
-    /// row data, other .unitypackage files get a thumbnail pulled out of the archive itself and
+    /// row data, Booth-imported packages reuse the product cover captured by the Booth page,
+    /// other .unitypackage files get a thumbnail pulled out of the archive itself and
     /// disk-cached, and anything without one keeps the default glyph.
     /// </summary>
     private async Task ResolvePackageIconsAsync()
     {
+        // Booth 商品封面表：zip 名（规范化的 FormLabel 与本地 zip 名）→ 封面 URL，
+        // 来自 Booth 页最近一次读取的磁盘缓存。
+        var boothCovers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (var item in _boothService.LoadLibraryCache().Items)
+            {
+                if (string.IsNullOrWhiteSpace(item.ImageUrl)) continue;
+
+                boothCovers[BoothService.NormalizeKey(item.FileNameWithoutExtension)] = item.ImageUrl;
+                if (!string.IsNullOrEmpty(item.LocalZipPath))
+                {
+                    var zipStem = Path.GetFileNameWithoutExtension(item.LocalZipPath);
+                    if (zipStem.Length > 0)
+                        boothCovers[BoothService.NormalizeKey(zipStem)] = item.ImageUrl;
+                }
+            }
+        }
+        catch
+        {
+            // 缓存缺失只影响 Booth 行的封面来源，回退到解包提图。
+        }
+
+        // Booth 解压目录名为 "<zip 名>-extracted"，由包路径向上回溯即可反查商品。
+        string? BoothCoverFor(string filePath)
+        {
+            var dir = Path.GetDirectoryName(filePath);
+            for (var i = 0; i < 4 && dir is not null; i++)
+            {
+                var name = Path.GetFileName(dir);
+                if (name.EndsWith("-extracted", StringComparison.OrdinalIgnoreCase) &&
+                    boothCovers.TryGetValue(BoothService.NormalizeKey(name[..^"-extracted".Length]), out var url))
+                {
+                    return url;
+                }
+
+                dir = Path.GetDirectoryName(dir);
+            }
+
+            return null;
+        }
+
         var pending = Packages.Concat(BoothPackages)
             .Where(r => r.Icon is null && !r.IconFailed)
             .Distinct()
@@ -463,10 +508,25 @@ public partial class ResourcesViewModel : ObservableObject
             ImageSource? icon = null;
             try
             {
-                var thumb = await _iconService.GetThumbnailAsync(key);
-                if (thumb is not null && File.Exists(thumb))
+                // Booth 导入的包直接复用商品封面；拿不到才解包找图。
+                if (row.File.Origin == PackageOrigin.Booth)
                 {
-                    icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(thumb));
+                    var coverUrl = BoothCoverFor(key);
+                    if (coverUrl is not null)
+                    {
+                        var absolute = coverUrl.StartsWith("//") ? "https:" + coverUrl : coverUrl;
+                        if (Uri.TryCreate(absolute, UriKind.Absolute, out var coverUri))
+                            icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(coverUri);
+                    }
+                }
+
+                if (icon is null)
+                {
+                    var thumb = await _iconService.GetThumbnailAsync(key);
+                    if (thumb is not null && File.Exists(thumb))
+                    {
+                        icon = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(thumb));
+                    }
                 }
             }
             catch

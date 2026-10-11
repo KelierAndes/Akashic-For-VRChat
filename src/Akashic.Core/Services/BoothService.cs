@@ -219,6 +219,13 @@ public class BoothService : IBoothService
 
     private static string Key(string raw) => new(raw.Where(char.IsLetterOrDigit).ToArray());
 
+    /// <summary>
+    /// Normalises a file label or archive name for matching: letters and digits only,
+    /// case-insensitive by the caller's dictionary. Shared with the icon resolver so cached
+    /// covers can be matched back to their packages.
+    /// </summary>
+    public static string NormalizeKey(string raw) => Key(raw);
+
     public async Task<string> DownloadAsync(BoothPurchaseItem item, IProgress<double>? progress = null,
         CancellationToken ct = default)
     {
