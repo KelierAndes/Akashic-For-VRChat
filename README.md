@@ -85,12 +85,20 @@ E:\Akashic\VPMManager\              # 项目根目录（磁盘位置沿用旧名
 
 ## 🚀 编译与运行
 
-### 环境要求
+### 方式一：从 Release 直接运行（推荐普通用户）
+无需安装 .NET 或 Windows App SDK，构建产物已自包含全部运行时：
+
+1. 打开 [Releases](https://github.com/KelierAndes/Akashic-For-VRChat/releases/latest) 页面，下载最新版本的 `Akashic.zip`。
+2. 解压到任意目录，双击运行 `Akashic.exe` 即可。
+
+### 方式二：从源码构建
+
+#### 环境要求
 * Windows 10 (1809 及以上) 或 Windows 11
 * .NET 8.0 SDK
 * Windows App SDK 1.5
 
-### 命令行编译与启动
+#### 命令行编译与启动
 在终端中执行以下命令：
 
 ```powershell
