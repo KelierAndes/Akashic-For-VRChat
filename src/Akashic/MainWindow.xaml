@@ -4,15 +4,17 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Akashic">
 
-    <Grid>
-        <NavigationView
-            x:Name="NavView"
-            IsBackButtonVisible="Collapsed"
-            PaneDisplayMode="Left"
-            IsSettingsVisible="True"
-            SelectionChanged="NavView_SelectionChanged"
-            Loaded="NavView_Loaded"
-            OpenPaneLength="260">
+    <!-- 主题切换锚定在最外层：NavigationView、Mica 背景板与内容区才会整体跟随 -->
+    <Grid x:Name="RootGrid">
+            <NavigationView
+                x:Name="NavView"
+                IsBackButtonVisible="Collapsed"
+                PaneDisplayMode="Left"
+                IsSettingsVisible="False"
+                SelectionChanged="NavView_SelectionChanged"
+                ItemInvoked="NavView_ItemInvoked"
+                Loaded="NavView_Loaded"
+                OpenPaneLength="260">
 
             <NavigationView.PaneHeader>
                 <StackPanel Orientation="Horizontal" Margin="8,8,0,0" Spacing="12">
@@ -58,6 +60,17 @@
                 <NavigationViewItem Content="关于" Tag="about">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE946;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="设置" Tag="settings">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <!-- 切换主题：真正的导航项，SelectsOnInvoked=False，点击在 ItemInvoked 处理 -->
+                <NavigationViewItem x:Name="ThemeNavItem" Content="切换主题" Tag="theme" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon>
+                        <FontIcon x:Name="ThemeNavIcon" Glyph="&#xE793;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>

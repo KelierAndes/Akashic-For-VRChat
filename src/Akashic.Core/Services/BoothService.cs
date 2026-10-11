@@ -121,6 +121,35 @@ public class BoothService : IBoothService
 
     public BoothLibraryPage ParseFreeLibraryPage(string extractorResultJson) => ParseItemPage(extractorResultJson);
 
+    public BoothLibraryCache LoadLibraryCache()
+    {
+        try
+        {
+            var path = LibraryCachePath;
+            if (File.Exists(path))
+                return JsonSerializer.Deserialize<BoothLibraryCache>(File.ReadAllText(path), SerializerOptions)
+                       ?? new BoothLibraryCache();
+        }
+        catch (JsonException)
+        {
+        }
+
+        return new BoothLibraryCache();
+    }
+
+    public async Task SaveLibraryCacheAsync(IReadOnlyList<BoothPurchaseItem> items, CancellationToken ct = default)
+    {
+        var path = LibraryCachePath;
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+        var snapshot = new BoothLibraryCache { SavedAt = DateTime.Now, Items = [.. items] };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, SerializerOptions), ct);
+    }
+
+    private string LibraryCachePath =>
+        Path.Combine(Path.GetDirectoryName(_settingsPath) ?? ".", "cache", "booth-library.json");
+
     public BoothLibraryPage ParseLibraryPage(string extractorResultJson)
     {
         if (string.IsNullOrWhiteSpace(extractorResultJson)) return new BoothLibraryPage();

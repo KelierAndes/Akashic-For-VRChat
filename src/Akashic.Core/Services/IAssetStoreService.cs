@@ -68,4 +68,10 @@ public interface IAssetStoreService
 
     /// <summary>Loose name key shared by the cache merge and the cover cache.</summary>
     string MatchKey(string raw);
+
+    /// <summary>Loads the disk snapshot of the last 我的资产 read, if any.</summary>
+    AssetStoreAccountCache LoadAccountCache();
+
+    /// <summary>Overwrites the disk snapshot with the given account read.</summary>
+    Task SaveAccountCacheAsync(IReadOnlyList<AssetStoreAsset> items, CancellationToken ct = default);
 }

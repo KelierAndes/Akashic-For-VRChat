@@ -64,6 +64,15 @@ public interface IBoothService
     /// <summary>Turns the result of <see cref="FreeLibraryExtractorScript"/> into product metadata.</summary>
     BoothLibraryPage ParseFreeLibraryPage(string extractorResultJson);
 
+    /// <summary>
+    /// Loads the disk snapshot of the last full library read, so the page can open with a list
+    /// without re-walking every library page.
+    /// </summary>
+    BoothLibraryCache LoadLibraryCache();
+
+    /// <summary>Overwrites the disk snapshot with the given library read.</summary>
+    Task SaveLibraryCacheAsync(IReadOnlyList<BoothPurchaseItem> items, CancellationToken ct = default);
+
     string GetDownloadDirectory();
 
     Task SetDownloadDirectoryAsync(string directory, CancellationToken ct = default);

@@ -57,6 +57,7 @@ public partial class App : Application
         services.AddSingleton<IBoothService, BoothService>();
         services.AddSingleton<IAssetStoreService, AssetStoreService>();
         services.AddSingleton<IUnityPackageIconService, UnityPackageIconService>();
+        services.AddSingleton<IThemeService, ThemeService>();
 
         // ViewModels
         services.AddTransient<ProjectsViewModel>();

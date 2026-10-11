@@ -26,9 +26,12 @@ public class AssetStoreService : IAssetStoreService
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
 
     // Product covers remembered by name, so cache-only rows and list rows can share them
-    // without hitting the storefront again. Filled from 我的资产 reads and search lookups.
+    // without hitting the storefront again. Filled from 我的资产 reads and search lookups,
+    // and persisted to disk so they survive restarts.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _coverCache =
         new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly string _coverCachePath;
 
     public AssetStoreService(IUnityPackageLibraryService library, string? settingsPath = null)
     {
@@ -41,7 +44,75 @@ public class AssetStoreService : IAssetStoreService
         _settingsPath = settingsPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
+
+        var dataDir = Path.GetDirectoryName(_settingsPath) ?? ".";
+        _coverCachePath = Path.Combine(dataDir, "cache", "assetstore-covers.json");
+        LoadCoverCache();
     }
+
+    private void LoadCoverCache()
+    {
+        try
+        {
+            if (!File.Exists(_coverCachePath)) return;
+
+            var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_coverCachePath), SerializerOptions);
+            if (entries is null) return;
+
+            foreach (var (key, url) in entries)
+                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(url))
+                    _coverCache[key] = url;
+        }
+        catch (JsonException)
+        {
+        }
+    }
+
+    private void SaveCoverCache()
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(_coverCachePath);
+            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+            File.WriteAllText(_coverCachePath,
+                JsonSerializer.Serialize(_coverCache.ToArray(), SerializerOptions));
+        }
+        catch (IOException)
+        {
+        }
+    }
+
+    /// <summary>Loads the disk snapshot of the last 我的资产 read, if any.</summary>
+    public AssetStoreAccountCache LoadAccountCache()
+    {
+        try
+        {
+            var path = AccountCachePath;
+            if (File.Exists(path))
+                return JsonSerializer.Deserialize<AssetStoreAccountCache>(File.ReadAllText(path), SerializerOptions)
+                       ?? new AssetStoreAccountCache();
+        }
+        catch (JsonException)
+        {
+        }
+
+        return new AssetStoreAccountCache();
+    }
+
+    /// <summary>Overwrites the disk snapshot with the given account read.</summary>
+    public async Task SaveAccountCacheAsync(IReadOnlyList<AssetStoreAsset> items, CancellationToken ct = default)
+    {
+        var path = AccountCachePath;
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
+
+        var snapshot = new AssetStoreAccountCache { SavedAt = DateTime.Now, Items = [.. items] };
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, SerializerOptions), ct);
+    }
+
+    private string AccountCachePath =>
+        Path.Combine(Path.GetDirectoryName(_settingsPath) ?? ".", "cache", "assetstore-account.json");
 
     public IReadOnlyDictionary<string, string>? SessionCookies
     {
@@ -227,6 +298,7 @@ public class AssetStoreService : IAssetStoreService
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url)) return;
         _coverCache[MatchKey(name)] = url;
+        SaveCoverCache();
     }
 
     public bool TryGetCoverUrl(string name, out string url)

@@ -19,6 +19,11 @@ public partial class AssetStoreViewModel : ObservableObject
     private List<AssetStoreRow> _allRows = [];
     private List<AssetStoreAsset> _accountItems = [];
     private bool _hasAccount;
+    private bool _cachedAccountLoaded;
+    private DateTime _cachedAccountAt;
+
+    /// <summary>The account rows currently on screen come from the disk cache, not a live read.</summary>
+    public bool CachedAccountLoaded => _cachedAccountLoaded;
 
     /// <summary>
     /// Supplied by the page: points the WebView2 at the 我的资产 page and returns the raw result of
@@ -161,11 +166,27 @@ public partial class AssetStoreViewModel : ObservableObject
             CacheDirectory = _store.GetCacheDirectory();
             DownloadDirectory = _store.GetDownloadDirectory();
 
+            // The account list from the last session joins the scan, so rows and covers are on
+            // screen without a storefront login; a fresh read overwrites it.
+            if (!_hasAccount)
+            {
+                var cachedAccount = _store.LoadAccountCache();
+                if (cachedAccount.Items.Count > 0)
+                {
+                    _accountItems = cachedAccount.Items;
+                    _hasAccount = true;
+                    _cachedAccountLoaded = true;
+                    _cachedAccountAt = cachedAccount.SavedAt;
+                }
+            }
+
             await RebuildRowsAsync();
             HasScanned = true;
             Status = AssetCount == 0
                 ? $"缓存目录里还没有 .unitypackage（{CacheDirectory}）"
-                : $"已扫描 {AssetCount} 项本地资源";
+                : CachedAccountLoaded
+                    ? $"已加载 {AssetCount} 项资源（我的资产来自本地缓存 {_cachedAccountAt:yyyy/MM/dd HH:mm}）"
+                    : $"已扫描 {AssetCount} 项本地资源";
         }
         catch (Exception ex)
         {
@@ -267,6 +288,9 @@ public partial class AssetStoreViewModel : ObservableObject
 
         IsLoginPanelOpen = false;
         Status = $"已读取 {scraped.Items.Count} 项我的资产";
+
+        try { await _store.SaveAccountCacheAsync(_accountItems); }
+        catch { /* the snapshot is a convenience, not a requirement */ }
     }
 
     /// <summary>

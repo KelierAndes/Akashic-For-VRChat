@@ -38,7 +38,7 @@ public class BoothPurchaseItem
     public string ImageUrl { get; set; } = string.Empty;
 
     /// <summary>True when this entry came from a free item page rather than the purchase library.</summary>
-    [JsonIgnore]
+    [JsonPropertyName("isFree")]
     public bool IsFree { get; set; }
 
     /// <summary>
@@ -122,6 +122,17 @@ public class BoothLibraryPage
     public bool LoginRequired { get; set; }
 
     [JsonPropertyName("items")]
+    public List<BoothPurchaseItem> Items { get; set; } = [];
+}
+
+/// <summary>
+/// Disk snapshot of the last full library read, so the Booth page opens with a list and covers
+/// without re-walking every library page.
+/// </summary>
+public class BoothLibraryCache
+{
+    public DateTime SavedAt { get; set; }
+
     public List<BoothPurchaseItem> Items { get; set; } = [];
 }
 

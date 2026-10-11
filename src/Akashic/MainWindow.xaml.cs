@@ -1,5 +1,8 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Akashic.Core.Services;
 using Akashic.Views;
 
 namespace Akashic;
@@ -9,6 +12,8 @@ namespace Akashic;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private readonly IThemeService _themeService = App.Services.GetRequiredService<IThemeService>();
+
     public MainWindow()
     {
         InitializeComponent();
@@ -17,6 +22,36 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
 
         Title = "Akashic - VRChat 包管理器";
+
+        ApplyTheme(_themeService.IsDarkTheme);
+    }
+
+    /// <summary>
+    /// Applies the light/dark preference to the whole visual tree and the title bar buttons,
+    /// and keeps the footer item icon in step (moon while dark, sun while light — the icon
+    /// shows the current theme, same as DGStudio's footer item).
+    /// </summary>
+    public void ApplyTheme(bool dark)
+    {
+        RootGrid.RequestedTheme = dark ? ElementTheme.Dark : ElementTheme.Light;
+        ThemeNavIcon.Glyph = dark ? "\uE793" : "\uE706";
+
+        var titleBar = AppWindow.TitleBar;
+        titleBar.ButtonForegroundColor = dark
+            ? Microsoft.UI.Colors.White
+            : Microsoft.UI.Colors.Black;
+        titleBar.ButtonHoverBackgroundColor = Microsoft.UI.Colors.Transparent;
+    }
+
+    /// <summary>The theme item never becomes selected; it only flips the theme on invoke.</summary>
+    private async void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItemContainer is NavigationViewItem item && item.Tag?.ToString() == "theme")
+        {
+            var dark = RootGrid.RequestedTheme != ElementTheme.Dark;
+            ApplyTheme(dark);
+            await _themeService.SetDarkThemeAsync(dark);
+        }
     }
 
     private void NavView_Loaded(object sender, RoutedEventArgs e)
@@ -36,6 +71,8 @@ public sealed partial class MainWindow : Window
         if (args.SelectedItemContainer is NavigationViewItem item)
         {
             var tag = item.Tag?.ToString();
+            if (tag == "theme") return;
+
             var pageType = tag switch
             {
                 "projects" => typeof(ProjectsPage),
@@ -45,6 +82,7 @@ public sealed partial class MainWindow : Window
                 "assetstore" => typeof(AssetStorePage),
                 "import" => typeof(ImportPackagePage),
                 "about" => typeof(AboutPage),
+                "settings" => typeof(SettingsPage),
                 _ => typeof(ProjectsPage)
             };
             ContentFrame.Navigate(pageType);

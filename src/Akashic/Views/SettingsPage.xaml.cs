@@ -3,15 +3,39 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
+using Akashic.Core.Services;
 using Akashic.ViewModels;
 
 namespace Akashic.Views;
 
 public sealed partial class SettingsPage : Page
 {
+    private readonly IThemeService _themeService = App.Services.GetRequiredService<IThemeService>();
+
+    private bool _themeInitialized;
+
     public SettingsPage()
     {
         InitializeComponent();
+    }
+
+    protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+
+        // Set the switch before wiring matters little — the handler only acts on real toggles —
+        // but flag anyway so the initial assignment is never persisted back.
+        ThemeSwitch.IsOn = _themeService.IsDarkTheme;
+        _themeInitialized = true;
+    }
+
+    private async void ThemeSwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_themeInitialized) return;
+
+        var dark = ThemeSwitch.IsOn;
+        (App.MainWindow as MainWindow)?.ApplyTheme(dark);
+        await _themeService.SetDarkThemeAsync(dark);
     }
 
     private BoothViewModel ViewModel { get; } = App.Services.GetRequiredService<BoothViewModel>();

@@ -13,6 +13,35 @@
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
+            <!-- Section 0: appearance -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="外观" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="暗色主题" FontWeight="SemiBold" />
+                            <TextBlock Text="关闭后切换为亮色；也可用侧栏标题旁的按钮随时切换"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
+
+                        <ToggleSwitch x:Name="ThemeSwitch" Grid.Column="1"
+                                      VerticalAlignment="Center"
+                                      Toggled="ThemeSwitch_Toggled" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+
             <!-- Section 1: resource management shortcuts -->
             <StackPanel Spacing="12">
                 <TextBlock Text="资源管理" Style="{StaticResource SubtitleTextBlockStyle}" />

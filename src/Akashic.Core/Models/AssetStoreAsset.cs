@@ -78,6 +78,17 @@ public class AssetStoreSearchCover
     public string ImageUrl { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Disk snapshot of the last 我的资产 read, so the Asset Store page opens with account rows and
+/// their covers without re-walking the storefront.
+/// </summary>
+public class AssetStoreAccountCache
+{
+    public DateTime SavedAt { get; set; }
+
+    public List<AssetStoreAsset> Items { get; set; } = [];
+}
+
 /// <summary>One rendered page of the account's 我的资产 list.</summary>
 public class AssetStorePurchasePage
 {

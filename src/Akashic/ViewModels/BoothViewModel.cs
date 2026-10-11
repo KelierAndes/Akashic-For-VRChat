@@ -115,6 +115,32 @@ public partial class BoothViewModel : ObservableObject
         _library = library;
         _external = external;
         _downloadDirectory = booth.GetDownloadDirectory();
+
+        LoadCachedLibrary();
+    }
+
+    /// <summary>
+    /// Restores the last full library read from disk, so covers and rows are on screen before
+    /// any WebView2 navigation. A refresh simply overwrites the snapshot.
+    /// </summary>
+    private void LoadCachedLibrary()
+    {
+        try
+        {
+            var cache = _booth.LoadLibraryCache();
+            if (cache.Items.Count == 0) return;
+
+            var items = cache.Items;
+            _booth.ReconcileLocalArchives(items);
+            _known = items.ToDictionary(i => i.Number, i => i, StringComparer.Ordinal);
+            var hidden = DeduplicateVersions(items);
+            RebuildRows(items, hidden);
+            Status = $"已从本地缓存加载（{cache.SavedAt:yyyy/MM/dd HH:mm}）· 点右上角读取最新列表";
+        }
+        catch
+        {
+            // A corrupt cache only costs the head start; the next read rebuilds it.
+        }
     }
 
     public string ExtractorScript => _booth.PurchaseExtractorScript;
@@ -289,6 +315,9 @@ public partial class BoothViewModel : ObservableObject
             _booth.ReconcileLocalArchives(collected);
             var hidden = DeduplicateVersions(collected);
             RebuildRows(collected, hidden);
+
+            try { await _booth.SaveLibraryCacheAsync(collected); }
+            catch { /* the snapshot is a convenience, not a requirement */ }
 
             // Keep the page visible when nothing came back so the account can be checked.
             IsLoginPanelOpen = collected.Count == 0;
