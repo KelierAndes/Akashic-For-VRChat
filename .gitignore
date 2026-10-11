@@ -1,0 +1,9 @@
+## Build artifacts
+bin/
+obj/
+dist/
+.vs/
+
+## Local logs
+crash.log
+*.user

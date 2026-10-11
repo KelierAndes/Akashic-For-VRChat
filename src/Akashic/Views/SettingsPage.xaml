@@ -1,0 +1,262 @@
+<Page
+    x:Class="Akashic.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer Padding="{StaticResource PagePadding}">
+        <StackPanel MaxWidth="800" HorizontalAlignment="Left" Spacing="24">
+            <!-- Header -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="设置" Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock Text="查看环境状态；资源与包列表的管理已独立到“资源”页"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+
+            <!-- Section 1: resource management shortcuts -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="资源管理" Style="{StaticResource SubtitleTextBlockStyle}" />
+                <TextBlock Text="VPM 存储库与 .unitypackage 用户软件包在“资源”页分开管理"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="VPM 存储库" FontWeight="SemiBold" />
+                                <TextBlock Text="添加、移除与排序 packages.vrchat.com 等注册表源"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="管理存储库"
+                                    Tag="repositories"
+                                    Click="OpenResources_Click" />
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,4" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="UnityPackage 用户软件包" FontWeight="SemiBold" />
+                                <TextBlock Text="管理库目录与包列表中的 .unitypackage 文件"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <Button Grid.Column="1"
+                                    Content="管理软件包"
+                                    Tag="packages"
+                                    Click="OpenResources_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- Section 2: Booth download cache -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Booth 下载缓存" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                            <TextBlock Text="下载目录" FontWeight="SemiBold" />
+                            <TextBlock Text="压缩包和解压结果都保存在这里，换目录后已下载的记录会随文件一起被重新识别"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Text="{x:Bind ViewModel.DownloadDirectory, Mode=OneWay}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,4,0,0" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <Button Content="选择目录" Click="ChooseBoothDirectory_Click" />
+                            <Button Content="打开目录" Click="OpenBoothDirectory_Click" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+
+            <!-- Section 3: Asset Store cache -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="Unity Asset Store 缓存" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="4">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                                <TextBlock Text="缓存目录" FontWeight="SemiBold" />
+                                <TextBlock Text="Unity 存放已购买 .unitypackage 的目录，默认是 %APPDATA%\Unity\Asset Store-5.x"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{x:Bind StoreViewModel.CacheDirectory, Mode=OneWay}"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Content="选择目录" Click="ChooseAssetStoreCache_Click" />
+                                <Button Content="打开目录" Click="OpenAssetStoreCache_Click" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,8" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                                <TextBlock Text="下载目录" FontWeight="SemiBold" />
+                                <TextBlock Text="在本页下载的资源会保存到这里，扫描时与缓存目录一起读取"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Text="{x:Bind StoreViewModel.DownloadDirectory, Mode=OneWay}"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,0" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <Button Content="选择目录" Click="ChooseAssetStoreDownload_Click" />
+                                <Button Content="打开目录" Click="OpenAssetStoreDownload_Click" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,8" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel VerticalAlignment="Center" Spacing="2" Margin="0,0,16,0">
+                                <TextBlock Text="资源管理" FontWeight="SemiBold" />
+                                <TextBlock Text="登录 Unity 账号后可读取“我的资产”，并把缓存里的包登记进用户软件包"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextWrapping="Wrap" />
+                            </StackPanel>
+
+                            <Button Grid.Column="1"
+                                    Content="管理资源"
+                                    Tag="assetstore"
+                                    Click="OpenResources_Click" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- Section 4: Environment Info -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="环境与兼容性" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="Unity 依赖解析器" FontWeight="SemiBold" />
+                                <TextBlock Text="支持 Unity 2019 / 2022 LTS 及 Packages 文件夹自动化同步"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <InfoBadge Style="{StaticResource SuccessIconInfoBadgeStyle}" />
+                                <TextBlock Text="正常" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,4" />
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <TextBlock Text="VCC 配置文件兼容" FontWeight="SemiBold" />
+                                <TextBlock Text="自动探测与兼容 VRChat Creator Companion 本地注册表与设置"
+                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <InfoBadge Style="{StaticResource AttentionIconInfoBadgeStyle}" />
+                                <TextBlock Text="已启用" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- Section 5: App Info -->
+            <StackPanel Spacing="12">
+                <TextBlock Text="关于软件" Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="16">
+                    <StackPanel Spacing="8">
+                        <TextBlock Text="Akashic for VRChat" FontWeight="SemiBold" />
+                        <TextBlock Text="基于 Windows App SDK &amp; WinUI 3 (Fluent Design) 构建的现代化 Unity / VPM 包管理工具。"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="版本: 1.0.0 (x64)"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</Page>
