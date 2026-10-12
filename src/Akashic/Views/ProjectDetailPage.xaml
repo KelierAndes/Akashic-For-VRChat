@@ -92,6 +92,17 @@
                     </StackPanel>
                 </Button>
 
+                <!-- 云端管理：只在工程场景里的蓝图 id 与账号内容对得上时出现 -->
+                <Button x:Name="CloudManageButton"
+                        Style="{StaticResource AlcomDarkButtonStyle}"
+                        Visibility="Collapsed"
+                        Click="CloudManage_Click">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <FontIcon Glyph="&#xE753;" FontSize="13" />
+                        <TextBlock x:Name="CloudManageText" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Button>
+
                 <DropDownButton Padding="8,6">
                     <FontIcon Glyph="&#xE712;" FontSize="13" />
                     <DropDownButton.Flyout>

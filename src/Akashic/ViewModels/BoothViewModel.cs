@@ -173,8 +173,8 @@ public partial class BoothViewModel : ObservableObject
         : $"正在下载 {ActiveItemName} · {DownloadProgress:0}%";
 
     /// <summary>Called by the page after every rendered Booth page so downloads reuse the live session.</summary>
-    public void ApplySessionCookies(IReadOnlyDictionary<string, string> cookies) =>
-        _booth.SessionCookies = cookies;
+    public void ApplySessionCookies(IReadOnlyList<StoredCookie> cookies) =>
+        _booth.ImportSession(cookies);
 
     [RelayCommand]
     public async Task OpenLoginAsync()

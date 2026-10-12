@@ -38,10 +38,19 @@ public class BoothService : IBoothService
     private readonly HttpClient _boothClient;
     private readonly HttpClient _fileClient;
     private readonly string _settingsPath;
+    private readonly ISessionVault _vault;
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
 
-    public BoothService(string? settingsPath = null)
+    private List<StoredCookie> _entries = [];
+    private bool _vaultChecked;
+
+    /// <summary>Name of this site's slot in the encrypted session store.</summary>
+    private const string VaultKey = "booth";
+
+    public BoothService(ISessionVault vault, string? settingsPath = null)
     {
+        _vault = vault;
+
         // Private clients: the shared HttpClient in the container is also used by the registry
         // services, and Booth's session header must never leak into those requests.
         _boothClient = new HttpClient(new HttpClientHandler
@@ -60,24 +69,70 @@ public class BoothService : IBoothService
 
     public IReadOnlyDictionary<string, string>? SessionCookies
     {
-        get => _cookies.Count == 0 ? null : _cookies;
-        set
+        get
         {
-            var fresh = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (value is not null)
-            {
-                foreach (var cookie in value)
-                    if (!string.IsNullOrWhiteSpace(cookie.Key))
-                        fresh[cookie.Key.Trim()] = cookie.Value?.Trim() ?? string.Empty;
-            }
-
-            _cookies = fresh;
+            RestoreFromVault();
+            return _cookies.Count == 0 ? null : _cookies;
         }
+    }
+
+    /// <summary>
+    /// The same session with each cookie's own domain and path, which is the only form the WebView2
+    /// seed can use — a cookie written to the wrong domain is simply never sent to the site.
+    /// </summary>
+    public IReadOnlyList<StoredCookie>? SessionEntries
+    {
+        get
+        {
+            RestoreFromVault();
+            return _entries.Count == 0 ? null : _entries;
+        }
+    }
+
+    public void ImportSession(IReadOnlyList<StoredCookie> cookies)
+    {
+        var fresh = new List<StoredCookie>();
+
+        if (cookies is not null)
+        {
+            foreach (var cookie in cookies)
+                if (!string.IsNullOrWhiteSpace(cookie.Name) && !string.IsNullOrWhiteSpace(cookie.Domain))
+                    fresh.Add(cookie);
+        }
+
+        // An empty export means the browser had nothing to hand over — a reset profile, or a page
+        // that never set cookies — so it must never overwrite a session that still works.
+        if (fresh.Count == 0) return;
+
+        _entries = fresh;
+        _cookies = StoredCookies.ToNameValue(fresh);
+        _vaultChecked = true;
+        _vault.Save(VaultKey, fresh);
     }
 
     // Rails hands out a session cookie to anonymous visitors too, so this only says a cookie set
     // was exported; whether it authenticates is Booth's answer.
-    public bool HasSession => _cookies.Count > 0;
+    public bool HasSession
+    {
+        get
+        {
+            RestoreFromVault();
+            return _cookies.Count > 0;
+        }
+    }
+
+    /// <summary>Adopts a Booth session an earlier run stored, so a WebView2 reset is not a sign-out.</summary>
+    private void RestoreFromVault()
+    {
+        if (_entries.Count > 0 || _vaultChecked) return;
+
+        _vaultChecked = true;
+
+        if (_vault.Load(VaultKey) is not { } stored) return;
+
+        _entries = stored.Cookies.ToList();
+        _cookies = StoredCookies.ToNameValue(_entries);
+    }
 
     public string GetLibraryUrl(int page) =>
         page <= 1

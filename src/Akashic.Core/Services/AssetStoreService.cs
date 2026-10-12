@@ -23,7 +23,14 @@ public class AssetStoreService : IAssetStoreService
     private readonly HttpClient _fileClient;
     private readonly IUnityPackageLibraryService _library;
     private readonly string _settingsPath;
+    private readonly ISessionVault _vault;
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
+
+    private List<StoredCookie> _entries = [];
+    private bool _vaultChecked;
+
+    /// <summary>Name of this site's slot in the encrypted session store.</summary>
+    private const string VaultKey = "assetstore";
 
     // Product covers remembered by name, so cache-only rows and list rows can share them
     // without hitting the storefront again. Filled from 我的资产 reads and search lookups,
@@ -33,8 +40,10 @@ public class AssetStoreService : IAssetStoreService
 
     private readonly string _coverCachePath;
 
-    public AssetStoreService(IUnityPackageLibraryService library, string? settingsPath = null)
+    public AssetStoreService(IUnityPackageLibraryService library, ISessionVault vault, string? settingsPath = null)
     {
+        _vault = vault;
+
         // Private clients: the shared HttpClient in the container also serves the registry
         // services, and a Unity session header must never travel with those requests.
         _apiClient = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false });
@@ -116,22 +125,72 @@ public class AssetStoreService : IAssetStoreService
 
     public IReadOnlyDictionary<string, string>? SessionCookies
     {
-        get => _cookies.Count == 0 ? null : _cookies;
-        set
+        get
         {
-            var fresh = new Dictionary<string, string>(StringComparer.Ordinal);
-            if (value is not null)
-            {
-                foreach (var cookie in value)
-                    if (!string.IsNullOrWhiteSpace(cookie.Key))
-                        fresh[cookie.Key.Trim()] = cookie.Value?.Trim() ?? string.Empty;
-            }
-
-            _cookies = fresh;
+            RestoreFromVault();
+            return _cookies.Count == 0 ? null : _cookies;
         }
     }
 
-    public bool HasSession => _cookies.Count > 0;
+    /// <summary>
+    /// The same session with each cookie's own domain and path, which is the only form the WebView2
+    /// seed can use — Unity's session token is issued for <c>assetstore.unity.com</c>, and writing it
+    /// to any other domain means the storefront never receives it.
+    /// </summary>
+    public IReadOnlyList<StoredCookie>? SessionEntries
+    {
+        get
+        {
+            RestoreFromVault();
+            return _entries.Count == 0 ? null : _entries;
+        }
+    }
+
+    public void ImportSession(IReadOnlyList<StoredCookie> cookies)
+    {
+        var fresh = new List<StoredCookie>();
+
+        if (cookies is not null)
+        {
+            foreach (var cookie in cookies)
+                if (!string.IsNullOrWhiteSpace(cookie.Name) && !string.IsNullOrWhiteSpace(cookie.Domain))
+                    fresh.Add(cookie);
+        }
+
+        // An empty export means the browser had nothing to hand over — a reset profile, or a page
+        // that never set cookies — so it must never overwrite a session that still works.
+        if (fresh.Count == 0) return;
+
+        _entries = fresh;
+        _cookies = StoredCookies.ToNameValue(fresh);
+        _vaultChecked = true;
+        _vault.Save(VaultKey, fresh);
+    }
+
+    public bool HasSession
+    {
+        get
+        {
+            RestoreFromVault();
+            return _cookies.Count > 0;
+        }
+    }
+
+    /// <summary>
+    /// Unity's session is the one the 我的资产 read and the download endpoint both need, so a stored
+    /// copy is picked up here rather than waiting for the storefront to be signed into again.
+    /// </summary>
+    private void RestoreFromVault()
+    {
+        if (_entries.Count > 0 || _vaultChecked) return;
+
+        _vaultChecked = true;
+
+        if (_vault.Load(VaultKey) is not { } stored) return;
+
+        _entries = stored.Cookies.ToList();
+        _cookies = StoredCookies.ToNameValue(_entries);
+    }
 
     public string MyAssetsUrl => $"https://{StoreHost}/account/assets";
 

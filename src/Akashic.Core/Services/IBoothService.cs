@@ -4,18 +4,26 @@ namespace Akashic.Core.Services;
 
 /// <summary>
 /// Downloads what the signed-in Booth account already owns. The WebView2 login owns the
-/// session (Booth stores it inside the browser profile), the list pages are read from the
-/// rendered DOM there, and the cookies they export are handed over so plain HTTP can follow
-/// the downloadables redirect. The cookie set is never written to disk.
+/// session, the list pages are read from the rendered DOM there, and the cookies they export are
+/// handed over so plain HTTP can follow the downloadables redirect. The exported set is stored
+/// encrypted under the current Windows account so a WebView2 profile reset is not a sign-out.
 /// </summary>
 public interface IBoothService
 {
     /// <summary>
-    /// The booth.pm cookies exported from the WebView2 profile, by name. Assigning replaces
-    /// the previous set; Booth rotates the session value, so re-export after every login or
-    /// list refresh.
+    /// The booth.pm cookies by name, which is the shape a hand-built <c>Cookie:</c> header needs.
+    /// Read-only: import through <see cref="ImportSession"/> so the domains survive.
     /// </summary>
-    IReadOnlyDictionary<string, string>? SessionCookies { get; set; }
+    IReadOnlyDictionary<string, string>? SessionCookies { get; }
+
+    /// <summary>The same cookies with their domains, for seeding a fresh WebView2 back.</summary>
+    IReadOnlyList<StoredCookie>? SessionEntries { get; }
+
+    /// <summary>
+    /// Replaces the session with a fresh export. Booth rotates the session value, so re-export after
+    /// every login or list refresh. An empty set is ignored rather than treated as a sign-out.
+    /// </summary>
+    void ImportSession(IReadOnlyList<StoredCookie> cookies);
 
     bool HasSession { get; }
 

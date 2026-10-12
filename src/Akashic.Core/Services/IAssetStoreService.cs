@@ -9,10 +9,19 @@ namespace Akashic.Core.Services;
 public interface IAssetStoreService
 {
     /// <summary>
-    /// The assetstore.unity.com cookies exported from the WebView2 profile. Assigning replaces the
-    /// previous set; they are never written to disk.
+    /// The assetstore.unity.com cookies by name, which is the shape a hand-built <c>Cookie:</c>
+    /// header needs. Read-only: import through <see cref="ImportSession"/> so the domains survive.
     /// </summary>
-    IReadOnlyDictionary<string, string>? SessionCookies { get; set; }
+    IReadOnlyDictionary<string, string>? SessionCookies { get; }
+
+    /// <summary>The same cookies with their domains, for seeding a fresh WebView2 back.</summary>
+    IReadOnlyList<StoredCookie>? SessionEntries { get; }
+
+    /// <summary>
+    /// Replaces the session with a fresh export from the storefront. An empty set is ignored rather
+    /// than treated as a sign-out, so a reset browser profile cannot erase a session that still works.
+    /// </summary>
+    void ImportSession(IReadOnlyList<StoredCookie> cookies);
 
     bool HasSession { get; }
 

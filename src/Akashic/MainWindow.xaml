@@ -54,6 +54,16 @@
                         <FontIcon Glyph="&#xE719;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="VRChat 数据同步" Tag="vrchatsync">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8CE;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="项目模板" Tag="templates">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE7C1;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <NavigationView.FooterMenuItems>

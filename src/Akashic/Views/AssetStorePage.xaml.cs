@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
+using Akashic.Core.Services;
 using Akashic.ViewModels;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -349,12 +350,14 @@ public sealed partial class AssetStorePage : Page
 
     private async Task ExportUnityCookiesAsync(CoreWebView2 core)
     {
-        var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+        var cookies = new List<StoredCookie>();
 
         // Querying the storefront origin also returns the domain cookies a request to it would
-        // carry, which is exactly the set the JSON API and the download endpoint need.
+        // carry, which is exactly the set the JSON API and the download endpoint need. Their domains
+        // come along too: Unity's session token is issued for assetstore.unity.com, and a copy
+        // written to any other domain is a copy the storefront will never see.
         foreach (var cookie in await core.CookieManager.GetCookiesAsync(ViewModel.MyAssetsUrl))
-            cookies[cookie.Name] = cookie.Value;
+            cookies.Add(new StoredCookie(cookie.Name, cookie.Value, cookie.Domain, cookie.Path));
 
         ViewModel.ApplySessionCookies(cookies);
     }
@@ -366,8 +369,15 @@ public sealed partial class AssetStorePage : Page
         await WaitForUnityLoadedAsync();
         await UnityWebView.EnsureCoreWebView2Async();
 
-        return UnityWebView.CoreWebView2
-               ?? throw new InvalidOperationException("WebView2 未能初始化，请确认系统已安装 WebView2 运行时。");
+        var core = UnityWebView.CoreWebView2
+                   ?? throw new InvalidOperationException("WebView2 未能初始化，请确认系统已安装 WebView2 运行时。");
+
+        // 我的资产 is still scraped out of this browser, so a reset profile needs the stored Unity
+        // session put back before the storefront will show anything.
+        WebViewCookieSeed.Apply(core,
+            App.Services.GetRequiredService<IAssetStoreService>().SessionEntries);
+
+        return core;
     }
 
     private async Task WaitForUnityLoadedAsync()

@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
+using Akashic.Core.Services;
 using Akashic.ViewModels;
 using Windows.Storage.Pickers;
 using Windows.System;
@@ -182,15 +183,21 @@ public sealed partial class BoothPage : Page
 
     private async Task ExportCookiesAsync(CoreWebView2 core)
     {
-        var cookies = new Dictionary<string, string>(StringComparer.Ordinal);
+        var cookies = new List<StoredCookie>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
 
         // .booth.pm covers both the store and the account pages, and the session cookie itself
         // is named after the deployment, so the whole set is handed over instead of one name.
         foreach (var origin in new[] { "https://booth.pm", "https://accounts.booth.pm" })
         {
-            var list = await core.CookieManager.GetCookiesAsync(origin);
-            foreach (var cookie in list)
-                cookies[cookie.Name] = cookie.Value;
+            foreach (var cookie in await core.CookieManager.GetCookiesAsync(origin))
+            {
+                // The same name exists on both hosts with different values, so the domain and path
+                // are part of what makes an entry unique — collapsing them loses one of the two.
+                if (!seen.Add($"{cookie.Name}\n{cookie.Domain}\n{cookie.Path}")) continue;
+
+                cookies.Add(new StoredCookie(cookie.Name, cookie.Value, cookie.Domain, cookie.Path));
+            }
         }
 
         ViewModel.ApplySessionCookies(cookies);
@@ -203,8 +210,15 @@ public sealed partial class BoothPage : Page
         await WaitForLoadedAsync();
         await BoothWebView.EnsureCoreWebView2Async();
 
-        return BoothWebView.CoreWebView2
-               ?? throw new InvalidOperationException("WebView2 未能初始化，请确认系统已安装 WebView2 运行时。");
+        var core = BoothWebView.CoreWebView2
+                   ?? throw new InvalidOperationException("WebView2 未能初始化，请确认系统已安装 WebView2 运行时。");
+
+        // A reset browser profile used to cost the Booth login as well, so the stored session goes
+        // back in before the page is ever pointed at booth.pm.
+        WebViewCookieSeed.Apply(core,
+            App.Services.GetRequiredService<IBoothService>().SessionEntries);
+
+        return core;
     }
 
     private async Task WaitForLoadedAsync()

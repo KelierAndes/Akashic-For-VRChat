@@ -23,6 +23,33 @@ public class AppSettings
         @"C:\Program Files\Unity\Hub\Editor"
     ];
 
+    /// <summary>
+    /// Editors the user registered by hand. They are consulted before Unity Hub and VCC, so a
+    /// project always starts with the editor the user pointed at for that version.
+    /// </summary>
+    [JsonPropertyName("unityEditorEntries")]
+    public List<UnityEditorEntry> UnityEditorEntries { get; set; } = [];
+
+    /// <summary>Where backup zips go. Empty falls back to VCC's own setting, then to the app folder.</summary>
+    [JsonPropertyName("projectBackupPath")]
+    public string ProjectBackupPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Drops the package folders from a backup. The manifests stay in, so the packages can be
+    /// resolved again, and the archive only carries what no registry can hand back.
+    /// </summary>
+    [JsonPropertyName("backupExcludePackages")]
+    public bool BackupExcludePackages { get; set; }
+
+    /// <summary>Where new projects are created and where the folder scan looks for projects.</summary>
+    [JsonPropertyName("defaultProjectPath")]
+    public string DefaultProjectPath { get; set; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "VRCProjects");
+
+    /// <summary>Templates the user saved from existing projects, used by the new project dialog.</summary>
+    [JsonPropertyName("projectTemplates")]
+    public List<ProjectTemplate> ProjectTemplates { get; set; } = [];
+
     [JsonPropertyName("cacheDirectory")]
     public string CacheDirectory { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

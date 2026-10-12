@@ -54,8 +54,11 @@ public partial class App : Application
         services.AddSingleton<IUnityPackageLibraryService, UnityPackageLibraryService>();
         services.AddSingleton<IExternalPackageService, ExternalPackageService>();
         services.AddSingleton<IPackageInstaller, PackageInstaller>();
+        services.AddSingleton<ISessionVault, DpapiSessionVault>();
         services.AddSingleton<IBoothService, BoothService>();
         services.AddSingleton<IAssetStoreService, AssetStoreService>();
+        services.AddSingleton<IVRChatSyncService, VRChatSyncService>();
+        services.AddSingleton<IVRChatBlueprintScanService, VRChatBlueprintScanService>();
         services.AddSingleton<IUnityPackageIconService, UnityPackageIconService>();
         services.AddSingleton<IThemeService, ThemeService>();
 
@@ -67,6 +70,9 @@ public partial class App : Application
         services.AddSingleton<ResourcesViewModel>();
         services.AddSingleton<BoothViewModel>();
         services.AddSingleton<AssetStoreViewModel>();
+        services.AddSingleton<SettingsViewModel>();
+        services.AddSingleton<VRChatSyncViewModel>();
+        services.AddSingleton<ProjectTemplatesViewModel>();
 
         Services = services.BuildServiceProvider();
     }

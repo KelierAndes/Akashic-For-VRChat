@@ -152,8 +152,8 @@ public partial class AssetStoreViewModel : ObservableObject
         : $"正在下载 {ActiveAssetName} · {DownloadProgress:0}%";
 
     /// <summary>Called by the page after the WebView2 renders, so downloads reuse the live session.</summary>
-    public void ApplySessionCookies(IReadOnlyDictionary<string, string> cookies) =>
-        _store.SessionCookies = cookies;
+    public void ApplySessionCookies(IReadOnlyList<StoredCookie> cookies) =>
+        _store.ImportSession(cookies);
 
     [RelayCommand]
     public async Task LoadCacheAsync()

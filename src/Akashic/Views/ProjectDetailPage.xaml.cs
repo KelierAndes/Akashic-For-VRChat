@@ -15,6 +15,8 @@ public sealed partial class ProjectDetailPage : Page
     public ProjectDetailViewModel ViewModel { get; }
     private readonly IProjectService _projectService;
 
+    private IReadOnlyList<string> _cloudBlueprintIds = [];
+
     public ProjectDetailPage()
     {
         ViewModel = App.Services.GetRequiredService<ProjectDetailViewModel>();
@@ -30,8 +32,21 @@ public sealed partial class ProjectDetailPage : Page
             ProjectNameText.Text = project.Name;
             UnityVersionText.Text = project.UnityVersion;
             ProjectPathText.Text = $"位于: {project.Path}";
+
+            _cloudBlueprintIds = project.CloudBlueprintIds;
+            CloudManageButton.Visibility = _cloudBlueprintIds.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            CloudManageText.Text = project.CloudLinkLabel;
+            ToolTipService.SetToolTip(CloudManageButton, project.CloudLinkTip);
         }
         base.OnNavigatedTo(e);
+    }
+
+    private void CloudManage_Click(object sender, RoutedEventArgs e)
+    {
+        if (_cloudBlueprintIds.Count == 0) return;
+
+        if (App.MainWindow is MainWindow mw)
+            mw.NavigateToVRChatContent(_cloudBlueprintIds);
     }
 
     private async void Page_Loaded(object sender, RoutedEventArgs e)

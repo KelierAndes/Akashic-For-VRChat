@@ -80,6 +80,8 @@ public sealed partial class MainWindow : Window
                 "packages" => typeof(PackageBrowserPage),
                 "booth" => typeof(BoothPage),
                 "assetstore" => typeof(AssetStorePage),
+                "vrchatsync" => typeof(VRChatSyncPage),
+                "templates" => typeof(ProjectTemplatesPage),
                 "import" => typeof(ImportPackagePage),
                 "about" => typeof(AboutPage),
                 "settings" => typeof(SettingsPage),
@@ -105,14 +107,41 @@ public sealed partial class MainWindow : Window
     /// <summary>Selects a navigation entry by its Tag so pages can jump between each other.</summary>
     public void NavigateToTag(string tag)
     {
+        if (FindNavItem(tag) is { } item) NavView.SelectedItem = item;
+    }
+
+    private NavigationViewItem? FindNavItem(string tag)
+    {
         foreach (var obj in NavView.MenuItems)
-        {
             if (obj is NavigationViewItem item && item.Tag?.ToString() == tag)
-            {
-                NavView.SelectedItem = item;
-                return;
-            }
-        }
+                return item;
+
+        return null;
+    }
+
+    /// <summary>
+    /// Blueprint ids the sync page should scroll to and mark once its list is in place. Re-selecting
+    /// an entry that is already current raises no selection change, so that case navigates directly.
+    /// </summary>
+    public IReadOnlyList<string> PendingVRChatBlueprintIds { get; private set; } = [];
+
+    /// <summary>Jumps to the sync page and points it at the cloud contents a local project produced.</summary>
+    public void NavigateToVRChatContent(IReadOnlyList<string> blueprintIds)
+    {
+        PendingVRChatBlueprintIds = blueprintIds;
+
+        if (FindNavItem("vrchatsync") is not { } item) return;
+
+        if (Equals(NavView.SelectedItem, item)) ContentFrame.Navigate(typeof(VRChatSyncPage));
+        else NavView.SelectedItem = item;
+    }
+
+    /// <summary>Takes the ids a jump left behind, so a later visit is not highlighted again.</summary>
+    public IReadOnlyList<string> TakePendingVRChatBlueprintIds()
+    {
+        var ids = PendingVRChatBlueprintIds;
+        PendingVRChatBlueprintIds = [];
+        return ids;
     }
 
     public void UpdateProjectCount(int count)

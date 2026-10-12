@@ -298,136 +298,20 @@ public partial class ProjectService : IProjectService
         catch { }
     }
 
+    /// <summary>
+    /// Picks the editor for a project version out of the same list the settings page shows, so what
+    /// you see is what launches. A version that no editor matches returns null rather than some
+    /// other release — opening a project with the wrong editor rewrites it.
+    /// </summary>
     public string? FindUnityEditor(string? version = null)
     {
-        // 1. Check Unity Hub editors.json (AppData\Roaming\UnityHub\editors.json)
-        try
-        {
-            var hubEditorsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "UnityHub", "editors.json");
-            if (File.Exists(hubEditorsPath))
-            {
-                var json = File.ReadAllText(hubEditorsPath);
-                using var doc = JsonDocument.Parse(json);
-                string? firstFound = null;
+        var editors = DiscoverUnityEditors();
+        if (editors.Count == 0) return null;
 
-                foreach (var prop in doc.RootElement.EnumerateObject())
-                {
-                    var edVersion = prop.Name;
-                    if (prop.Value.TryGetProperty("location", out var locElem))
-                    {
-                        string? loc = null;
-                        if (locElem.ValueKind == JsonValueKind.Array && locElem.GetArrayLength() > 0)
-                            loc = locElem[0].GetString();
-                        else if (locElem.ValueKind == JsonValueKind.String)
-                            loc = locElem.GetString();
+        if (string.IsNullOrEmpty(version)) return editors[0].Path;
 
-                        if (!string.IsNullOrEmpty(loc) && File.Exists(loc))
-                        {
-                            firstFound ??= loc;
-                            if (!string.IsNullOrEmpty(version))
-                            {
-                                if (string.Equals(edVersion, version, StringComparison.OrdinalIgnoreCase))
-                                    return loc;
-                                if (version.Length >= 4 && edVersion.StartsWith(version[..4]))
-                                    return loc;
-                            }
-                        }
-                    }
-                }
-
-                if (!string.IsNullOrEmpty(firstFound) && string.IsNullOrEmpty(version))
-                    return firstFound;
-            }
-        }
-        catch { }
-
-        // 2. Check VCC settings.json (preferredUnityEditors / unityEditors / pathToUnityExe)
-        try
-        {
-            var vccSettingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VRChatCreatorCompanion", "settings.json");
-            if (File.Exists(vccSettingsPath))
-            {
-                var json = File.ReadAllText(vccSettingsPath);
-                using var doc = JsonDocument.Parse(json);
-
-                if (doc.RootElement.TryGetProperty("preferredUnityEditors", out var prefElem))
-                {
-                    foreach (var prop in prefElem.EnumerateObject())
-                    {
-                        var path = prop.Value.GetString();
-                        if (!string.IsNullOrEmpty(path) && File.Exists(path))
-                        {
-                            if (!string.IsNullOrEmpty(version) && (prop.Name == version || version.StartsWith(prop.Name)))
-                                return path;
-                            return path;
-                        }
-                    }
-                }
-
-                if (doc.RootElement.TryGetProperty("pathToUnityExe", out var exeElem))
-                {
-                    var exePath = exeElem.GetString();
-                    if (!string.IsNullOrEmpty(exePath) && File.Exists(exePath))
-                        return exePath;
-                }
-
-                if (doc.RootElement.TryGetProperty("unityEditors", out var edList) && edList.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in edList.EnumerateArray())
-                    {
-                        var p = item.GetString();
-                        if (!string.IsNullOrEmpty(p) && File.Exists(p))
-                            return p;
-                    }
-                }
-            }
-        }
-        catch { }
-
-        // 3. Scan drives for Unity installations
-        var drives = DriveInfo.GetDrives()
-            .Where(d => d.DriveType == DriveType.Fixed)
-            .Select(d => d.RootDirectory.FullName)
-            .ToList();
-
-        if (!string.IsNullOrEmpty(version))
-        {
-            foreach (var drive in drives)
-            {
-                var candidate1 = Path.Combine(drive, "Unity", $"Unity {version}", "Editor", "Unity.exe");
-                if (File.Exists(candidate1)) return candidate1;
-
-                var candidate2 = Path.Combine(drive, "Unity", version, "Editor", "Unity.exe");
-                if (File.Exists(candidate2)) return candidate2;
-
-                var candidate3 = Path.Combine(drive, "Program Files", "Unity", "Hub", "Editor", version, "Editor", "Unity.exe");
-                if (File.Exists(candidate3)) return candidate3;
-            }
-        }
-
-        // 4. Fallback search
-        foreach (var drive in drives)
-        {
-            var unityDir = Path.Combine(drive, "Unity");
-            if (Directory.Exists(unityDir))
-            {
-                try
-                {
-                    foreach (var sub in Directory.GetDirectories(unityDir))
-                    {
-                        var exe = Path.Combine(sub, "Editor", "Unity.exe");
-                        if (File.Exists(exe)) return exe;
-                    }
-                }
-                catch { }
-            }
-        }
-
-        return null;
+        return editors.FirstOrDefault(e => VersionMatches(e.Version, version)
+                                           || e.Path.Contains(version, StringComparison.OrdinalIgnoreCase))?.Path;
     }
 
     public string? FindUnityHub()
@@ -466,6 +350,333 @@ public partial class ProjectService : IProjectService
         }
 
         return null;
+    }
+
+    private const string SourceManual = "手动添加";
+    private const string SourceHub = "Unity Hub";
+    private const string SourceVcc = "VCC";
+    private const string SourceScanned = "扫描目录";
+
+    private string VccSettingsPath() => LoadSettings().VccSettingsPath;
+
+    /// <summary>
+    /// Every editor this machine can point at: the manual list first, then Unity Hub, VCC and the
+    /// scanned folders. A path is kept once, so the first source to report it owns the label.
+    /// </summary>
+    public List<UnityEditorEntry> DiscoverUnityEditors()
+    {
+        var found = new List<UnityEditorEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? path, string? version, string source)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return;
+
+            var full = Path.GetFullPath(path);
+            if (!seen.Add(full)) return;
+
+            found.Add(new UnityEditorEntry { Path = full, Version = ResolveVersion(full, version), Source = source });
+        }
+
+        var settings = LoadSettings();
+
+        foreach (var entry in settings.UnityEditorEntries)
+            Add(entry.Path, entry.Version, SourceManual);
+
+        // Unity Hub stores its registry with the version as the key.
+        try
+        {
+            var hubEditorsPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "UnityHub", "editors.json");
+            if (File.Exists(hubEditorsPath))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(hubEditorsPath));
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (prop.Value.TryGetProperty("location", out var location))
+                        Add(ReadLocation(location), prop.Name, SourceHub);
+                }
+            }
+        }
+        catch (JsonException) { }
+        catch (IOException) { }
+
+        // VCC lists the editors it was pointed at, keyed by version.
+        try
+        {
+            var vccPath = VccSettingsPath();
+            if (File.Exists(vccPath))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(vccPath));
+                var root = doc.RootElement;
+
+                if (root.TryGetProperty("preferredUnityEditors", out var preferred) &&
+                    preferred.ValueKind == JsonValueKind.Object)
+                    foreach (var prop in preferred.EnumerateObject())
+                        Add(prop.Value.GetString(), prop.Name, SourceVcc);
+
+                if (root.TryGetProperty("unityEditors", out var list) && list.ValueKind == JsonValueKind.Array)
+                    foreach (var item in list.EnumerateArray())
+                        Add(item.GetString(), null, SourceVcc);
+
+                if (root.TryGetProperty("pathToUnityExe", out var exe))
+                    Add(exe.GetString(), null, SourceVcc);
+            }
+        }
+        catch (JsonException) { }
+        catch (IOException) { }
+
+        // A scanned path is either an editor root itself or the folder that holds several of them.
+        foreach (var root in settings.UnityEditorPaths)
+        {
+            if (!Directory.Exists(root)) continue;
+
+            var direct = Path.Combine(root, "Editor", "Unity.exe");
+            if (File.Exists(direct))
+            {
+                Add(direct, null, SourceScanned);
+                continue;
+            }
+
+            try
+            {
+                foreach (var sub in Directory.GetDirectories(root))
+                    Add(Path.Combine(sub, "Editor", "Unity.exe"), null, SourceScanned);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        // Editors installed outside Hub's registry — a copied Editor folder, or one Hub forgot to
+        // report — still have to be startable, so each drive's usual Unity homes are walked a level
+        // or two deep.
+        foreach (var drive in DriveInfo.GetDrives()
+                     .Where(d => d.DriveType == DriveType.Fixed)
+                     .Select(d => d.RootDirectory.FullName))
+        {
+            foreach (var root in new[]
+                     {
+                         Path.Combine(drive, "Unity"),
+                         Path.Combine(drive, "Program Files", "Unity", "Hub", "Editor")
+                     })
+                ScanEditorRoot(root, Add);
+        }
+
+        return found.OrderByDescending(e => e.Version, StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    /// <summary>Adds the editors under a folder that is either an editor itself or holds several.</summary>
+    private static void ScanEditorRoot(
+        string root, Action<string?, string?, string> add)
+    {
+        if (!Directory.Exists(root)) return;
+
+        void Try(string dir) => add(Path.Combine(dir, "Editor", "Unity.exe"), null, SourceScanned);
+
+        try
+        {
+            Try(root);
+
+            foreach (var sub in Directory.GetDirectories(root))
+            {
+                Try(sub);
+
+                // Hub-style layouts nest once more: <root>\Editor\<version>\Editor.
+                foreach (var inner in Directory.GetDirectories(sub))
+                    Try(inner);
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    /// <summary>
+    /// Registers an editor by hand. The picked path may be the folder that holds Unity.exe, its
+    /// Editor subfolder, or the executable itself.
+    /// </summary>
+    public async Task<string> AddUnityEditorAsync(string pickedPath)
+    {
+        var full = ResolveEditorExecutable(pickedPath);
+        if (full is null)
+            return "所选位置里没有找到 Unity.exe，请选择编辑器目录或其 Editor 子目录。";
+
+        var settings = LoadSettings();
+
+        if (settings.UnityEditorEntries.Any(e => PathEquals(e.Path, full)))
+            return $"{ResolveVersion(full, null)} 已经在手动列表里。";
+
+        var entry = new UnityEditorEntry
+        {
+            Path = full,
+            Version = ResolveVersion(full, null),
+            Source = SourceManual
+        };
+        settings.UnityEditorEntries.Add(entry);
+        await SaveOwnedFieldsAsync(settings);
+
+        return $"已添加 {entry.Version}。";
+    }
+
+    private static string? ResolveEditorExecutable(string? picked)
+    {
+        if (string.IsNullOrWhiteSpace(picked)) return null;
+
+        var full = Path.GetFullPath(picked.Trim().Trim('"'));
+
+        if (File.Exists(full))
+            return string.Equals(Path.GetFileName(full), "Unity.exe", StringComparison.OrdinalIgnoreCase) ? full : null;
+
+        if (!Directory.Exists(full)) return null;
+
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(full, "Unity.exe"),
+                     Path.Combine(full, "Editor", "Unity.exe")
+                 })
+            if (File.Exists(candidate)) return candidate;
+
+        return null;
+    }
+
+    public async Task<string> RemoveUnityEditorAsync(string exePath)
+    {
+        var settings = LoadSettings();
+        var removed = settings.UnityEditorEntries.RemoveAll(e => PathEquals(e.Path, exePath));
+
+        if (removed > 0) await SaveOwnedFieldsAsync(settings);
+
+        return removed > 0 ? "已从手动列表移除。" : "只有手动添加的编辑器可以移除。";
+    }
+
+    /// <summary>Backup target: this app's setting wins, then VCC's, then the app data folder.</summary>
+    public string GetBackupDirectory()
+    {
+        var configured = LoadSettings().ProjectBackupPath;
+        if (!string.IsNullOrWhiteSpace(configured)) return configured;
+
+        try
+        {
+            var vccPath = VccSettingsPath();
+            if (File.Exists(vccPath))
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(vccPath));
+                if (doc.RootElement.TryGetProperty("projectBackupPath", out var bp) &&
+                    bp.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(bp.GetString()))
+                    return bp.GetString()!;
+            }
+        }
+        catch (JsonException) { }
+        catch (IOException) { }
+
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Akashic", "Backups");
+    }
+
+    public async Task SetBackupDirectoryAsync(string directory)
+    {
+        var full = Path.GetFullPath(directory.Trim().Trim('"'));
+        Directory.CreateDirectory(full);
+
+        var settings = LoadSettings();
+        settings.ProjectBackupPath = full;
+        await SaveOwnedFieldsAsync(settings);
+    }
+
+    public bool BackupExcludesPackages => LoadSettings().BackupExcludePackages;
+
+    public async Task SetBackupExcludesPackagesAsync(bool exclude)
+    {
+        var settings = LoadSettings();
+        settings.BackupExcludePackages = exclude;
+        await SaveOwnedFieldsAsync(settings);
+    }
+
+    public string GetDefaultProjectPath()
+    {
+        var configured = LoadSettings().DefaultProjectPath;
+        return string.IsNullOrWhiteSpace(configured) ? Path.GetFullPath(".") : configured;
+    }
+
+    public async Task SetDefaultProjectPathAsync(string directory)
+    {
+        var full = Path.GetFullPath(directory.Trim().Trim('"'));
+        Directory.CreateDirectory(full);
+
+        var settings = LoadSettings();
+        settings.DefaultProjectPath = full;
+        await SaveOwnedFieldsAsync(settings);
+    }
+
+    private async Task SaveOwnedFieldsAsync(AppSettings updated)
+    {
+        var dir = Path.GetDirectoryName(_settingsPath);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+
+        // Re-read so the paths other services own are never clobbered.
+        var current = LoadSettings();
+        current.UnityEditorEntries = updated.UnityEditorEntries;
+        current.ProjectBackupPath = updated.ProjectBackupPath;
+        current.BackupExcludePackages = updated.BackupExcludePackages;
+        current.DefaultProjectPath = updated.DefaultProjectPath;
+        current.ProjectTemplates = updated.ProjectTemplates;
+
+        await File.WriteAllTextAsync(_settingsPath, JsonSerializer.Serialize(current, JsonOptions));
+    }
+
+    private static bool VersionMatches(string? known, string? wanted)
+    {
+        if (string.IsNullOrWhiteSpace(known) || string.IsNullOrWhiteSpace(wanted)) return false;
+
+        return string.Equals(known, wanted, StringComparison.OrdinalIgnoreCase)
+               || (wanted.Length >= 4 && known.StartsWith(wanted[..4], StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool PathEquals(string? a, string? b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) return false;
+
+        try
+        {
+            return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static string? ReadLocation(JsonElement location) => location.ValueKind switch
+    {
+        JsonValueKind.Array when location.GetArrayLength() > 0 => location[0].GetString(),
+        JsonValueKind.String => location.GetString(),
+        _ => null
+    };
+
+    /// <summary>
+    /// The version string Unity itself prints, e.g. 2022.3.22f1: a known key wins, then the exe's
+    /// ProductVersion, then the folder name the editor lives in.
+    /// </summary>
+    private static string ResolveVersion(string exePath, string? known)
+    {
+        if (!string.IsNullOrWhiteSpace(known)) return known.Trim();
+
+        try
+        {
+            var product = System.Diagnostics.FileVersionInfo.GetVersionInfo(exePath).ProductVersion ?? string.Empty;
+            var match = UnityReleaseVersionRegex().Match(product);
+            if (match.Success) return match.Value;
+        }
+        catch (Exception) { }
+
+        var editorDir = Path.GetDirectoryName(exePath);
+        var folderMatch = UnityReleaseVersionRegex().Match(Path.GetFileName(editorDir ?? string.Empty));
+        if (folderMatch.Success) return folderMatch.Value;
+
+        var parentMatch = UnityReleaseVersionRegex().Match(
+            Path.GetFileName(Path.GetDirectoryName(editorDir) ?? string.Empty));
+
+        return parentMatch.Success ? parentMatch.Value : "未知版本";
     }
 
     public (bool Success, string Message, string? PathUsed) LaunchUnity(UnityProject project)
@@ -516,28 +727,7 @@ public partial class ProjectService : IProjectService
     public async Task<(bool Success, string Message, string? BackupPath)> CreateProjectBackupAsync(UnityProject project, IProgress<double>? progress = null)
     {
         progress?.Report(0.1);
-        string backupDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Akashic", "Backups");
-
-        try
-        {
-            var vccSettingsPath = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VRChatCreatorCompanion", "settings.json");
-            if (File.Exists(vccSettingsPath))
-            {
-                var json = await File.ReadAllTextAsync(vccSettingsPath);
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("projectBackupPath", out var bpElem))
-                {
-                    var p = bpElem.GetString();
-                    if (!string.IsNullOrEmpty(p))
-                        backupDir = p;
-                }
-            }
-        }
-        catch { }
+        string backupDir = GetBackupDirectory();
 
         if (!Directory.Exists(backupDir))
             Directory.CreateDirectory(backupDir);
@@ -545,6 +735,8 @@ public partial class ProjectService : IProjectService
         var safeProjectName = string.Join("_", project.Name.Split(Path.GetInvalidFileNameChars()));
         var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         var backupZip = Path.Combine(backupDir, $"{safeProjectName}_{timestamp}.zip");
+
+        var excludePackages = LoadSettings().BackupExcludePackages;
 
         progress?.Report(0.2);
 
@@ -560,7 +752,13 @@ public partial class ProjectService : IProjectService
                     var dirPath = Path.Combine(project.Path, folder);
                     if (!Directory.Exists(dirPath)) continue;
 
-                    var files = Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories);
+                    // Dropping the package folders is where the size saving is: the manifests left
+                    // behind say which packages the project wants, and the Resolver can fetch the
+                    // packages themselves again.
+                    var files = folder == "Packages" && excludePackages
+                        ? Directory.GetFiles(dirPath, "*.json")
+                        : Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories);
+
                     foreach (var file in files)
                     {
                         var rel = Path.GetRelativePath(project.Path, file);
@@ -570,7 +768,7 @@ public partial class ProjectService : IProjectService
             });
 
             progress?.Report(1.0);
-            return (true, $"备份已保存至: {backupZip}", backupZip);
+            return (true, $"备份已保存至: {backupZip}" + (excludePackages ? "（不含软件包）" : string.Empty), backupZip);
         }
         catch (Exception ex)
         {
@@ -578,6 +776,295 @@ public partial class ProjectService : IProjectService
         }
     }
 
+    // ── Templates, new projects and folder detection ───────────────────────────────────────────
+
+    private static string TemplatesRoot => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Akashic", "Templates");
+
+    /// <summary>
+    /// The official VCC templates come first so the new project dialog opens on a real VRChat starting
+    /// point rather than an empty folder.
+    /// </summary>
+    public List<ProjectTemplate> GetTemplates()
+    {
+        var builtins = BuiltinTemplates.Discover().Select(t => new ProjectTemplate
+        {
+            Name = t.Name,
+            Kind = t.Kind,
+            UnityVersion = t.UnityVersion,
+            Notes = string.IsNullOrWhiteSpace(t.Description) ? "官方模板" : t.Description,
+            Directory = t.Directory,
+            BuiltinKey = t.Key
+        });
+
+        var saved = LoadSettings().ProjectTemplates.OrderByDescending(t => t.CreatedAt);
+
+        return builtins.Concat(saved).ToList();
+    }
+
+    public string GetTemplatesDirectory() => TemplatesRoot;
+
+    /// <summary>
+    /// Snapshots a project as a template. Only ProjectSettings and the package manifests are kept:
+    /// the packages themselves are re-resolvable, so copying them would make every template as large
+    /// as the project it came from.
+    /// </summary>
+    public async Task<string> SaveTemplateFromProjectAsync(UnityProject project, string name, string notes)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0) return "模板需要一个名字。";
+        if (!IsValidUnityProject(project.Path)) return "这不是一个可读的 Unity 工程。";
+
+        var target = Path.Combine(TemplatesRoot,
+            $"{Slug(trimmed)}_{DateTime.Now:yyyyMMdd_HHmmss}");
+
+        try
+        {
+            Directory.CreateDirectory(target);
+            CopyDirectory(Path.Combine(project.Path, "ProjectSettings"), Path.Combine(target, "ProjectSettings"));
+
+            var packages = Path.Combine(target, "Packages");
+            Directory.CreateDirectory(packages);
+
+            var sourcePackages = Path.Combine(project.Path, "Packages");
+            if (Directory.Exists(sourcePackages))
+            {
+                foreach (var json in Directory.GetFiles(sourcePackages, "*.json"))
+                    File.Copy(json, Path.Combine(packages, Path.GetFileName(json)), true);
+            }
+
+            var settings = LoadSettings();
+            settings.ProjectTemplates.Add(new ProjectTemplate
+            {
+                Name = trimmed,
+                Kind = project.ProjectTypeDisplayName,
+                UnityVersion = project.UnityVersion,
+                Notes = notes.Trim(),
+                Directory = target,
+                SourcePath = project.Path,
+                CreatedAt = DateTime.Now
+            });
+
+            await SaveOwnedFieldsAsync(settings);
+            return $"已保存模板“{trimmed}”。";
+        }
+        catch (Exception ex)
+        {
+            TryDeleteTemplateFolder(target);
+            return $"保存模板失败：{ex.Message}";
+        }
+    }
+
+    public async Task<string> DeleteTemplateAsync(ProjectTemplate template)
+    {
+        // Built-ins are compiled in, so there is nothing on disk to forget.
+        if (template.IsBuiltIn) return $"{template.Name} 是应用自带的模板，不能删除。";
+
+        var settings = LoadSettings();
+        var kept = settings.ProjectTemplates
+            .Where(t => !PathsMatch(t.Directory, template.Directory))
+            .ToList();
+
+        var removed = settings.ProjectTemplates.Count - kept.Count;
+        settings.ProjectTemplates = kept;
+        await SaveOwnedFieldsAsync(settings);
+
+        TryDeleteTemplateFolder(template.Directory);
+
+        return removed > 0 ? $"已删除模板“{template.Name}”。" : "这个模板已经不在列表里了。";
+    }
+
+    /// <summary>
+    /// Only ever removes a folder inside this app's own template root, so a stale or hand-edited
+    /// Directory value can never take a real project with it.
+    /// </summary>
+    private static void TryDeleteTemplateFolder(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory)) return;
+
+        var root = Path.GetFullPath(TemplatesRoot);
+        var full = Path.GetFullPath(directory);
+
+        if (full.Length <= root.Length ||
+            !full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            if (Directory.Exists(full)) Directory.Delete(full, true);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static bool PathsMatch(string? left, string? right) =>
+        !string.IsNullOrWhiteSpace(left) && !string.IsNullOrWhiteSpace(right) &&
+        string.Equals(Path.GetFullPath(left), Path.GetFullPath(right), StringComparison.OrdinalIgnoreCase);
+
+    public async Task<(bool Success, string Message, string? ProjectPath)> CreateProjectAsync(
+        string name, string? parentDirectory, ProjectTemplate? template, string unityVersion)
+    {
+        var trimmed = name.Trim();
+        if (trimmed.Length == 0) return (false, "请填写项目名称。", null);
+        if (trimmed.Any(Path.GetInvalidFileNameChars().Contains)) return (false, "项目名称里有非法字符。", null);
+
+        var parent = Path.GetFullPath(string.IsNullOrWhiteSpace(parentDirectory)
+            ? GetDefaultProjectPath()
+            : parentDirectory.Trim().Trim('"'));
+
+        var target = Path.Combine(parent, trimmed);
+        if (Directory.Exists(target)) return (false, $"{target} 已经存在，换一个名字或目录。", null);
+
+        try
+        {
+            Directory.CreateDirectory(target);
+            Directory.CreateDirectory(Path.Combine(target, "Assets"));
+
+            var packages = Path.Combine(target, "Packages");
+            Directory.CreateDirectory(packages);
+
+            var version = string.IsNullOrWhiteSpace(unityVersion) ? template?.UnityVersion ?? "" : unityVersion.Trim();
+
+            var builtin = BuiltinTemplates.Find(template?.BuiltinKey);
+
+            if (builtin is not null && Directory.Exists(builtin.Directory))
+            {
+                // An official template is a complete skeleton, so it is copied the way Creator
+                // Companion copies it. The template's own package.json describes the template rather
+                // than the project, so it is deliberately left behind.
+                foreach (var part in new[] { "Assets", "Packages", "ProjectSettings" })
+                    CopyDirectory(Path.Combine(builtin.Directory, part), Path.Combine(target, part));
+
+                CopyRelative(builtin.Directory, target, ".gitignore");
+                CopyRelative(builtin.Directory, target, Path.Combine("Packages", ".gitignore"));
+
+                if (string.IsNullOrWhiteSpace(version)) version = builtin.UnityVersion;
+            }
+            else if (builtin is not null)
+            {
+                // No VCC on this machine: the compiled-in stand-in writes the smallest manifest that
+                // still gives Unity its built-in modules, and the SDK packages are installed after.
+                Directory.CreateDirectory(Path.Combine(target, "ProjectSettings"));
+                await File.WriteAllTextAsync(Path.Combine(packages, "manifest.json"),
+                    BuiltinTemplates.ManifestJson);
+                await File.WriteAllTextAsync(Path.Combine(packages, "vpm-manifest.json"),
+                    "{\n  \"dependencies\": {}\n}\n");
+
+                if (string.IsNullOrWhiteSpace(version)) version = builtin.UnityVersion;
+            }
+            else if (template is { IsAvailable: true })
+            {
+                CopyDirectory(Path.Combine(template.Directory, "ProjectSettings"),
+                    Path.Combine(target, "ProjectSettings"));
+
+                var from = Path.Combine(template.Directory, "Packages");
+                if (Directory.Exists(from))
+                {
+                    foreach (var json in Directory.GetFiles(from, "*.json"))
+                        File.Copy(json, Path.Combine(packages, Path.GetFileName(json)), true);
+                }
+
+                if (string.IsNullOrWhiteSpace(version)) version = ReadUnityVersion(template.Directory);
+            }
+            else
+            {
+                Directory.CreateDirectory(Path.Combine(target, "ProjectSettings"));
+                await File.WriteAllTextAsync(Path.Combine(packages, "manifest.json"),
+                    "{\n  \"dependencies\": {}\n}\n");
+            }
+
+            var release = UnityReleaseVersionRegex().Match(version);
+            if (release.Success)
+            {
+                await File.WriteAllTextAsync(
+                    Path.Combine(target, "ProjectSettings", "ProjectVersion.txt"),
+                    $"m_EditorVersion: {release.Value}\n");
+            }
+
+            await AddProjectAsync(target);
+            return (true, $"已创建项目 {target}", target);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"创建项目失败：{ex.Message}", null);
+        }
+    }
+
+    /// <summary>
+    /// Registers the folder itself when it is a project, otherwise every project directly inside it.
+    /// Going one level deep is what makes a "E:\VRChat" archive show up without dragging in the
+    /// nested folders of a single project.
+    /// </summary>
+    public async Task<(int Added, int Already, string Message)> DetectProjectsAsync(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            return (0, 0, "目录不存在。");
+
+        var root = Path.GetFullPath(directory);
+
+        var candidates = IsValidUnityProject(root)
+            ? [root]
+            : Directory.EnumerateDirectories(root).Where(IsValidUnityProject).ToList();
+
+        var known = new HashSet<string>(
+            LoadSettings().ProjectPaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+
+        var added = 0;
+        var already = 0;
+
+        foreach (var candidate in candidates)
+        {
+            if (known.Contains(candidate))
+            {
+                already++;
+                continue;
+            }
+
+            if (await AddProjectAsync(candidate) is not null) added++;
+        }
+
+        return (added, already, $"在 {root} 下发现 {candidates.Count} 个工程 · 新登记 {added} 个 · 已登记 {already} 个");
+    }
+
+    /// <summary>Copies one file across, keeping its relative path, and says nothing when it is absent.</summary>
+    private static void CopyRelative(string source, string target, string relative)
+    {
+        var from = Path.Combine(source, relative);
+        if (!File.Exists(from)) return;
+
+        var to = Path.Combine(target, relative);
+        var parent = Path.GetDirectoryName(to);
+        if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+
+        File.Copy(from, to, true);
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        if (!Directory.Exists(source)) return;
+
+        foreach (var file in Directory.GetFiles(source))
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), true);
+
+        foreach (var dir in Directory.GetDirectories(source))
+            CopyDirectory(dir, Path.Combine(target, Path.GetFileName(dir)));
+    }
+
+    private static string Slug(string text)
+    {
+        var cleaned = new string(text
+            .Where(c => !Path.GetInvalidFileNameChars().Contains(c))
+            .Select(c => char.IsWhiteSpace(c) ? '_' : c)
+            .ToArray());
+
+        return cleaned.Length == 0 ? "template" : cleaned;
+    }
+
     [GeneratedRegex(@"m_EditorVersion:\s*(.+)")]
     private static partial Regex UnityVersionRegex();
+
+    [GeneratedRegex(@"\d{4}\.\d+\.\d+f\d+")]
+    private static partial Regex UnityReleaseVersionRegex();
 }
