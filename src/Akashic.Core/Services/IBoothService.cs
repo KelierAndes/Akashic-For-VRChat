@@ -28,6 +28,12 @@ public interface IBoothService
     bool HasSession { get; }
 
     /// <summary>
+    /// One cheap request that says whether the stored session still works: true signed in,
+    /// false signed out, null when Booth could not be asked.
+    /// </summary>
+    Task<bool?> ProbeSessionAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// The page the WebView2 has to open so the list extractor can run against it.
     /// </summary>
     string GetLibraryUrl(int page);

@@ -52,6 +52,11 @@ public partial class BoothViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SessionDisplay))]
     private bool? _isSignedIn;
 
+    /// <summary>Whether an earlier run left a usable session behind, before Booth confirms it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SessionDisplay))]
+    private bool _hasStoredSession;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Summary))]
     private string _downloadDirectory = string.Empty;
@@ -117,6 +122,39 @@ public partial class BoothViewModel : ObservableObject
         _downloadDirectory = booth.GetDownloadDirectory();
 
         LoadCachedLibrary();
+        RestoreSession();
+    }
+
+    /// <summary>
+    /// Picks up the session an earlier run stored and asks Booth once whether it still works, so
+    /// opening the page after a restart no longer reads as being signed out.
+    /// </summary>
+    private void RestoreSession()
+    {
+        if (!_booth.HasSession) return;
+
+        HasStoredSession = true;
+        _ = ProbeAsync();
+    }
+
+    private async Task ProbeAsync()
+    {
+        switch (await _booth.ProbeSessionAsync())
+        {
+            case true:
+                IsSignedIn = true;
+                Status = "已恢复上次保存的 Booth 登录态 · 点右上角读取最新列表";
+                break;
+
+            case false:
+                HasStoredSession = false;
+                IsSignedIn = false;
+                Status = "保存的 Booth 登录态已失效，请重新登录后再读取。";
+                break;
+
+            // null means Booth could not be asked this time; the restored wording stands rather
+            // than a flaky network appearing to log the user out.
+        }
     }
 
     /// <summary>
@@ -153,13 +191,15 @@ public partial class BoothViewModel : ObservableObject
 
     /// <summary>
     /// Booth's own verdict from the last read: the library page only renders for a signed-in
-    /// account, while a logged-out one is redirected to the sign-in form.
+    /// account, while a logged-out one is redirected to the sign-in form. Before any read this run,
+    /// a session carried over from an earlier one gets its own wording rather than pretending to be
+    /// a verdict it has not asked for yet.
     /// </summary>
     public string SessionDisplay => IsSignedIn switch
     {
         true => "已登录 Booth",
         false => "未登录 Booth",
-        _ => "尚未读取 Booth 账号"
+        _ => HasStoredSession ? "已恢复保存的 Booth 登录态" : "尚未读取 Booth 账号"
     };
 
     public bool HasStatus => !string.IsNullOrWhiteSpace(Status);

@@ -72,6 +72,11 @@ public partial class AssetStoreViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(SessionDisplay))]
     private bool? _isSignedIn;
 
+    /// <summary>Whether an earlier run left a usable session behind, before Unity confirms it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SessionDisplay))]
+    private bool _hasStoredSession;
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(Summary))]
     private string _cacheDirectory = string.Empty;
@@ -112,6 +117,10 @@ public partial class AssetStoreViewModel : ObservableObject
         _library = library;
         _cacheDirectory = store.GetCacheDirectory();
         _downloadDirectory = store.GetDownloadDirectory();
+
+        // The encrypted vault already holds the session from the last run; say so on open instead of
+        // leaving the badge on 尚未读取 until someone clicks 读取.
+        HasStoredSession = store.HasSession;
     }
 
     public string ExtractorScript => _store.MyAssetsExtractorScript;
@@ -126,11 +135,16 @@ public partial class AssetStoreViewModel : ObservableObject
     public IReadOnlyList<string> ViewFilterOptions { get; } =
         ["全部资源", "仅未入库", "仅已缓存", "仅我的资产", "仅本地缓存"];
 
+    /// <summary>
+    /// Unity's verdict from the last read. Unlike Booth, the storefront renders 我的资产 client-side,
+    /// so there is no cheap request that distinguishes a live session from a dead one — until a read
+    /// happens, a carried-over session is reported as restored rather than as confirmed.
+    /// </summary>
     public string SessionDisplay => IsSignedIn switch
     {
         true => "已登录 Unity",
         false => "未登录 Unity",
-        _ => "尚未读取 Unity 账号"
+        _ => HasStoredSession ? "已恢复保存的 Unity 登录态" : "尚未读取 Unity 账号"
     };
 
     public bool HasStatus => !string.IsNullOrWhiteSpace(Status);

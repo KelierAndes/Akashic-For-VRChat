@@ -134,6 +134,36 @@ public class BoothService : IBoothService
         _cookies = StoredCookies.ToNameValue(_entries);
     }
 
+    /// <summary>
+    /// Asks Booth whether the stored session still authenticates, without scraping the library.
+    /// A logged-out request for the library is redirected to the sign-in form, so the absence of that
+    /// redirect is the answer — one headers-only request instead of a paged DOM read.
+    ///
+    /// Null means "no answer": offline, or Cloudflare pushing back on a bare request. That is
+    /// deliberately not reported as signed out, so a flaky network cannot log the user out on screen.
+    /// </summary>
+    public async Task<bool?> ProbeSessionAsync(CancellationToken ct = default)
+    {
+        if (!HasSession) return null;
+
+        var url = new Uri($"https://{AccountHost}/library");
+
+        try
+        {
+            using var response = await SendAsync(
+                _boothClient, url, HttpCompletionOption.ResponseHeadersRead, sendCookies: true, ct);
+
+            if (IsRedirect(response, url, out var next))
+                return next.AbsolutePath.Contains("sign_in", StringComparison.OrdinalIgnoreCase) ? false : null;
+
+            return response.StatusCode == HttpStatusCode.OK;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
     public string GetLibraryUrl(int page) =>
         page <= 1
             ? $"https://{AccountHost}/library"
