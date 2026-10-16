@@ -28,7 +28,7 @@ class LeftRail extends StatelessWidget {
   static const double _trayGap = 10;
 
   BoxDecoration _baseStrip(NeuTokens t) {
-    // The same 全局透明度 knob that fades the window sheet fades these trays, or
+    // The same 全局不透明度 knob that fades the window sheet fades these trays, or
     // the rail would stay solid while everything around it turned glass.
     final a = model.sheetOpacity;
     return BoxDecoration(

@@ -428,7 +428,7 @@ class GlassSheet extends StatelessWidget {
   final Widget child;
   final double radius;
 
-  /// Multiplies the alpha of the sheet gradient — the 全局透明度 knob.
+  /// Alpha of the sheet gradient — the 全局不透明度 knob.
   final double opacity;
 
   @override

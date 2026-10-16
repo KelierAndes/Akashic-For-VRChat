@@ -101,7 +101,7 @@ public class AppSettings
 
     /// <summary>
     /// Alpha of the glass surfaces: the window sheet, the rail trays and the popup panels.
-    /// The 透明度 slider shows this number as-is, so the usable band is 0.4 … 1 and 0.7
+    /// The 不透明度 slider shows this number as-is, so the usable band is 0.4 … 1 and 0.7
     /// is the shipped look.
     /// </summary>
     [JsonPropertyName("sheetOpacity")]

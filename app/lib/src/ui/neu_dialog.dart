@@ -24,7 +24,7 @@ class NeuModalScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
-    // Popups are glass too: without this the 全局透明度 slider faded the window and
+    // Popups are glass too: without this the 全局不透明度 slider faded the window and
     // the rail but left every dialog — 新建项目 included — solid.
     final opacity = AppScope.of(context).sheetOpacity;
     return NeuBox(

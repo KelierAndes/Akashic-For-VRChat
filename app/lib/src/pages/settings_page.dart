@@ -586,7 +586,7 @@ class _ToolRow extends StatelessWidget {
   }
 }
 
-/// 颜色模式与页面全局透明度. Both apply live: the slider drives the window sheet as the
+/// 颜色模式与页面全局不透明度. Both apply live: the slider drives the window sheet as the
 /// thumb moves and the sidecar only stores the value once it settles.
 class _VisualCard extends StatelessWidget {
   const _VisualCard(this.model);
@@ -622,14 +622,14 @@ class _VisualCard extends StatelessWidget {
           const SizedBox(height: 10),
           _slider(
             context,
-            '页面全局透明度',
+            '页面全局不透明度',
             '${(_alpha * 100).round()}%',
             0.4,
             1.0,
             _alpha,
             (value) => model.setVisual(opacity: value),
-            hint: '数值直接等于面板 alpha，可设范围 0.4–1：向左更透、向右更实，1 为完全不透明。'
-                '作用于窗口底板、侧栏托盘与弹出面板；越透，桌面透出越多，文字对比度也越低。',
+            hint: '数值即面板不透明度，可设范围 0.4–1：越大越实，1 为完全不透明。'
+                '作用于窗口底板、侧栏托盘与弹出面板；越小桌面透出越多，文字对比度也越低。',
           ),
         ],
       ),
