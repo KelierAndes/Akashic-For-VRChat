@@ -36,7 +36,7 @@ public class ThemeService : IThemeService
 
     public bool IsDarkTheme { get; private set; } = true;
 
-    public double SheetOpacity { get; private set; } = 0.9;
+    public double SheetOpacity { get; private set; } = 0.7;
 
     public ThemeService(string? settingsPath = null)
     {
@@ -65,8 +65,8 @@ public class ThemeService : IThemeService
     public async Task SetVisualAsync(double opacity, CancellationToken ct = default)
     {
         // Clamped here rather than trusted from the shell: a NaN would otherwise be
-        // written down and leave the window unreadable on the next start. The alpha
-        // band matches the 透明度 slider, which runs from 10 % to 60 % transparency.
+        // written down and leave the window unreadable on the next start. The slider shows
+        // this alpha as-is, so the band is 0.4 … 1.
         SheetOpacity = ClampOpacity(opacity);
 
         var settings = LoadSettings();
@@ -77,7 +77,7 @@ public class ThemeService : IThemeService
 
     /// <summary>Keeps a value out of settings.json that the page cannot express any more.</summary>
     private static double ClampOpacity(double opacity) =>
-        double.IsFinite(opacity) ? Math.Clamp(opacity, 0.4, 0.9) : 0.9;
+        double.IsFinite(opacity) ? Math.Clamp(opacity, 0.4, 1.0) : 0.7;
 
     private async Task WriteAsync(AppSettings settings, CancellationToken ct)
     {

@@ -134,9 +134,9 @@ class AppModel extends ChangeNotifier {
   bool _themeOverridden = false;
 
   /// Glass sheet alpha, from settings.json. The 视觉效果 card drives it and the shell repaints
-  /// on the spot, so a slider never waits for a restart. The page shows the inverse as 透明度,
-  /// so the band is 0.9 (least transparent) down to 0.4.
-  double sheetOpacity = 0.9;
+  /// on the spot, so a slider never waits for a restart. The slider shows this number as-is,
+  /// so the band is 0.4 (most see-through) up to 1.0, with 0.7 shipped.
+  double sheetOpacity = 0.7;
   Timer? _visualSave;
 
   /// The icon rail's tiles as `nav:<id>` / `proj:<path>`; empty falls back to the
@@ -891,7 +891,7 @@ class AppModel extends ChangeNotifier {
   /// Applied to the window as the thumb moves; settings.json only sees it once the drag
   /// settles, and then only with what the sidecar kept after clamping.
   void setVisual({required double opacity}) {
-    sheetOpacity = opacity.clamp(0.4, 0.9).toDouble();
+    sheetOpacity = opacity.clamp(0.4, 1.0).toDouble();
     notifyListeners();
 
     _visualSave?.cancel();

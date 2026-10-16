@@ -194,7 +194,7 @@ class HostState {
         assetStoreDownloadDirectory:
             json['assetStoreDownloadDirectory'] as String? ?? '',
         darkTheme: json['darkTheme'] as bool? ?? true,
-        sheetOpacity: (json['sheetOpacity'] as num?)?.toDouble() ?? 0.9,
+        sheetOpacity: (json['sheetOpacity'] as num?)?.toDouble() ?? 0.7,
         rail: ((json['rail'] as List?) ?? const []).cast<String>(),
       );
 }

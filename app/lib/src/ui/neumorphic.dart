@@ -411,9 +411,12 @@ class _NeuButtonState extends State<NeuButton> {
 }
 
 /// Frosted glass window sheet. The app canvas is fully transparent, so this
-/// sheet carries its own translucent gray fill and reads as an independent
-/// window: hairline highlight edge, no drop shadow. A shadow here used to paint
-/// a gray halo into the transparent margin, which made the window edge look dirty.
+/// sheet carries its own fill and reads as an independent window: hairline
+/// highlight edge, no drop shadow. A shadow here used to paint a gray halo into
+/// the transparent margin, which made the window edge look dirty.
+///
+/// `opacity` is the only alpha here — the sheet tokens are opaque — so 1 really
+/// is a solid window and the slider number is what gets painted.
 class GlassSheet extends StatelessWidget {
   const GlassSheet({
     super.key,
@@ -442,9 +445,9 @@ class GlassSheet extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                t.sheetA.withValues(alpha: t.sheetA.a * opacity),
-                t.sheetB.withValues(alpha: t.sheetB.a * opacity),
-                t.sheetC.withValues(alpha: t.sheetC.a * opacity),
+                t.sheetA.withValues(alpha: opacity),
+                t.sheetB.withValues(alpha: opacity),
+                t.sheetC.withValues(alpha: opacity),
               ],
               stops: const [0.0, 0.55, 1.0],
             ),

@@ -101,11 +101,11 @@ public class AppSettings
 
     /// <summary>
     /// Alpha of the glass surfaces: the window sheet, the rail trays and the popup panels.
-    /// The page shows its inverse as 透明度, so the usable band is 0.4 … 0.9 and 0.9 —
-    /// the least transparent end — is the shipped look.
+    /// The 透明度 slider shows this number as-is, so the usable band is 0.4 … 1 and 0.7
+    /// is the shipped look.
     /// </summary>
     [JsonPropertyName("sheetOpacity")]
-    public double SheetOpacity { get; set; } = 0.9;
+    public double SheetOpacity { get; set; } = 0.7;
 
     /// <summary>
     /// What the icon rail holds, in order: <c>nav:&lt;id&gt;</c> for a destination and

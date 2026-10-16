@@ -31,7 +31,7 @@ class NeuModalScaffold extends StatelessWidget {
       mode: NeuMode.raised,
       radius: 14,
       depth: 9,
-      color: t.raisedHi.withValues(alpha: t.raisedHi.a * opacity),
+      color: t.raisedHi.withValues(alpha: opacity),
       edge: GlassEdgeStyle(top: t.edgeTop * opacity, bottom: t.edgeBottom * opacity, width: 1.4),
       darkShadow: const Color(0x40000000),
       lightShadow: const Color(0x40FFFFFF),

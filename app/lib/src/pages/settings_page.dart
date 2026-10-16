@@ -593,8 +593,8 @@ class _VisualCard extends StatelessWidget {
 
   final AppModel model;
 
-  /// The sheet stores an alpha; the page speaks the inverse, so right really is more see-through.
-  double get _transparency => (1 - model.sheetOpacity).clamp(0.1, 0.6);
+  /// The slider shows the sheet alpha as-is, so 70 % is the `0.7` written to settings.json.
+  double get _alpha => model.sheetOpacity.clamp(0.4, 1.0);
 
   @override
   Widget build(BuildContext context) {
@@ -623,13 +623,13 @@ class _VisualCard extends StatelessWidget {
           _slider(
             context,
             '页面全局透明度',
-            '${(_transparency * 100).round()}%',
-            0.1,
-            0.6,
-            _transparency,
-            (value) => model.setVisual(opacity: 1 - value),
-            hint: '向右更透明、向左更实，可设范围 10%–60%。'
-                '作用于窗口底板、侧栏托盘与弹出面板；越透明，桌面透出越多，文字对比度也越低。',
+            '${(_alpha * 100).round()}%',
+            0.4,
+            1.0,
+            _alpha,
+            (value) => model.setVisual(opacity: value),
+            hint: '数值直接等于面板 alpha，可设范围 0.4–1：向左更透、向右更实，1 为完全不透明。'
+                '作用于窗口底板、侧栏托盘与弹出面板；越透，桌面透出越多，文字对比度也越低。',
           ),
         ],
       ),

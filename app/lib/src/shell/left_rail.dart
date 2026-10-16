@@ -37,9 +37,9 @@ class LeftRail extends StatelessWidget {
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: [
-          t.sheetA.withValues(alpha: t.sheetA.a * a),
-          t.sheetB.withValues(alpha: t.sheetB.a * a),
-          t.sheetC.withValues(alpha: t.sheetC.a * a),
+          t.sheetA.withValues(alpha: a),
+          t.sheetB.withValues(alpha: a),
+          t.sheetC.withValues(alpha: a),
         ],
         stops: const [0.0, 0.55, 1.0],
       ),
