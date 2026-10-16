@@ -98,6 +98,15 @@ public interface IBoothService
     void ReconcileLocalArchives(IEnumerable<BoothPurchaseItem> items);
 
     /// <summary>
+    /// Removes the superseded downloadables of products that appear several times, keeping the
+    /// newest of each, and reports per survivor how many versions it stands in for. One Booth
+    /// product carries a bundle, a rebuild and a renamed re-upload as separate rows, so a list
+    /// without this reads as a pile of duplicates.
+    /// </summary>
+    /// <returns>How many rows were folded away in total.</returns>
+    int FoldOldVersions(List<BoothPurchaseItem> items, Dictionary<string, int> hiddenByNumber);
+
+    /// <summary>
     /// Downloads one purchased form into the download directory and returns the zip path.
     /// </summary>
     Task<string> DownloadAsync(BoothPurchaseItem item, IProgress<double>? progress = null, CancellationToken ct = default);

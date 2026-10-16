@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Akashic.Host</RootNamespace>
+    <AssemblyName>Akashic.Host</AssemblyName>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Akashic.Core\Akashic.Core.csproj" />
+  </ItemGroup>
+
+</Project>

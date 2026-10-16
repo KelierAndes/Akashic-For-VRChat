@@ -91,8 +91,45 @@ public class AppSettings
     [JsonPropertyName("useDarkTheme")]
     public bool UseDarkTheme { get; set; } = true;
 
+    /// <summary>
+    /// Whether the encrypted gist sync runs at all. Signing into GitHub is useful on its own —
+    /// private external packages go through the same credential — so the login stays available
+    /// with this off, and only the upload, the restore and the post-login auto-push honour it.
+    /// </summary>
+    [JsonPropertyName("syncEnabled")]
+    public bool SyncEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Alpha of the glass surfaces: the window sheet, the rail trays and the popup panels.
+    /// The page shows its inverse as 透明度, so the usable band is 0.4 … 0.9 and 0.9 —
+    /// the least transparent end — is the shipped look.
+    /// </summary>
+    [JsonPropertyName("sheetOpacity")]
+    public double SheetOpacity { get; set; } = 0.9;
+
+    /// <summary>
+    /// What the icon rail holds, in order: <c>nav:&lt;id&gt;</c> for a destination and
+    /// <c>proj:&lt;path&gt;</c> for a pinned project. Empty means the built-in set.
+    /// </summary>
+    [JsonPropertyName("railItems")]
+    public List<string> RailItems { get; set; } = [];
+
     [JsonPropertyName("vccSettingsPath")]
     public string VccSettingsPath { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VRChatCreatorCompanion", "settings.json");
+
+    /// <summary>
+    /// The private gist this machine pushes its encrypted config to. Left empty, the first
+    /// upload creates one under the signed-in GitHub account and stores its id here.
+    /// </summary>
+    [JsonPropertyName("syncGistId")]
+    public string SyncGistId { get; set; } = string.Empty;
+
+    [JsonPropertyName("syncUploadedAt")]
+    public DateTime? SyncUploadedAt { get; set; }
+
+    /// <summary>How many bytes the last upload carried, so the page can say what it sent.</summary>
+    [JsonPropertyName("syncPayloadBytes")]
+    public int SyncPayloadBytes { get; set; }
 }

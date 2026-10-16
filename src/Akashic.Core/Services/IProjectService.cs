@@ -40,6 +40,21 @@ public interface IProjectService
 
     Task<(bool Success, string Message, string? BackupPath)> CreateProjectBackupAsync(UnityProject project, IProgress<double>? progress = null);
 
+    /// <summary>
+    /// Every archive in the backup folder, newest first. Both this app's
+    /// <c>Name_20260102_030405.zip</c> and VCC's <c>Name-2026-01-02T03-04-05.zip</c>
+    /// are read, because a machine that has used VCC has both.
+    /// </summary>
+    List<BackupArchive> ListBackupArchives();
+
+    /// <summary>
+    /// Unpacks a backup into a project folder. Nothing is ever deleted: the default
+    /// only writes files that are not there yet, and overwriting has to be asked for.
+    /// </summary>
+    Task<(bool Success, string Message)> RestoreBackupAsync(
+        BackupArchive archive, string targetProjectPath, bool overwrite,
+        IProgress<double>? progress = null, CancellationToken ct = default);
+
     /// <summary>Templates saved from existing projects, newest first.</summary>
     List<ProjectTemplate> GetTemplates();
 

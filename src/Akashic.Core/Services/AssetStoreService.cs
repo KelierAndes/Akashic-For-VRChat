@@ -258,17 +258,22 @@ public class AssetStoreService : IAssetStoreService
                 catch (UnauthorizedAccessException) { continue; }
 
                 var (publisher, category) = Relate(root, file);
+                var name = string.IsNullOrWhiteSpace(info.DisplayName) ? info.PackageId : info.DisplayName;
 
                 result.Add(new AssetStoreAsset
                 {
-                    Name = string.IsNullOrWhiteSpace(info.DisplayName) ? info.PackageId : info.DisplayName,
+                    Name = name,
                     Publisher = publisher,
                     Category = category,
                     Version = info.Version,
                     LocalPath = file,
                     Size = info.Size,
                     LastModified = info.LastModified,
-                    IsInLibrary = known.Contains(file)
+                    IsInLibrary = known.Contains(file),
+                    // The cover this name has already been matched to. Without it a cache-only row
+                    // always came back blank, so the page reopened the storefront search for it
+                    // on every visit and the downloaded thumbnails looked like they had vanished.
+                    ImageUrl = TryGetCoverUrl(name, out var cover) ? cover : string.Empty
                 });
             }
         }
@@ -348,8 +353,16 @@ public class AssetStoreService : IAssetStoreService
             asset.IsInLibrary = hit.IsInLibrary;
             if (string.IsNullOrWhiteSpace(asset.Category)) asset.Category = hit.Category;
 
-            // The account row's cover also answers for the cache file it now owns.
-            if (!string.IsNullOrWhiteSpace(asset.ImageUrl)) CacheCoverUrl(asset.Name, asset.ImageUrl);
+            // The account row's cover also answers for the cache file it now owns. Both names get
+            // the URL, because the file name and the display name differ often enough that
+            // matching one of them alone left the other looking for a cover forever.
+            if (string.IsNullOrWhiteSpace(asset.ImageUrl) && TryGetCoverUrl(asset.Name, out var stored))
+                asset.ImageUrl = stored;
+
+            if (string.IsNullOrWhiteSpace(asset.ImageUrl)) continue;
+
+            CacheCoverUrl(asset.Name, asset.ImageUrl);
+            CacheCoverUrl(hit.Name, asset.ImageUrl);
         }
     }
 

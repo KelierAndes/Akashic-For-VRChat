@@ -776,6 +776,135 @@ public partial class ProjectService : IProjectService
         }
     }
 
+    /// <summary>The only folders a backup is allowed to write into.</summary>
+    private static readonly string[] BackupRoots = ["Assets", "Packages", "ProjectSettings"];
+
+    public List<BackupArchive> ListBackupArchives()
+    {
+        var dir = GetBackupDirectory();
+        if (!Directory.Exists(dir)) return [];
+
+        var archives = new List<BackupArchive>();
+        foreach (var file in Directory.EnumerateFiles(dir, "*.zip", SearchOption.TopDirectoryOnly))
+        {
+            var archive = BackupArchive.TryParse(file);
+            if (archive != null) archives.Add(archive);
+        }
+
+        return archives.OrderByDescending(a => a.CreatedAt).ToList();
+    }
+
+    /// <summary>
+    /// Unpacks a backup with a light touch: nothing already in the project is ever removed,
+    /// so a restore that turns out to be the wrong archive still leaves the old one openable.
+    /// Entries outside the three project folders are ignored rather than followed, because a
+    /// zip can carry "../" paths and a stray absolute path would write outside the project.
+    /// </summary>
+    public async Task<(bool Success, string Message)> RestoreBackupAsync(
+        BackupArchive archive, string targetProjectPath, bool overwrite,
+        IProgress<double>? progress = null, CancellationToken ct = default)
+    {
+        if (archive == null) return (false, "没有选中备份。");
+        if (string.IsNullOrWhiteSpace(targetProjectPath)) return (false, "没有填写目标工程目录。");
+        if (!File.Exists(archive.FilePath)) return (false, $"备份文件已经不在了: {archive.FilePath}");
+        if (!archive.Readable) return (false, $"备份读不出文件清单，可能没写完或已损坏: {archive.FileName}");
+
+        var target = Path.GetFullPath(targetProjectPath.TrimEnd('"'));
+        var existedBefore = Directory.Exists(target);
+        if (!existedBefore)
+        {
+            try
+            {
+                Directory.CreateDirectory(target);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"目标目录创建失败: {ex.Message}");
+            }
+        }
+
+        var prefix = target.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                     + Path.DirectorySeparatorChar;
+
+        progress?.Report(0.05);
+
+        try
+        {
+            return await Task.Run(() =>
+            {
+                using var zip = ZipFile.Open(archive.FilePath, ZipArchiveMode.Read);
+                var entries = zip.Entries;
+                var total = entries.Count;
+
+                var written = 0;
+                var kept = 0;
+                var ignored = 0;
+                var failed = 0;
+
+                for (var i = 0; i < total; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var entry = entries[i];
+
+                    // Directory entries have an empty Name; the files below them make the folders.
+                    if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                    var rel = entry.FullName.Replace('\\', '/');
+                    if (!BackupRoots.Contains(rel.Split('/')[0], StringComparer.Ordinal))
+                    {
+                        ignored++;
+                        continue;
+                    }
+
+                    var dest = Path.GetFullPath(
+                        Path.Combine(target, rel.Replace('/', Path.DirectorySeparatorChar)));
+                    if (!dest.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        ignored++;
+                        continue;
+                    }
+
+                    if (File.Exists(dest) && !overwrite)
+                    {
+                        kept++;
+                        continue;
+                    }
+
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                        entry.ExtractToFile(dest, overwrite);
+                        written++;
+                    }
+                    catch (Exception)
+                    {
+                        // A read-only or locked file stops that one entry, not the whole restore.
+                        failed++;
+                    }
+
+                    if (i % 64 == 0 || i == total - 1) progress?.Report(0.05 + 0.9 * (i + 1) / Math.Max(1, total));
+                }
+
+                progress?.Report(1.0);
+
+                var message = $"还原完成：写入 {written} 个文件，保留已存在 {kept} 个";
+                if (ignored > 0) message += $"，忽略非工程条目 {ignored} 个";
+                if (failed > 0) message += $"，{failed} 个文件写入失败";
+                if (!existedBefore) message += $"，目标目录已新建: {target}";
+
+                return (failed == 0, message);
+            }, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, "还原已取消，已写入的文件保留在目标目录。");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"还原失败: {ex.Message}");
+        }
+    }
+
     // ── Templates, new projects and folder detection ───────────────────────────────────────────
 
     private static string TemplatesRoot => Path.Combine(

@@ -304,6 +304,63 @@ public class BoothService : IBoothService
 
     private static string Key(string raw) => new(raw.Where(char.IsLetterOrDigit).ToArray());
 
+    public int FoldOldVersions(List<BoothPurchaseItem> items, Dictionary<string, int> hiddenByNumber)
+    {
+        var dropped = new List<BoothPurchaseItem>();
+        var hidden = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        foreach (var group in items.GroupBy(i => i.ProductKey).Where(g => g.Count() > 1))
+        {
+            var ordered = group.OrderByDescending(i => i,
+                Comparer<BoothPurchaseItem>.Create(CompareFreshness)).ToList();
+            hidden[ordered[0].Number] = ordered.Count - 1;
+            dropped.AddRange(ordered.Skip(1));
+        }
+
+        if (dropped.Count == 0) return 0;
+
+        items.RemoveAll(dropped.Contains);
+        foreach (var pair in hidden)
+            hiddenByNumber[pair.Key] =
+                (hiddenByNumber.TryGetValue(pair.Key, out var seen) ? seen : 0) + pair.Value;
+
+        return dropped.Count;
+    }
+
+    private static int CompareFreshness(BoothPurchaseItem a, BoothPurchaseItem b)
+    {
+        var va = ParseVersion(a);
+        var vb = ParseVersion(b);
+
+        if (va is not null && vb is not null) return va.CompareTo(vb);
+        if (va is not null) return 1;
+        if (vb is not null) return -1;
+
+        // Nothing states a version, so the larger downloadables id is the later upload.
+        var na = long.TryParse(a.Number, out var x) ? x : 0;
+        var nb = long.TryParse(b.Number, out var y) ? y : 0;
+        return na.CompareTo(nb);
+    }
+
+    /// <summary>
+    /// A version written into the file name or the product title: "UnyStylus_v1.3.zip",
+    /// "Soramoyou ver1.2". Two-part versions count, so a bare "1" never wins by accident.
+    /// </summary>
+    private static Version? ParseVersion(BoothPurchaseItem item)
+    {
+        foreach (var source in new[] { item.FormLabel, item.DisplayTitle })
+        {
+            if (string.IsNullOrWhiteSpace(source)) continue;
+
+            var match = System.Text.RegularExpressions.Regex.Match(source,
+                @"(?:^|[vV\s_\-\[])(\d{1,3}(?:\.\d{1,3}){1,3})(?:$|[\s_\-\]]|$)");
+            if (match.Success && Version.TryParse(match.Groups[1].Value, out var parsed))
+                return parsed;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Normalises a file label or archive name for matching: letters and digits only,
     /// case-insensitive by the caller's dictionary. Shared with the icon resolver so cached

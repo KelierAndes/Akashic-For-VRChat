@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Akashic.Core.Models;
 
@@ -9,6 +10,11 @@ namespace Akashic.Core.Services;
 /// Keeps the 外部包 library in settings.json and installs its entries into Unity projects:
 /// local folders are referenced with a file: path, GitHub repositories are downloaded as
 /// zipballs and embedded under Packages/.
+///
+/// GitHub is reached through the GitHub CLI rather than anonymous HTTP, which is what lets a
+/// private repository install at all and stops the shared unauthenticated rate limit from
+/// breaking the download halfway through a list. GitLab and Gitee have no CLI here, so they
+/// keep plain HTTP.
 /// </summary>
 public class ExternalPackageService : IExternalPackageService
 {
@@ -16,6 +22,7 @@ public class ExternalPackageService : IExternalPackageService
 
     private readonly HttpClient _httpClient;
     private readonly IPackageInstaller _installer;
+    private readonly GitHubCli? _gitHub;
     private readonly string _settingsPath;
     private readonly string _cacheDir;
 
@@ -25,9 +32,11 @@ public class ExternalPackageService : IExternalPackageService
         PropertyNameCaseInsensitive = true
     };
 
-    public ExternalPackageService(IPackageInstaller installer, HttpClient? httpClient = null, string? settingsPath = null)
+    public ExternalPackageService(IPackageInstaller installer, HttpClient? httpClient = null,
+        string? settingsPath = null, GitHubCli? gitHub = null)
     {
         _installer = installer;
+        _gitHub = gitHub ?? new GitHubCli();
         _httpClient = httpClient ?? new HttpClient();
         if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Akashic/1.0");
@@ -98,6 +107,8 @@ public class ExternalPackageService : IExternalPackageService
                    ?? throw new InvalidOperationException(
                        "无法解析仓库地址，应形如 https://github.com|gitlab.com|gitee.com/所有者/仓库");
 
+        await RequireGitHubAsync(repo, ct);
+
         var location = $"https://{repo.Host}/{repo.Owner}/{repo.Repository}";
         var settings = LoadSettings();
         var id = BuildId(repo.Kind, location, repo.Reference);
@@ -164,6 +175,9 @@ public class ExternalPackageService : IExternalPackageService
 
         var repo = ParseGitRepo(package.Location)
                    ?? throw new InvalidOperationException($"无法解析仓库地址: {package.Location}");
+
+        await RequireGitHubAsync(repo, ct);
+
         var refName = string.IsNullOrWhiteSpace(package.Reference) ? "HEAD" : package.Reference;
 
         progress?.Report(0.1);
@@ -173,7 +187,7 @@ public class ExternalPackageService : IExternalPackageService
         try
         {
             var zipPath = Path.Combine(_cacheDir, $"{Sanitize(repo.Owner)}.{Sanitize(repo.Repository)}.{Sanitize(refName)}.zip");
-            await DownloadZipAsync(ArchiveUrl(repo, refName), zipPath, ct);
+            await DownloadArchiveAsync(repo, refName, zipPath, ct);
 
             progress?.Report(0.45);
             var extractDir = Path.Combine(staging, "content");
@@ -266,11 +280,58 @@ public class ExternalPackageService : IExternalPackageService
         File.Move(temp, target);
     }
 
+    private static bool IsGitHub(GitRepo repo) =>
+        repo.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
+        repo.Host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// GitHub has no anonymous fallback any more, so a missing or signed-out CLI is reported as
+    /// the thing to fix instead of as a download that mysteriously failed.
+    /// </summary>
+    private async Task RequireGitHubAsync(GitRepo repo, CancellationToken ct)
+    {
+        if (!IsGitHub(repo)) return;
+
+        if (GitHubCli.Find() == null)
+            throw new InvalidOperationException(
+                "访问 GitHub 仓库需要 GitHub CLI。请在 设置 → 版本控制依赖 点「一键安装」，装好后在 设置 → 配置同步 登录 GitHub。");
+
+        var identity = await _gitHub!.IdentityAsync(ct);
+        if (identity?.SignedIn != true)
+            throw new InvalidOperationException(
+                "已装 GitHub CLI，但没有登录的 GitHub 账号。在 设置 → 配置同步 点「使用浏览器登录 GitHub」后重试。");
+    }
+
+    /// <summary>GitHub goes through gh; the other hosts keep the plain archive endpoint.</summary>
+    private async Task DownloadArchiveAsync(GitRepo repo, string reference, string target, CancellationToken ct)
+    {
+        if (!IsGitHub(repo))
+        {
+            await DownloadZipAsync(ArchiveUrl(repo, reference), target, ct);
+            return;
+        }
+
+        var path = string.IsNullOrWhiteSpace(reference) || reference.Equals("HEAD", StringComparison.OrdinalIgnoreCase)
+            ? $"repos/{repo.Owner}/{repo.Repository}/zipball"
+            : $"repos/{repo.Owner}/{repo.Repository}/zipball/{Uri.EscapeDataString(reference)}";
+
+        var (ok, error) = await _gitHub!.DownloadAsync(path, target, ct);
+        if (!ok)
+            throw new InvalidOperationException($"通过 GitHub CLI 下载 {repo.Owner}/{repo.Repository} 失败：{error}");
+    }
+
     private async Task<string?> FetchDefaultBranchAsync(GitRepo repo, CancellationToken ct)
     {
+        if (IsGitHub(repo))
+        {
+            var branch = await _gitHub!.ApiAsync($"repos/{repo.Owner}/{repo.Repository}",
+                ".default_branch", ct);
+            var trimmed = branch?.Trim().Trim('"');
+            return string.IsNullOrWhiteSpace(trimmed) ? null : trimmed;
+        }
+
         var url = repo.Host switch
         {
-            "github.com" => $"https://api.github.com/repos/{repo.Owner}/{repo.Repository}",
             "gitlab.com" => $"https://gitlab.com/api/v4/projects/{Uri.EscapeDataString($"{repo.Owner}/{repo.Repository}")}",
             "gitee.com" => $"https://gitee.com/api/v5/repos/{repo.Owner}/{repo.Repository}",
             _ => null
@@ -296,6 +357,8 @@ public class ExternalPackageService : IExternalPackageService
     private async Task<PackageJson?> ProbePackageJsonAsync(GitRepo repo, string reference,
         CancellationToken ct)
     {
+        if (IsGitHub(repo)) return await ProbeWithCliAsync(repo, reference, ct);
+
         // Assets/<repo> covers the layout git-hosted UPM packages usually ship with.
         foreach (var dir in GitHubPackageDirs.Append($"Assets/{repo.Repository}"))
         {
@@ -312,6 +375,51 @@ public class ExternalPackageService : IExternalPackageService
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"package.json probe failed for {path}: {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// One tree call names every path the ref holds, so the handful of candidate folders are
+    /// settled without a request each; the winner is then read through gh, which is the only
+    /// thing here allowed to see a private repository.
+    /// </summary>
+    private async Task<PackageJson?> ProbeWithCliAsync(GitRepo repo, string reference, CancellationToken ct)
+    {
+        var tree = await _gitHub!.ApiAsync(
+            $"repos/{repo.Owner}/{repo.Repository}/git/trees/{Uri.EscapeDataString(reference)}?recursive=1",
+            "[.tree[]?.path | select(. | endswith(\"package.json\"))] | join(\"\\n\")", ct);
+
+        if (string.IsNullOrWhiteSpace(tree)) return null;
+
+        var paths = tree.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(path => path.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var dir in GitHubPackageDirs.Append($"Assets/{repo.Repository}"))
+        {
+            var path = string.IsNullOrEmpty(dir) ? "package.json" : $"{dir}/package.json";
+            if (!paths.Contains(path)) continue;
+
+            var encoded = await _gitHub.ApiAsync(
+                $"repos/{repo.Owner}/{repo.Repository}/contents/{path}?ref={Uri.EscapeDataString(reference)}",
+                ".content", ct);
+
+            if (string.IsNullOrWhiteSpace(encoded)) continue;
+
+            try
+            {
+                var compact = new string(encoded.Where(c => !char.IsWhiteSpace(c)).ToArray());
+                var json = Encoding.UTF8.GetString(Convert.FromBase64String(compact));
+
+                var meta = JsonSerializer.Deserialize<PackageJson>(json, JsonOptions);
+                if (meta != null && !string.IsNullOrWhiteSpace(meta.Name)) return meta;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"gh package.json read failed for {path}: {ex.Message}");
             }
         }
 
