@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// A .unitypackage file discovered in a local library folder or added by hand.
-/// </summary>
 public class UnityPackageFileInfo
 {
     public string FilePath { get; set; } = string.Empty;
@@ -13,10 +10,8 @@ public class UnityPackageFileInfo
     public long Size { get; set; }
     public DateTime LastModified { get; set; }
 
-    /// <summary>Who supplied the file; the library scan fills this in from settings.json.</summary>
     public PackageOrigin Origin { get; set; }
 
-    /// <summary>Stable identity used to match install records: file name without extension.</summary>
     [JsonIgnore]
     public string PackageId => Path.GetFileNameWithoutExtension(FilePath);
 
@@ -33,9 +28,6 @@ public class UnityPackageFileInfo
     public string LastModifiedDisplay => LastModified.ToString("yyyy/MM/dd");
 }
 
-/// <summary>
-/// One recorded .unitypackage import into a project, used to report installed state and to undo it.
-/// </summary>
 public class UnityPackageInstallRecord
 {
     [JsonPropertyName("packageId")]
@@ -56,7 +48,6 @@ public class UnityPackageInstallRecord
     [JsonPropertyName("fileCount")]
     public int FileCount { get; set; }
 
-    /// <summary>Project-relative paths (assets, folders and their .meta files) written by this import.</summary>
     [JsonPropertyName("installedPaths")]
     public List<string> InstalledPaths { get; set; } = [];
 }

@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import '../app_nav.dart';
 import '../ui/neu_kit.dart';
 
-/// Placeholder body until each destination is ported page by page. It keeps
-/// the real page chrome — title, subtitle, cards — so the layout is already
-/// reviewed against the framework.
 class StubPage extends StatelessWidget {
   const StubPage({super.key, required this.entry});
 

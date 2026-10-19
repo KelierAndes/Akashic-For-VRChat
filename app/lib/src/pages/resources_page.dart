@@ -8,8 +8,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// The local package library: registry sources, the .unitypackage shelf, external
-/// packages, and the two account feeds that already have files on disk.
 class ResourcesPage extends StatefulWidget {
   const ResourcesPage({super.key, this.initialTab = 0});
 
@@ -47,7 +45,6 @@ class _ResourcesPageState extends State<ResourcesPage> {
   }
 }
 
-// ---------- 1 · repositories ----------
 
 class _RepositoriesTab extends StatefulWidget {
   const _RepositoriesTab();
@@ -81,8 +78,6 @@ class _RepositoriesTabState extends State<_RepositoriesTab> {
     _resolveNames();
   }
 
-  /// Names come from each registry, which is one request per source, so the derived
-  /// label stays on screen until the real one lands.
   Future<void> _resolveNames() async {
     final host = AppScope.of(context).host;
     if (host == null) return;
@@ -276,7 +271,6 @@ class _IconPoke extends StatelessWidget {
   }
 }
 
-// ---------- 2 · user packages ----------
 
 class _UserPackagesTab extends StatefulWidget {
   const _UserPackagesTab();
@@ -290,8 +284,6 @@ class _UserPackagesTabState extends State<_UserPackagesTab> {
   List<dynamic> _folders = [];
   String _originFilter = '全部来源';
 
-  /// Booth-imported packages belong to the Booth shelf tab, so they are not an option
-  /// here — same as the old page, whose list excluded PackageOrigin.Booth outright.
   static const _origins = ['全部来源', '本地', 'Asset Store'];
 
   @override
@@ -481,7 +473,6 @@ class _UserPackagesTabState extends State<_UserPackagesTab> {
   }
 }
 
-// ---------- 3 · external ----------
 
 class _ExternalTab extends StatefulWidget {
   const _ExternalTab();
@@ -621,7 +612,6 @@ class _ExternalTabState extends State<_ExternalTab> {
   }
 }
 
-// ---------- 4 · booth shelf ----------
 
 class _BoothShelfTab extends StatefulWidget {
   const _BoothShelfTab();
@@ -644,8 +634,6 @@ class _BoothShelfTabState extends State<_BoothShelfTab> {
     final host = AppScope.of(context).host;
     if (host == null) return;
 
-    // This shelf is the imported side of Booth, same as the old page: only the
-    // .unitypackage files tagged with the Booth origin, not the purchase list.
     _imported = (await host.libraryFiles())
         .where((f) => '${f['origin']}' == 'Booth')
         .toList();
@@ -737,7 +725,6 @@ class _BoothShelfTabState extends State<_BoothShelfTab> {
   }
 }
 
-// ---------- 5 · asset store shelf ----------
 
 class _AssetStoreShelfTab extends StatefulWidget {
   const _AssetStoreShelfTab();

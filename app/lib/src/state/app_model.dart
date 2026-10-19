@@ -6,8 +6,6 @@ import '../app_nav.dart';
 import '../host/host_client.dart';
 import '../host/host_models.dart';
 
-/// Everything the shell and the project list need to know, kept in one place so a
-/// page never talks to the sidecar directly.
 class AppModel extends ChangeNotifier {
   HostClient? host;
 
@@ -33,8 +31,6 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// After anything that rewrites a project's manifests, so the cards and the
-  /// nav badge show the new package counts.
   Future<void> refreshProjects() async {
     final client = host;
     if (client == null) return;
@@ -70,8 +66,6 @@ class AppModel extends ChangeNotifier {
   String get templateSummary =>
       '共 ${templates.length} 个模板 · 内置 $builtInTemplateCount · 自建 ${templates.length - builtInTemplateCount}';
 
-  /// Settings writes go straight through and pull a fresh state back, so the page
-  /// always shows what is actually on disk.
   Future<void> updateSetting(Future<void> Function(HostClient client) change) =>
       _run((client) async {
         await change(client);
@@ -108,7 +102,6 @@ class AppModel extends ChangeNotifier {
   Future<void> backupProject(UnityProject project) => _run((client) async {
         final result = await client.backupProject(project.path);
         status = result;
-        // The card's 备份 pill has to move the moment a backup lands.
         await refreshBackupCounts();
       });
 
@@ -129,21 +122,14 @@ class AppModel extends ChangeNotifier {
   String cloudFilter = cloudStates.first;
   String sortBy = sortModes.first;
 
-  /// 0 浅色 · 1 暗色 · 2 跟随系统. Seeded from settings.json, then the user wins.
   int themeChoice = 2;
   bool _themeOverridden = false;
 
-  /// Glass sheet alpha, from settings.json. The 视觉效果 card drives it and the shell repaints
-  /// on the spot, so a slider never waits for a restart. The slider shows this number as-is,
-  /// so the band is 0.4 (most see-through) up to 1.0, with 0.7 shipped.
   double sheetOpacity = 0.7;
   Timer? _visualSave;
 
-  /// The icon rail's tiles as `nav:<id>` / `proj:<path>`; empty falls back to the
-  /// built-in set so a fresh install still looks like the product.
   List<String> rail = [];
 
-  /// True while the rail shows its remove buttons.
   bool railEditing = false;
 
   void setRailEditing(bool editing) {
@@ -153,7 +139,6 @@ class AppModel extends ChangeNotifier {
 
   List<String> get railTiles => rail.isEmpty ? AppNav.defaultRail : rail;
 
-  /// Rail dots: how many projects the 项目 destination should advertise.
   Map<String, int> get badges => {
         if (projects.isNotEmpty) 'projects': projects.length,
       };
@@ -172,8 +157,6 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A tile is 41px, so ten of them plus the header and the two editor buttons is
-  /// what the tray can hold without pushing the piece below it out of the window.
   static const int maxRailTiles = 10;
 
   void toggleRailTile(String raw) {
@@ -191,14 +174,11 @@ class AppModel extends ChangeNotifier {
     setRail(next);
   }
 
-  /// The last tile stays: an empty rail would read back as the built-in set, which is
-  /// not what "I removed everything" should look like.
   void removeRailTile(String raw) {
     if (railTiles.length <= 1) return;
     setRail([...railTiles]..remove(raw));
   }
 
-  // ---------- 搜索：项目与包 ----------
 
   String search = '';
   List<UnityProject> searchProjects = [];
@@ -206,7 +186,6 @@ class AppModel extends ChangeNotifier {
   bool searchBusy = false;
   Timer? _searchTimer;
 
-  /// Handed to 包浏览器 so a package result opens already filtered.
   String packageQuery = '';
 
   bool get hasSearchResults =>
@@ -252,7 +231,6 @@ class AppModel extends ChangeNotifier {
       searchPackages = [];
     }
 
-    // A newer query owns the results once it arrives.
     if (search != query) return;
     searchBusy = false;
     notifyListeners();
@@ -320,8 +298,6 @@ class AppModel extends ChangeNotifier {
     } on HostException catch (error) {
       fatal = error.message;
     } catch (error) {
-      // Anything else still has to reach the screen instead of vanishing into
-      // the unawaited task.
       fatal = '连接本地数据服务时出错：$error';
     } finally {
       loading = false;
@@ -331,14 +307,10 @@ class AppModel extends ChangeNotifier {
     unawaited(matchCloud());
     unawaited(refreshVcsMarkers());
     unawaited(refreshBackupCounts());
-    // The sidebar card shows the account and the last sync, so both come in at startup;
-    // the second one shares the single gh probe the first one makes.
     unawaited(loadGitHub());
     unawaited(loadSync());
   }
 
-  /// The list is on screen before this finishes: each project answers for itself and
-  /// the tile fills in its cloud state as it goes.
   Future<void> matchCloud() async {
     final client = host;
     if (client == null || projects.isEmpty) return;
@@ -359,8 +331,6 @@ class AppModel extends ChangeNotifier {
     }
   }
 
-  /// The detail view is swapped in inside the shell's own stack rather than pushed as
-  /// a route, because routes cannot receive pointer input in this window.
   String? openProjectPath;
 
   void openProject(String path) {
@@ -373,14 +343,10 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Set by the shell so any page can land on another destination — the VRChat list
-  /// jumps into a project's detail view.
   ValueChanged<String>? navJump;
 
   void jumpTo(String id) => navJump?.call(id);
 
-  /// Blueprint ids carried across a 项目 → VRChat 数据同步 jump. The sync page takes
-  /// them once and narrows its list to the uploads that project produced.
   List<String> _vrchatJumpIds = const [];
 
   void jumpToVrchatContent(List<String> ids) {
@@ -394,25 +360,18 @@ class AppModel extends ChangeNotifier {
     return ids;
   }
 
-  /// Also set by the shell: the rail and the panel both select by index.
   ValueChanged<int>? navSelect;
 
   void selectNav(int index) => navSelect?.call(index);
 
-  /// Bumped when something asks the settings page to bring the 配置同步 card into view.
-  /// The page compares it on every build, because it has no other reason to hear about it.
   int syncReveal = 0;
 
-  /// The sidebar account card is the way into the GitHub login: the settings page is
-  /// the only place that can start it, and it is long enough to hide the card.
   void openGitHubLogin() {
     jumpTo('settings');
     syncReveal++;
     notifyListeners();
   }
 
-  /// Walking every project's Packages folder is the slowest call on the VRChat page,
-  /// so it runs once per session and is kept here rather than re-read per visit.
   Future<Map<String, dynamic>>? _vrchatLocalMap;
 
   Future<Map<String, dynamic>> vrchatLocalMap() {
@@ -439,7 +398,6 @@ class AppModel extends ChangeNotifier {
     return vrchatLocalMap();
   }
 
-  // ---------- 备份还原与版本托管 ----------
 
   String backupDirectory = '';
   List<Map<String, dynamic>> backups = [];
@@ -450,39 +408,27 @@ class AppModel extends ChangeNotifier {
   List<Map<String, dynamic>> vcsStates = [];
   bool vcsLoading = false;
 
-  /// One row is running an operation; the buttons on it go quiet until it returns.
   String vcsBusyPath = '';
 
-  /// A winget install is in flight; the settings rows show it rather than go dark.
   bool installingTool = false;
 
-  /// The last restore this page asked for, kept on screen because the job can run
-  /// for minutes and the shell status line is easy to miss.
   String restoreMessage = '';
 
-  /// Last tool output, kept so the page can show git's or cm's own words.
   Map<String, dynamic> vcsLog = const {};
 
-  /// path → hosting marker. Read offline, so the project cards can tell a Git project
-  /// from a UVCS one without spawning anything per row.
   Map<String, Map<String, dynamic>> vcsByPath = {};
 
   String hostingOf(String path) =>
       vcsByPath[path]?['kind'] as String? ?? '';
 
-  /// path → how many archives in the backup folder carry that project.
   Map<String, int> backupCounts = {};
 
-  /// Who the GitHub CLI is signed in as. Read once at connect time: it spawns gh, so it is
-  /// not something to re-ask on every repaint of the sidebar.
   Map<String, dynamic> github = const {};
 
-  /// What the 配置同步 page shows: gist id, last upload, and what would be carried.
   Map<String, dynamic> sync = const {};
 
   bool syncing = false;
 
-  /// The last push or pull, kept on the page because the call runs for a minute or two.
   Map<String, dynamic> syncLog = const {};
 
   Future<void> refreshBackupCounts() async {
@@ -515,7 +461,6 @@ class AppModel extends ChangeNotifier {
       _indexVcsStates(await client
           .vcsStates([for (final project in projects) project.path]));
     } on HostException {
-      // The cards simply stay unmarked; 恢复/同步 reports the real failure.
       return;
     }
     notifyListeners();
@@ -597,15 +542,12 @@ class AppModel extends ChangeNotifier {
     }
   }
 
-  /// Only the tool probe, for the settings page: the per-project states are heavier.
   Future<void> loadVcsTools({bool refresh = true}) async {
     final client = host;
     if (client == null) return;
 
     try {
       vcsTools = await client.vcsTools(refresh: refresh);
-      // Without a line of its own the button looks dead when everything is already
-      // installed, which is the common case.
       status = '已检测：${vcsTools['summary'] ?? ''}';
     } on HostException catch (error) {
       status = error.message;
@@ -628,8 +570,6 @@ class AppModel extends ChangeNotifier {
       vcsTools = await client.vcsTools();
       if (tool == 'gh') {
         await loadGitHub();
-        // The sync card's note is computed sidecar-side; without this it keeps saying
-        // "未检测到 GitHub CLI" after the install that fixed exactly that.
         await loadSync();
       }
     } on HostException catch (error) {
@@ -647,7 +587,6 @@ class AppModel extends ChangeNotifier {
     try {
       github = await client.githubStatus();
     } on HostException {
-      // A missing CLI is the normal state on a fresh machine, not an error to report.
       github = const {'found': false, 'signedIn': false, 'login': ''};
     }
     notifyListeners();
@@ -665,8 +604,6 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Pushing re-asks the CLI for its identity, so a login that happened in a terminal since
-  /// the app started is picked up without a restart.
   Future<void> pushSync() async {
     final client = host;
     if (client == null) return;
@@ -710,12 +647,6 @@ class AppModel extends ChangeNotifier {
 
   bool githubLoggingIn = false;
 
-  /// One click in the user's own browser, no code to copy and no passphrase to remember. The OAuth
-  /// App it rides on is compiled into the sidecar, so there is nothing to configure here.
-  ///
-  /// A first login on an account without a backup uploads this machine's config straight away, which
-  /// is the point of the flow. When the account already has one, this only says so: overwriting local
-  /// settings is left to 从 gist 恢复, where the page can ask before it replaces anything.
   Future<void> githubLogin() async {
     final client = host;
     if (client == null) return;
@@ -741,8 +672,6 @@ class AppModel extends ChangeNotifier {
 
       final login = '${result['login'] ?? ''}';
       if (sync['enabled'] == false) {
-        // The switch means it: signing in is useful for private packages on its own, but
-        // nothing leaves this machine until the user turns the sync back on.
         status = '已登录 $login。配置同步当前已关闭，需要时在 设置 → 配置同步 打开。';
       } else if (result['hasBackup'] == true) {
         status = '已登录 $login。这个账号已经有配置备份，点「从 gist 恢复」就能套到本机。';
@@ -759,8 +688,6 @@ class AppModel extends ChangeNotifier {
     }
   }
 
-  /// The changed-file counts need git or cm, so they are only taken for the row
-  /// the user is actually looking at.
   Future<void> refreshVcsState(String path) async {
     final client = host;
     if (client == null || path.isEmpty) return;
@@ -814,9 +741,6 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Forms are hosted inside the shell's own stack rather than as a route: a route
-  /// pushed over this frameless transparent window never receives pointer events,
-  /// so its buttons are dead.
   Widget? modal;
 
   void showModal(Widget form) {
@@ -884,12 +808,9 @@ class AppModel extends ChangeNotifier {
     themeChoice = choice;
     notifyListeners();
 
-    // Only an explicit light / dark pick is a setting; "follow system" stays local.
     if (choice != 2) unawaited(host?.setDarkTheme(choice == 1) ?? Future<void>.value());
   }
 
-  /// Applied to the window as the thumb moves; settings.json only sees it once the drag
-  /// settles, and then only with what the sidecar kept after clamping.
   void setVisual({required double opacity}) {
     sheetOpacity = opacity.clamp(0.4, 1.0).toDouble();
     notifyListeners();

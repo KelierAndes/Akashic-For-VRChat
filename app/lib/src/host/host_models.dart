@@ -1,9 +1,5 @@
-/// Mirrors of the records Akashic.Host serves. Field names are the C# ones in
-/// camelCase, so a rename on either side has to be done in both places.
 library;
 
-/// Who supplied a .unitypackage. The sidecar sends the enum name, which is not what
-/// the interface says, so every list funnels it through here.
 String originLabel(String code) => switch (code) {
       'Local' => '本地',
       'Booth' => 'Booth',
@@ -96,14 +92,10 @@ class UnityProject {
   final bool isVrcProject;
   final String projectTypeDisplayName;
 
-  /// Filled in by the background cloud match after the list is already on screen.
   List<String> cloudBlueprintIds = [];
 
   bool get hasCloudLink => cloudBlueprintIds.isNotEmpty;
 
-  /// Says what was found, not where the button goes. Spelled "VRC" rather than
-  /// "VRChat" because the card tile is 300 wide and the full name pushed the count
-  /// off the end of the pill.
   String get cloudLinkLabel => cloudBlueprintIds.length == 1
       ? 'VRC 已上传'
       : 'VRC 已上传（${cloudBlueprintIds.length}）';
@@ -166,11 +158,8 @@ class HostState {
   final String assetStoreDownloadDirectory;
   final bool darkTheme;
 
-  /// Alpha of the glass surfaces (window sheet, rail trays, popups), so the
-  /// window looks the same on every start.
   final double sheetOpacity;
 
-  /// The icon rail's tiles, in order. Empty means the built-in set.
   final List<String> rail;
 
   static HostState fromJson(Map<String, dynamic> json) => HostState(
@@ -188,7 +177,6 @@ class HostState {
             (json['booth'] as Map<String, dynamic>?) ?? const {}),
         assetStore: HostSession.fromJson(
             (json['assetStore'] as Map<String, dynamic>?) ?? const {}),
-        // The sidecar's camelCase of `VRChat` keeps the capital C: "vrChat".
         vrchat: HostSession.fromJson(
             (json['vrChat'] as Map<String, dynamic>?) ?? const {}),
         assetStoreDownloadDirectory:
@@ -199,10 +187,6 @@ class HostState {
       );
 }
 
-/// One cookie as it moves between the sidecar and the browser. Domain and path are
-/// load-bearing: Booth hands out the same name on `booth.pm` and `accounts.booth.pm`
-/// with different values, and Unity's session token lives on `.unity.com`, so a
-/// flattened name-to-value view loses one of them.
 class CookieSpec {
   const CookieSpec({
     required this.name,
@@ -259,8 +243,6 @@ class DetectResult {
       );
 }
 
-/// A template row with every display string already resolved by the sidecar,
-/// because those rules live on the C# model.
 class TemplateRow {
   const TemplateRow({
     required this.name,

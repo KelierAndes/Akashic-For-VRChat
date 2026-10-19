@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// Represents the VPM manifest file (vpm-manifest.json) in a Unity project.
-/// </summary>
 public class VpmManifest
 {
     [JsonPropertyName("dependencies")]
@@ -29,9 +26,6 @@ public class VpmLockedPackage
     public Dictionary<string, string>? Dependencies { get; set; }
 }
 
-/// <summary>
-/// Represents the Unity Package Manager manifest (Packages/manifest.json).
-/// </summary>
 public class UpmManifest
 {
     [JsonPropertyName("dependencies")]
@@ -53,9 +47,6 @@ public class ScopedRegistry
     public List<string> Scopes { get; set; } = [];
 }
 
-/// <summary>
-/// Represents a package.json inside a package folder.
-/// </summary>
 public class PackageJson
 {
     [JsonPropertyName("name")]

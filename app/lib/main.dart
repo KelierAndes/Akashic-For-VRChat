@@ -21,9 +21,6 @@ Future<void> main() async {
     titleBarStyle: TitleBarStyle.hidden,
   );
 
-  // The canvas is fully transparent so each piece casts its own shadow onto the
-  // desktop; the runner needs the DWM "sheet of glass" margin for that to
-  // actually be per-pixel alpha (see windows/runner/win32_window.cpp).
   unawaited(
     windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.setBackgroundColor(Colors.transparent);
@@ -49,8 +46,6 @@ class _AkashicAppState extends State<AkashicApp> {
   @override
   void initState() {
     super.initState();
-    // The window is already up; the shell shows "connecting" until the sidecar
-    // answers or refuses.
     unawaited(_model.connect());
   }
 
@@ -70,8 +65,6 @@ class _AkashicAppState extends State<AkashicApp> {
   }
 }
 
-/// Owns the light / dark / system choice and hands the matching token set to the
-/// widget tree. The choice comes from settings.json through the sidecar.
 class AppRoot extends StatelessWidget {
   const AppRoot({super.key});
 
@@ -86,8 +79,6 @@ class AppRoot extends StatelessWidget {
             ? (platformDark ? NeuTokens.dark : NeuTokens.light)
             : NeuTokens.light;
 
-    // Segoe UI has no Chinese glyphs, so without this list the CJK runs drop to Skia's
-    // generic substitute — which is what made the whole app look thin and misaligned.
     const fallback = [
       'Microsoft YaHei UI',
       'Microsoft YaHei',
@@ -105,9 +96,6 @@ class AppRoot extends StatelessWidget {
           const TextSelectionThemeData(cursorColor: Color(0xFF2E7D46)),
     );
 
-    // Nearly every label in the app sets a size but no weight, so it inherits these
-    // three. w500 is where 11-13 px Chinese stops looking shaved; the places that want
-    // more already ask for w600/w700 themselves.
     final text = base.textTheme;
 
     return Theme(

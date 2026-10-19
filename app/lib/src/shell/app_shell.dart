@@ -21,8 +21,6 @@ import 'app_scope.dart';
 import 'left_rail.dart';
 import 'nav_panel.dart';
 
-/// Three pieces resting on the desktop: the icon rail, its settings card, and the
-/// glass sheet that holds the nav panel plus the recessed page tray.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
 
@@ -70,7 +68,6 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final model = AppScope.of(context);
     final state = model.state;
-    // Pages can ask the shell to change destination; the shell owns the index.
     model.navJump = (id) => setState(() {
           final index = AppNav.indexOf(id);
           if (index >= 0) _navIndex = index;
@@ -93,7 +90,6 @@ class _AppShellState extends State<AppShell> {
                 model: model,
                 index: _navIndex,
               ),
-              // Same seam as the gaps between the rail's own pieces.
               const SizedBox(width: 10),
               Expanded(
                 child: GlassSheet(
@@ -118,7 +114,6 @@ class _AppShellState extends State<AppShell> {
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(10, 14, 14, 14),
                             child: NeuBox(
-                              // Page tray: recessed, thin uniform rim.
                               mode: NeuMode.inset,
                               radius: 12,
                               depth: 4,

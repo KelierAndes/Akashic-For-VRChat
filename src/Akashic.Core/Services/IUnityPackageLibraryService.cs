@@ -2,10 +2,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Tracks the local .unitypackage library (library folders + manually added files)
-/// and which packages were imported into which project.
-/// </summary>
 public interface IUnityPackageLibraryService
 {
     List<string> GetLibraryFolders();
@@ -18,7 +14,6 @@ public interface IUnityPackageLibraryService
 
     Task<List<UnityPackageFileInfo>> ScanAsync(CancellationToken ct = default);
 
-    /// <summary>Reads display name, version and size of a .unitypackage file name.</summary>
     UnityPackageFileInfo DescribePackage(string filePath);
 
     Task<List<UnityPackageInstallRecord>> GetRecordsAsync(string projectPath, CancellationToken ct = default);

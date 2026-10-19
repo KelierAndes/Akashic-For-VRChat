@@ -3,11 +3,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// Project templates, and the inputs the "new project" dialog needs. The display
-/// strings live on <see cref="ProjectTemplate"/> as [JsonIgnore] computed members, so
-/// they are resolved here rather than rebuilt in the frontend.
-/// </summary>
 public static class TemplateEndpoints
 {
     public static RouteGroupBuilder MapTemplates(this RouteGroupBuilder group)
@@ -40,8 +35,6 @@ public static class TemplateEndpoints
             return Results.Json(new ResultLine(await projects.DeleteTemplateAsync(template)));
         });
 
-        // Unity only loads projects from its own minor line, so the dialog picks a
-        // version first and offers only the templates that match it.
         group.MapGet("/project-creation", (IProjectService projects) =>
         {
             var templates = projects.GetTemplates().Select(TemplateRow.From).ToList();

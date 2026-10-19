@@ -4,9 +4,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Installs and removes packages in Unity projects (VPM, UPM, and .unitypackage).
-/// </summary>
 public class PackageInstaller : IPackageInstaller
 {
     private readonly IVpmRegistryService _registryService;
@@ -15,7 +12,6 @@ public class PackageInstaller : IPackageInstaller
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
-        // Unity leaves // comments in some manifest.json files; parsing must survive them.
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true
     };
@@ -30,15 +26,12 @@ public class PackageInstaller : IPackageInstaller
     {
         progress?.Report(0.0);
 
-        // 1. Resolve dependencies first
         await ResolveDependenciesAsync(project, package, ct);
         progress?.Report(0.2);
 
-        // 2. Download the package
         var zipPath = await _registryService.DownloadPackageAsync(package, null, ct);
         progress?.Report(0.5);
 
-        // 3. Extract to project's Packages folder
         var targetDir = Path.Combine(project.PackagesPath, package.Name);
         if (Directory.Exists(targetDir))
             Directory.Delete(targetDir, true);
@@ -46,11 +39,9 @@ public class PackageInstaller : IPackageInstaller
         ZipFile.ExtractToDirectory(zipPath, targetDir);
         progress?.Report(0.7);
 
-        // 4. Update vpm-manifest.json
         await UpdateVpmManifestAsync(project, package);
         progress?.Report(0.9);
 
-        // 5. Update UPM manifest.json to reference the local package
         await AddLocalPackageReferenceAsync(project, package.Name);
         progress?.Report(1.0);
     }
@@ -136,7 +127,6 @@ public class PackageInstaller : IPackageInstaller
         if (!projectRoot.EndsWith(Path.DirectorySeparatorChar.ToString()))
             projectRoot += Path.DirectorySeparatorChar;
 
-        // Deepest paths first so folders are empty by the time they are deleted.
         var ordered = installedPaths
             .Select(p => p.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -162,7 +152,7 @@ public class PackageInstaller : IPackageInstaller
                     Directory.Delete(targetPath, false);
                 }
             }
-            catch (IOException) { /* Leftover files keep the folder; the rest is still removed. */ }
+            catch (IOException) {  }
             catch (UnauthorizedAccessException) { }
         }
 

@@ -6,7 +6,6 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../host/host_models.dart';
 
-/// Reads and writes the browser's own cookie jar.
 class BrowserSession {
   BrowserSession._();
 
@@ -27,7 +26,6 @@ class BrowserSession {
     }
   }
 
-  /// Origins to harvest, e.g. `https://booth.pm` and `https://accounts.booth.pm`.
   static Future<List<CookieSpec>> harvest(List<String> origins) async {
     final seen = <String>{};
     final cookies = <CookieSpec>[];
@@ -47,13 +45,10 @@ class BrowserSession {
     return cookies;
   }
 
-  /// A leading dot means "any host in this domain", which is not a URL.
   static String _hostOf(String domain) =>
       domain.startsWith('.') ? domain.substring(1) : domain;
 }
 
-/// The embedded browser, composited into the Flutter scene as a texture so it sits
-/// inside the page tray like any other widget.
 class BrowserPanel extends StatefulWidget {
   const BrowserPanel({
     super.key,
@@ -67,8 +62,6 @@ class BrowserPanel extends StatefulWidget {
   final void Function(InAppWebViewController controller)? onController;
   final void Function(String url)? onUrlChanged;
 
-  /// Booth and the Asset Store both lay out at roughly 1000 CSS px, which is wider
-  /// than the tray, so the page is allowed to shrink until it fits.
   final double minZoom;
 
   @override
@@ -79,15 +72,10 @@ class BrowserPanelState extends State<BrowserPanel> {
   InAppWebViewController? _controller;
   Size? _lastSize;
 
-  /// Scales the page so its full width lands inside the panel instead of spilling
-  /// into a horizontal scrollbar. Uses CSS `zoom`: the plugin's own `zoomBy` is a
-  /// no-op on the Windows implementation.
   Future<void> fitToWidth() async {
     final controller = _controller;
     if (controller == null) return;
 
-    // The overflow can come from either box, and innerWidth is the layout
-    // viewport the page actually laid out against.
     final raw = await controller.evaluateJavascript(
         source: 'JSON.stringify([Math.max(document.documentElement.scrollWidth,'
             'document.body ? document.body.scrollWidth : 0),'
@@ -111,7 +99,6 @@ class BrowserPanelState extends State<BrowserPanel> {
         source: 'document.documentElement.style.zoom="$zoom";');
   }
 
-  /// Cleared on every navigation, so the measurement is always taken unscaled.
   Future<void> resetZoom() async {
     final controller = _controller;
     if (controller == null) return;
@@ -149,14 +136,11 @@ class BrowserPanelState extends State<BrowserPanel> {
           widget.onController?.call(controller);
         },
         onProgressChanged: (controller, progress) {
-          // Undo our own scale early in a new navigation, so the next measurement
-          // runs against the page's natural width.
           if (progress > 0 && progress < 60) resetZoom();
         },
         onLoadStop: (controller, url) {
           widget.onUrlChanged?.call(url?.toString() ?? '');
           fitToWidth();
-          // Booth paints its grid a beat after the document settles.
           Timer(const Duration(milliseconds: 1200), fitToWidth);
         },
       );

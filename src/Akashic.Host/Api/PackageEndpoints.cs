@@ -3,10 +3,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// The VPM registry: browsing, searching and installing into a project. Anything
-/// that touches a project is addressed by its folder path, like the rest of the API.
-/// </summary>
 public static class PackageEndpoints
 {
     public static RouteGroupBuilder MapPackages(this RouteGroupBuilder group)
@@ -54,7 +50,6 @@ public static class PackageEndpoints
             return Results.Json(await projects.ScanProjectAsync(request.Path));
         });
 
-        // Registry order is resolution priority, so the list itself is the setting.
         group.MapGet("/repositories", (IVpmRegistryService registry) => new
         {
             urls = registry.GetRegistryUrls(),

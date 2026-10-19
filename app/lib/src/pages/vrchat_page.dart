@@ -9,9 +9,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// VRChat 数据同步. The content list comes off the disk cache first, so opening this
-/// page costs nothing; only 刷新云端 walks the API. The local blueprint map is memoised
-/// in the app model because scanning every project is the expensive half.
 class VRChatSyncPage extends StatefulWidget {
   const VRChatSyncPage({super.key});
 
@@ -24,7 +21,6 @@ class VRChatSyncPage extends StatefulWidget {
               orElse: () => MapEntry(code, code))
           .key;
 
-  /// Position of a server status inside [states] without the 全部状态 entry.
   static int indexOfCode(String code) {
     for (var i = 1; i < states.length; i++) {
       if (codes[states[i]] == code) return i - 1;
@@ -32,7 +28,6 @@ class VRChatSyncPage extends StatefulWidget {
     return 0;
   }
 
-  /// Some records only carry the full-size artwork, so the thumbnail falls back to it.
   static String coverOf(Map<String, dynamic> row) {
     final thumb = '${row['thumbnailImageUrl']}';
     return thumb.isNotEmpty ? thumb : '${row['imageUrl']}';
@@ -58,8 +53,6 @@ class _VRChatSyncPageState extends State<VRChatSyncPage> {
   bool _signedIn = false;
   bool _busy = false;
 
-  /// Set by a jump from a project card: the list narrows to these blueprint ids until
-  /// the chip is cleared.
   Set<String> _focus = {};
 
   @override
@@ -89,31 +82,23 @@ class _VRChatSyncPageState extends State<VRChatSyncPage> {
       _savedAt = _stamp(cache['savedAt']);
       _signedIn = model.state?.vrchat.signedIn ?? false;
 
-      // The list is the reason this page exists, so it goes on screen before
-      // anything that has to ask the network.
       if (mounted) setState(() => _status = _describe());
 
       if (!_signedIn) return;
 
-      // A dead session answers 401, which the client already folds into null.
       _self = await host.vrchatSelf();
 
-      // Cached rows already answer the question the map is for, so the scan only
-      // runs when there is something to match against.
       if (_rows.isNotEmpty) _local = await model.vrchatLocalMap();
 
       if (!mounted) return;
       setState(() => _status = _describe());
 
-      // Nothing on disk yet: the first read has to come from the API.
       if (_rows.isEmpty) await _refresh();
     } catch (error) {
-      // A blank page with no explanation is worse than a red line of text.
       if (mounted) setState(() => _status = '读取失败：$error');
     }
   }
 
-  /// The sidecar writes a full ISO stamp; the subtitle only has room for the minute.
   static String _stamp(Object? raw) {
     final parsed = DateTime.tryParse('$raw');
     if (parsed == null) return '';
@@ -574,8 +559,6 @@ class _VRChatSyncPageState extends State<VRChatSyncPage> {
   }
 }
 
-/// Name, description and — for a world — capacity and release status. Anything the
-/// form leaves out is sent as null so the sidecar keeps the server's own value.
 class _VrChatEditForm extends StatefulWidget {
   const _VrChatEditForm({required this.row, required this.onSubmit});
 

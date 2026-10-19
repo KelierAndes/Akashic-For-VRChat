@@ -4,10 +4,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// Settings, and the two shell actions the shell needs on behalf of every page:
-/// opening a folder in Explorer and a link in the default browser.
-/// </summary>
 public static class SettingsEndpoints
 {
     public static RouteGroupBuilder MapSettings(this RouteGroupBuilder group)
@@ -60,9 +56,6 @@ public static class SettingsEndpoints
             return new { forgotten = request.Site };
         });
 
-        // Deliberately narrow: a link is only http(s) and a target is only an existing
-        // folder. Shell-executing whatever path a caller names would turn this endpoint
-        // into a way to run anything as this user.
         group.MapPost("/shell/open", (OpenRequest request) =>
         {
             if (request.Kind == "url")

@@ -4,20 +4,8 @@ using System.Text.Json;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Stores each site's cookies as one DPAPI blob under <c>%LOCALAPPDATA%\Akashic\sessions</c>.
-///
-/// The scope is <see cref="DataProtectionScope.CurrentUser"/>, so a blob can only be decrypted by
-/// this Windows account: copying the folder to another machine or another user yields nothing. That
-/// is the boundary worth being exact about — a process already running as this user can call DPAPI
-/// itself, so this protects the file at rest and against casual leakage, not against malware on the
-/// account. The previous design kept sessions in memory only, which meant any WebView2 profile reset
-/// signed the user out of all three storefronts.
-/// </summary>
 public sealed class DpapiSessionVault : ISessionVault
 {
-    // Not a key — DPAPI keys come from the Windows login. This only stops a same-user process from
-    // handing our blob to any other ProtectedData caller and getting plaintext back.
     private static readonly byte[] Entropy =
         "Akashic.SessionVault.v1"u8.ToArray();
 
@@ -74,8 +62,6 @@ public sealed class DpapiSessionVault : ISessionVault
             });
         }
 
-        // An empty set means the site reported a logged-out state, which is a reason to forget the
-        // stored session rather than keep handing the services a dead cookie.
         if (clean.Count == 0)
         {
             Clear(site);
@@ -91,7 +77,6 @@ public sealed class DpapiSessionVault : ISessionVault
             var plain = JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions);
             var cipher = ProtectedData.Protect(plain, Entropy, DataProtectionScope.CurrentUser);
 
-            // Write aside so a crash mid-save cannot leave a half-written blob in place of a good one.
             var target = Path.Combine(_directory, key + ".bin");
             var temp = target + ".tmp";
             File.WriteAllBytes(temp, cipher);
@@ -101,7 +86,6 @@ public sealed class DpapiSessionVault : ISessionVault
         }
         catch (Exception)
         {
-            // Failing to remember a session must never break the read that is in flight.
         }
     }
 
@@ -144,7 +128,6 @@ public sealed class DpapiSessionVault : ISessionVault
         }
         catch (CryptographicException)
         {
-            // Wrong Windows account, or the blob was edited: treat it as no session at all.
             return null;
         }
         catch (Exception)
@@ -157,11 +140,6 @@ public sealed class DpapiSessionVault : ISessionVault
     {
         var cookies = new List<StoredCookie>();
 
-        // Blobs written before the domain was stored carry a flat name/value object. Promoting them
-        // with the site's own root domain keeps a session that was already working — VRChat reads its
-        // API off the name/value pair and never needed the domain — and gives the Asset Store's
-        // session token back the domain it was actually issued on. The next export overwrites the
-        // blob with the real per-cookie domains.
         if (element.ValueKind == JsonValueKind.Object)
         {
             var fallback = LegacyDomain(key);
@@ -199,7 +177,6 @@ public sealed class DpapiSessionVault : ISessionVault
         _ => ".vrchat.com"
     };
 
-    /// <summary>Site names become file names, so anything odder than a label is refused.</summary>
     private static string? SafeName(string site)
     {
         if (string.IsNullOrWhiteSpace(site)) return null;

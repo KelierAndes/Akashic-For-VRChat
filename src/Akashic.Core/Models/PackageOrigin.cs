@@ -2,10 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// Who supplied a package, which is separate from how it reached the library: a Booth archive and a
-/// hand-picked file can both end up as the same kind of .unitypackage entry.
-/// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum PackageOrigin
 {

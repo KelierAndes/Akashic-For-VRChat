@@ -1,11 +1,3 @@
-# Replaces dist/Akashic with the Flutter build output and re-zips it with the
-# same top-level folder the old archive used.
-#
-# The *.WebView2 directory is the runtime profile (login state, cache), not an
-# artifact, so it must not ship.
-#
-# Keep this file ASCII only: Windows PowerShell reads a BOM-less .ps1 as ANSI.
-
 $ErrorActionPreference = 'Stop'
 
 $root  = 'E:\Akashic\VPMManager'

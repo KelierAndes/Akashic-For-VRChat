@@ -9,9 +9,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// Paths, editors, backup behaviour, the hosting tools and the three stored logins —
-/// all of it read back from the sidecar after every change so the page shows what is
-/// actually on disk.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -20,19 +17,13 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  /// Marks the 配置同步 card so the sidebar account card can scroll to it.
   final GlobalKey _syncKey = GlobalKey();
 
-  /// Static on purpose: the page is thrown away and rebuilt every time it is opened, and a fresh
-  /// instance must not treat an older request from the account card as its own. Seeded at 0,
-  /// which is what the counter starts at, so clicking 设置 in the rail never scrolls.
   static int _revealed = 0;
 
   @override
   void initState() {
     super.initState();
-    // The probe spawns git, git-lfs, cm and gh once each, so it runs when this page is
-    // opened rather than on every start-up.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final model = AppScope.of(context);
       await model.loadVcsTools();
@@ -46,8 +37,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final state = model.state;
     final t = NeuTheme.of(context);
 
-    // The account card asks for this by bumping a counter; scrolling has to wait for the
-    // card to exist, which is the frame after the page is first shown.
     if (model.syncReveal != _revealed) {
       _revealed = model.syncReveal;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -137,8 +126,6 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         const SizedBox(height: 26),
         Row(
-          // The section title carries its own bottom padding, so a centred row let
-          // the taller button hang into the list below it.
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const NeuSectionTitle('Unity 编辑器'),
@@ -501,9 +488,6 @@ bool _flag(Object? value) => value as bool? ?? false;
 List<String> _missingOf(Map<String, dynamic> tools) =>
     ((tools['missing'] as List?) ?? const []).cast<String>();
 
-/// One dependency with what the probe found and the way to get it. The install button
-/// only appears when the tool is missing: an already-installed git should not offer to
-/// overwrite itself.
 class _ToolRow extends StatelessWidget {
   const _ToolRow({
     required this.name,
@@ -586,14 +570,11 @@ class _ToolRow extends StatelessWidget {
   }
 }
 
-/// 颜色模式与页面全局不透明度. Both apply live: the slider drives the window sheet as the
-/// thumb moves and the sidecar only stores the value once it settles.
 class _VisualCard extends StatelessWidget {
   const _VisualCard(this.model);
 
   final AppModel model;
 
-  /// The slider shows the sheet alpha as-is, so 70 % is the `0.7` written to settings.json.
   double get _alpha => model.sheetOpacity.clamp(0.4, 1.0);
 
   @override
@@ -684,13 +665,11 @@ class _VisualCard extends StatelessWidget {
   }
 }
 
-/// What would go up to the gist, where the last upload landed, and the two actions.
 class _SyncCard extends StatelessWidget {
   const _SyncCard(this.model);
 
   final AppModel model;
 
-  /// The sidecar writes a full ISO stamp; this row only has room for the minute.
   static String _when(Object? raw) {
     final parsed = DateTime.tryParse('$raw');
     if (parsed == null) return '$raw';
@@ -734,8 +713,6 @@ class _SyncCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _row('GitHub 账号', account),
-          // The gist's address is deliberately never shown: the id alone is enough to open the
-          // backup on the web, and the encrypted blob names its owner.
           _row('上次上传', uploaded.isEmpty
               ? '还没有上传过，首次上传会自动新建一个私有 gist'
               : '${_when(uploaded)} · ${bytes ~/ 1024} KB 密文'),
@@ -809,8 +786,6 @@ class _SyncCard extends StatelessWidget {
     );
   }
 
-  /// Values here are lists of names and paths, so they are allowed to take a second line
-  /// rather than ellipsize away the thing the user is checking for.
   Widget _row(String key, String value) => Padding(
         padding: const EdgeInsets.only(bottom: 6),
         child: Row(
@@ -831,9 +806,6 @@ class _SyncCard extends StatelessWidget {
       );
 }
 
-/// Restoring overwrites what is on this machine, so it asks first and says what it will touch.
-/// It never names the backup: the id alone is enough to open the gist on the web, so the page only
-/// says where it will look, and the sidecar finds it under the signed-in account.
 class _SyncRestoreForm extends StatelessWidget {
   const _SyncRestoreForm(this.model);
 

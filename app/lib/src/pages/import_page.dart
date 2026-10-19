@@ -6,8 +6,6 @@ import '../ui/neu_kit.dart';
 import '../ui/theme.dart';
 import 'project_picker.dart';
 
-/// Pick a .unitypackage, read its table of contents, untick whatever the project
-/// does not need, then install exactly that subset.
 class ImportPage extends StatefulWidget {
   const ImportPage({super.key});
 

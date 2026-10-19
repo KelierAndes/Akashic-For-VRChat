@@ -5,25 +5,15 @@ namespace Akashic.Core.Services;
 
 public interface IThemeService
 {
-    /// <summary>The persisted preference; defaults to dark.</summary>
     bool IsDarkTheme { get; }
 
-    /// <summary>Persists the preference. Reads settings.json afresh so edits made by the other
-    /// services sharing the file are not clobbered.</summary>
     Task SetDarkThemeAsync(bool dark, CancellationToken ct = default);
 
-    /// <summary>Alpha of the glass surfaces — window sheet, rail trays and popups.
-    /// The shell reads it at start-up and repaints immediately, so a slider never
-    /// needs a restart.</summary>
     double SheetOpacity { get; }
 
     Task SetVisualAsync(double opacity, CancellationToken ct = default);
 }
 
-/// <summary>
-/// Stores the light/dark preference in the shared settings.json, following the same
-/// read-merge-write pattern as the other services so concurrent edits survive.
-/// </summary>
 public class ThemeService : IThemeService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -46,15 +36,11 @@ public class ThemeService : IThemeService
 
         var settings = LoadSettings();
         IsDarkTheme = settings.UseDarkTheme;
-        // Clamped on the way in as well: a file written by an older build, or by hand, must not
-        // put the sheet outside the band the slider can express.
         SheetOpacity = ClampOpacity(settings.SheetOpacity);
     }
 
     public async Task SetDarkThemeAsync(bool dark, CancellationToken ct = default)
     {
-        // Read the full settings afresh and write them back with only the theme changed, so
-        // sections owned by the other services survive.
         var settings = LoadSettings();
         settings.UseDarkTheme = dark;
         IsDarkTheme = dark;
@@ -64,9 +50,6 @@ public class ThemeService : IThemeService
 
     public async Task SetVisualAsync(double opacity, CancellationToken ct = default)
     {
-        // Clamped here rather than trusted from the shell: a NaN would otherwise be
-        // written down and leave the window unreadable on the next start. The slider shows
-        // this alpha as-is, so the band is 0.4 … 1.
         SheetOpacity = ClampOpacity(opacity);
 
         var settings = LoadSettings();
@@ -75,7 +58,6 @@ public class ThemeService : IThemeService
         await WriteAsync(settings, ct);
     }
 
-    /// <summary>Keeps a value out of settings.json that the page cannot express any more.</summary>
     private static double ClampOpacity(double opacity) =>
         double.IsFinite(opacity) ? Math.Clamp(opacity, 0.4, 1.0) : 0.7;
 

@@ -4,9 +4,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Fetches package listings from VPM registries and manages the local package cache.
-/// </summary>
 public class VpmRegistryService : IVpmRegistryService
 {
     private readonly HttpClient _httpClient;
@@ -46,10 +43,6 @@ public class VpmRegistryService : IVpmRegistryService
             Directory.CreateDirectory(_cacheDir);
     }
 
-    /// <summary>
-    /// Every package the configured repositories advertise, in repository priority order. A package
-    /// is owned by the first repository that lists it, so nothing appears without a home repository.
-    /// </summary>
     public async Task<List<VpmPackage>> GetAllPackagesAsync(CancellationToken ct = default)
     {
         var packageMap = new Dictionary<string, VpmPackage>(StringComparer.OrdinalIgnoreCase);
@@ -73,7 +66,6 @@ public class VpmRegistryService : IVpmRegistryService
     public async Task<List<VpmPackage>> GetPackagesFromRegistryAsync(string registryUrl, CancellationToken ct = default)
         => await ResolveRegistryPackagesAsync(registryUrl, ct);
 
-    /// <summary>Reads a repository listing, preferring the copy VCC already cached next to its settings.</summary>
     private async Task<List<VpmPackage>> ResolveRegistryPackagesAsync(string registryUrl, CancellationToken ct)
     {
         if (_packageCache.TryGetValue(registryUrl, out var cached))
@@ -263,7 +255,6 @@ public class VpmRegistryService : IVpmRegistryService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // A row filtered out of the view never reaches the reorder callback, so keep unknown urls.
         foreach (var missing in _registryUrls.Where(u => !ordered.Contains(u, StringComparer.OrdinalIgnoreCase)))
             ordered.Add(missing);
 
@@ -304,7 +295,6 @@ public class VpmRegistryService : IVpmRegistryService
 
     public IReadOnlyList<VccRepository> GetKnownRepositories() => GetVccRepositories();
 
-    /// <summary>Adds every repository VCC has cached that this app does not list yet. Returns how many were added.</summary>
     public async Task<int> ImportVccRepositoriesAsync()
     {
         var added = 0;
@@ -321,10 +311,6 @@ public class VpmRegistryService : IVpmRegistryService
         return added;
     }
 
-    /// <summary>
-    /// The repository whose cached listing advertises this package, used to name the origin of packages
-    /// installed by VCC from a repository this app does not list.
-    /// </summary>
     public VccRepository? FindRepositoryFor(string packageName)
     {
         EnsurePackageOwnerIndex();
@@ -367,7 +353,6 @@ public class VpmRegistryService : IVpmRegistryService
         return pkgs.EnumerateObject().Select(p => p.Name).ToList();
     }
 
-    /// <summary>Finds the repository VCC caches for a registry URL, ignoring a trailing slash or query.</summary>
     private VccRepository? FindVccRepository(string registryUrl) =>
         GetVccRepositories().FirstOrDefault(r => IsSameUrl(r.Url, registryUrl));
 
@@ -390,7 +375,6 @@ public class VpmRegistryService : IVpmRegistryService
 
         var repos = new Dictionary<string, VccRepository>(StringComparer.OrdinalIgnoreCase);
 
-        // VCC's listing cache is what pairs a repository URL with a file we can read offline.
         var reposDir = Path.Combine(Path.GetDirectoryName(_vccSettingsPath) ?? string.Empty, "Repos");
         if (Directory.Exists(reposDir))
         {
@@ -402,7 +386,6 @@ public class VpmRegistryService : IVpmRegistryService
                 var key = repo.Id.Length > 0 ? repo.Id : repo.Url;
                 if (repos.TryGetValue(key, out var known))
                 {
-                    // VCC keeps one snapshot per fetch, and serves the newest one.
                     if (File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(known.LocalPath))
                         repos[key] = repo;
                     continue;
@@ -412,7 +395,6 @@ public class VpmRegistryService : IVpmRegistryService
             }
         }
 
-        // A name the user typed in VCC wins over whatever the listing advertises.
         foreach (var user in ReadVccUserRepos())
         {
             var key = user.Id.Length > 0 ? user.Id : user.Url;

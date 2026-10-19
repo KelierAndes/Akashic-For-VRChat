@@ -6,8 +6,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// Static product information. The version line is read from the sidecar, so it
-/// can no longer drift away from what is actually running.
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -33,7 +31,6 @@ class AboutPage extends StatelessWidget {
     final model = AppScope.of(context);
     final t = NeuTheme.of(context);
 
-    // The sidecar reports "2.0.0+<full sha>"; the commit is useful, all 40 of it is not.
     final plus = model.hostVersion.indexOf('+');
     final version = plus < 0
         ? model.hostVersion
@@ -47,8 +44,6 @@ class AboutPage extends StatelessWidget {
         NeuCard(
           child: Row(
             children: [
-              // The same treatment as the rail's mark: the light artwork on the
-              // black base, so the two never drift apart by theme.
               Container(
                 width: 56,
                 height: 56,

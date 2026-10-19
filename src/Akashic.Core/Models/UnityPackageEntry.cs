@@ -2,9 +2,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// Represents an entry (asset or folder) inside a .unitypackage file.
-/// </summary>
 public partial class UnityPackageEntry : ObservableObject
 {
     public string Guid { get; set; } = string.Empty;
@@ -13,7 +10,6 @@ public partial class UnityPackageEntry : ObservableObject
     public string? MetaContent { get; set; }
     public byte[]? PreviewData { get; set; }
 
-    /// <summary>Folder entries carry a pathname and a folderAsset meta but no asset payload.</summary>
     public bool IsDirectory => AssetData == null;
     public bool HasMeta => !string.IsNullOrEmpty(MetaContent);
     public long Size => AssetData?.Length ?? 0;
@@ -37,9 +33,6 @@ public partial class UnityPackageEntry : ObservableObject
         : $"{Size} B";
 }
 
-/// <summary>
-/// Represents a parsed .unitypackage file ready for installation.
-/// </summary>
 public class UnityPackageArchive
 {
     public string FilePath { get; set; } = string.Empty;

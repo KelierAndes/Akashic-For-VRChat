@@ -9,11 +9,6 @@ import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 import 'app_scope.dart';
 
-/// Icon rail: the app mark in its own tray at the top, a black tray under it that holds
-/// up to [AppModel.maxRailTiles] tiles — pages and pinned projects — and a second tray
-/// below that carrying the wordmark and the settings button. The middle tray only ever
-/// grows to the capped height, so pinning something can never squeeze the pieces around
-/// it.
 class LeftRail extends StatelessWidget {
   const LeftRail({super.key, required this.model, required this.index});
 
@@ -23,13 +18,9 @@ class LeftRail extends StatelessWidget {
   static const double _tileSize = 36;
   static const double _tileGap = 5;
 
-  /// One gap for every seam between the rail's pieces: the icon tray, the quick bar and
-  /// the wordmark card. They used to differ, which read as a stray large gap.
   static const double _trayGap = 10;
 
   BoxDecoration _baseStrip(NeuTokens t) {
-    // The same 全局不透明度 knob that fades the window sheet fades these trays, or
-    // the rail would stay solid while everything around it turned glass.
     final a = model.sheetOpacity;
     return BoxDecoration(
       borderRadius: BorderRadius.circular(16),
@@ -68,8 +59,6 @@ class LeftRail extends StatelessWidget {
     return match.isEmpty ? '已移除的工程' : match.first.name;
   }
 
-  /// Two letters, first upper and second lower ("EdenSpace" → "Ed"), or one
-  /// ideograph, so pinned projects stay tellable apart at 36px.
   static String initialsOf(String name) {
     final raw = name.trim();
     if (raw.isEmpty) return '?';
@@ -206,20 +195,12 @@ class LeftRail extends StatelessWidget {
     return SizedBox(
       width: AppSpacing.railWidth,
       child: LayoutBuilder(builder: (context, constraints) {
-        // The tray grows with the tiles it actually holds and stops at the cap, so
-        // pinning one more can never push the piece below it out of the window. A
-        // fixed height here used to be a few pixels short of the chrome, which made
-        // the list scroll even when every tile fitted.
         final rows = tiles.length.clamp(1, AppModel.maxRailTiles);
         final wanted = rows * (_tileSize + _tileGap);
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // The mark gets its own piece above the quick bar, built the same way as the
-            // other two: glass base, 8 px inset, then the black tray. Inside a 36 px tile
-            // it loses exactly the detail that makes it read as the app, so the black
-            // square here is the same width as the quick bar's.
             Padding(
               padding: const EdgeInsets.only(bottom: _trayGap),
               child: GlassEdgeOverlay(
@@ -243,8 +224,6 @@ class LeftRail extends StatelessWidget {
                         ],
                       ),
                       clipBehavior: Clip.antiAlias,
-                      // The light mark in both themes, as asked: the dark variant disappears
-                      // into the black tray.
                       child: Image.asset('assets/brand/akashic-light.png',
                           fit: BoxFit.cover),
                     ),
@@ -254,8 +233,6 @@ class LeftRail extends StatelessWidget {
             ),
             ConstrainedBox(
               constraints: BoxConstraints(
-                // 72 px taller now that the icon piece sits above it, or a full quick
-                // bar would push the wordmark strip out of the window.
                 maxHeight: (constraints.maxHeight - 242).clamp(180.0, double.infinity),
               ),
               child: GlassEdgeOverlay(
@@ -282,8 +259,6 @@ class LeftRail extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Flexible(
-                            // At most one row per tile, so nothing scrolls while the
-                            // window is tall enough; a short window still scrolls.
                             child: ConstrainedBox(
                               constraints: BoxConstraints(maxHeight: wanted),
                               child: SingleChildScrollView(
@@ -299,10 +274,6 @@ class LeftRail extends StatelessWidget {
                               ),
                             ),
                           ),
-                          // Pinned under the scrollable list: the way in and the way
-                          // out have to stay reachable however full the rail gets.
-                          // Same horizontal inset as the tile list, so the two
-                          // buttons sit on the same centre line as the tiles above.
                           Padding(
                             padding: const EdgeInsets.fromLTRB(9, 0, 9, 2),
                             child: Column(
@@ -345,10 +316,6 @@ class LeftRail extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Center(
-                          // RotatedBox swaps the constraints, so the wordmark
-                          // stays on one line; a plain Transform.rotate would
-                          // wrap it inside the 62px rail. It lives down here so
-                          // a growing tray can never cover it.
                           child: RotatedBox(
                             quarterTurns: 3,
                             child: Text(
@@ -398,16 +365,11 @@ class LeftRail extends StatelessWidget {
   }
 }
 
-/// What can still be pinned. Anything already on the rail is left out, and the
-/// settings button has its own fixed slot so it is not offered either.
 class RailPickerForm extends StatelessWidget {
   const RailPickerForm({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // Read the model through the scope: the shell keeps the same widget instance in
-    // its modal slot, so a field would freeze the list at whatever it was when the
-    // panel opened.
     final model = AppScope.of(context);
     final t = NeuTheme.of(context);
     final pinned = model.railTiles;

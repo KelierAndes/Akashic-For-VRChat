@@ -9,8 +9,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// Local Unity projects: the same three filters and the same background cloud
-/// match the desktop version has, rendered as tiles instead of a list.
 class ProjectsPage extends StatelessWidget {
   const ProjectsPage({super.key});
 
@@ -46,7 +44,6 @@ class ProjectsPage extends StatelessWidget {
             label: '新建项目',
             icon: Icons.add_rounded,
             onTap: () async {
-              // The form needs the template matrix, which the sidecar computes.
               await model.loadTemplates();
               model.showModal(const NewProjectForm());
             },
@@ -208,8 +205,6 @@ class _ProjectTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // Two rows with a fixed meaning each. A Wrap let a long VRChat label push the
-          // Unity version onto a third line, which grew that one card and offset the grid.
           _PillRow([
             NeuPill(project.projectTypeDisplayName),
             NeuPill('${project.installedPackages.length} 个包'),
@@ -262,8 +257,6 @@ class _ProjectTile extends StatelessWidget {
   }
 }
 
-/// Says how the folder is kept in sync. LFS is deliberately not shown here: it is a
-/// property of the git repository, and the 版本托管 page is where it gets toggled.
 List<Widget> hostingPills(AppModel model, String path) {
   final kind = model.hostingOf(path);
   if (kind.isEmpty) return const [];
@@ -286,8 +279,6 @@ Widget _backupPill(AppModel model, String path) {
   );
 }
 
-/// One fixed line of pills. Each is allowed to shrink so a long label ellipsizes
-/// instead of pushing the card taller than its neighbours.
 class _PillRow extends StatelessWidget {
   const _PillRow(this.pills);
 

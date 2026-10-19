@@ -6,8 +6,6 @@ import '../shell/app_scope.dart';
 import '../ui/neu_kit.dart';
 import '../ui/theme.dart';
 
-/// One project's package table: registry packages, whatever else is installed, and
-/// the local .unitypackage shelf matched against this project's import ledger.
 class ProjectDetailPage extends StatefulWidget {
   const ProjectDetailPage({super.key, required this.projectPath});
 

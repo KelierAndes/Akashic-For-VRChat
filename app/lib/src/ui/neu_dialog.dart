@@ -6,11 +6,6 @@ import 'neu_kit.dart';
 import 'neumorphic.dart';
 import 'theme.dart';
 
-/// Panel chrome for a form shown in the shell's own modal layer.
-///
-/// Forms are NOT routes: a route pushed over this frameless, per-pixel transparent
-/// window never receives pointer events, so every button in it is dead. The shell
-/// keeps a modal slot inside the page tray instead.
 class NeuModalScaffold extends StatelessWidget {
   const NeuModalScaffold({
     super.key,
@@ -24,8 +19,6 @@ class NeuModalScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
-    // Popups are glass too: without this the 全局不透明度 slider faded the window and
-    // the rail but left every dialog — 新建项目 included — solid.
     final opacity = AppScope.of(context).sheetOpacity;
     return NeuBox(
       mode: NeuMode.raised,
@@ -59,7 +52,6 @@ class NeuModalScaffold extends StatelessWidget {
   }
 }
 
-/// Label above any control, so forms read the same everywhere.
 class NeuField extends StatelessWidget {
   const NeuField({super.key, required this.label, required this.child, this.hint});
 
@@ -94,7 +86,6 @@ class NeuField extends StatelessWidget {
   }
 }
 
-/// Inset text entry — the same carved look as the search field.
 class NeuTextInput extends StatelessWidget {
   const NeuTextInput({
     super.key,
@@ -135,8 +126,6 @@ class NeuTextInput extends StatelessWidget {
   }
 }
 
-/// A selector that unfolds in place, so a long option list never has to be
-/// positioned against a layer the modal does not own.
 class NeuChoiceField extends StatefulWidget {
   const NeuChoiceField({
     super.key,
@@ -258,8 +247,6 @@ class _NeuChoiceFieldState extends State<NeuChoiceField> {
   }
 }
 
-/// A one-field prompt shown through the shell's modal slot. Routes are unusable in
-/// this window, so even a text entry has to live in the widget tree.
 class NeuPromptForm extends StatefulWidget {
   const NeuPromptForm({
     super.key,
@@ -351,10 +338,6 @@ class NeuDialogActions extends StatelessWidget {
   }
 }
 
-/// The outcome of one sidecar operation, in a dialog the user opens and closes on purpose.
-///
-/// Keeping this text on the page made the list rows underneath stop answering taps, so every
-/// caller that gets a long tool transcript — git, cm, the config sync — hands it here instead.
 class NeuResultForm extends StatelessWidget {
   const NeuResultForm(this.log, {super.key});
 
@@ -388,8 +371,6 @@ class NeuResultForm extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
-          // The modal scaffold hands its child an unbounded height, so the cap has
-          // to come from a box rather than an Expanded.
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 340),
             child: SingleChildScrollView(

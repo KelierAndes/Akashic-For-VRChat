@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// One downloadable file of a product the account already owns, as read from the Booth library page.
-/// </summary>
 public class BoothPurchaseItem
 {
     [JsonPropertyName("number")]
@@ -13,7 +10,6 @@ public class BoothPurchaseItem
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>The file name Booth shows next to this download.</summary>
     [JsonPropertyName("formLabel")]
     public string FormLabel { get; set; } = string.Empty;
 
@@ -29,22 +25,15 @@ public class BoothPurchaseItem
     [JsonPropertyName("shopUrl")]
     public string ShopUrl { get; set; } = string.Empty;
 
-    /// <summary>Booth hands this file out through an external link rather than its own CDN.</summary>
     [JsonPropertyName("external")]
     public bool External { get; set; }
 
-    /// <summary>Product cover image Booth renders on the library card or the item page.</summary>
     [JsonPropertyName("imageUrl")]
     public string ImageUrl { get; set; } = string.Empty;
 
-    /// <summary>True when this entry came from a free item page rather than the purchase library.</summary>
     [JsonPropertyName("isFree")]
     public bool IsFree { get; set; }
 
-    /// <summary>
-    /// Identity of the product behind this downloadable: the /items/ link when the page offered
-    /// one, else the title plus shop. Multiple versions of one product share this key.
-    /// </summary>
     [JsonIgnore]
     public string ProductKey
     {
@@ -58,9 +47,6 @@ public class BoothPurchaseItem
         }
     }
 
-    /// <summary>
-    /// The seller's name, read from the library card, falling back to its booth.pm subdomain.
-    /// </summary>
     [JsonIgnore]
     public string ShopHint
     {
@@ -80,10 +66,6 @@ public class BoothPurchaseItem
     [JsonIgnore]
     public string FormDisplay => string.IsNullOrWhiteSpace(FormLabel) ? "默认版本" : FormLabel;
 
-    /// <summary>
-    /// The archive name Booth shows, without its extension. The downloaded file carries a
-    /// CDN-sanitized variant of this.
-    /// </summary>
     [JsonIgnore]
     public string FileNameWithoutExtension => Path.GetFileNameWithoutExtension(FormLabel);
 
@@ -93,10 +75,6 @@ public class BoothPurchaseItem
     [JsonIgnore]
     public BoothArchiveContents? Contents { get; set; }
 
-    /// <summary>
-    /// What parsing this archive registered, kept so refreshing the list does not turn a parsed
-    /// row back into a plain "downloaded" one.
-    /// </summary>
     [JsonIgnore]
     public string? ParsedSummary { get; set; }
 
@@ -104,9 +82,6 @@ public class BoothPurchaseItem
     public bool IsDownloaded => LocalZipPath is not null && File.Exists(LocalZipPath);
 }
 
-/// <summary>
-/// One rendered page of the account's Booth library, as returned by the WebView2 extractor.
-/// </summary>
 public class BoothLibraryPage
 {
     [JsonPropertyName("url")]
@@ -115,9 +90,6 @@ public class BoothLibraryPage
     [JsonPropertyName("lastPage")]
     public int LastPage { get; set; }
 
-    /// <summary>
-    /// The page turned out to be a sign-in form, which means the exported session died.
-    /// </summary>
     [JsonPropertyName("loginRequired")]
     public bool LoginRequired { get; set; }
 
@@ -125,10 +97,6 @@ public class BoothLibraryPage
     public List<BoothPurchaseItem> Items { get; set; } = [];
 }
 
-/// <summary>
-/// Disk snapshot of the last full library read, so the Booth page opens with a list and covers
-/// without re-walking every library page.
-/// </summary>
 public class BoothLibraryCache
 {
     public DateTime SavedAt { get; set; }
@@ -136,9 +104,6 @@ public class BoothLibraryCache
     public List<BoothPurchaseItem> Items { get; set; } = [];
 }
 
-/// <summary>
-/// What a downloaded Booth archive turned out to contain.
-/// </summary>
 public class BoothArchiveContents
 {
     public string ZipPath { get; set; } = string.Empty;
@@ -152,9 +117,6 @@ public class BoothArchiveContents
                                AssetFolders.Count > 0 || Documents.Count > 0;
 }
 
-/// <summary>
-/// A folder inside the archive that carries a UPM package.json.
-/// </summary>
 public class BoothUpmPackage
 {
     public string Path { get; set; } = string.Empty;

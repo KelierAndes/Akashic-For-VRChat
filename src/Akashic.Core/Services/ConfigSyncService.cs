@@ -14,32 +14,9 @@ public interface IConfigSyncService
 
     Task<VcsRunResult> PullAsync(CancellationToken ct = default);
 
-    /// <summary>Turns the sync on or off. The GitHub sign-in itself is untouched.</summary>
     Task SetEnabledAsync(bool enabled, CancellationToken ct = default);
 }
 
-/// <summary>
-/// Moves this machine's configuration to another one through a private gist owned by the
-/// user's own GitHub account.
-///
-/// The payload is encrypted before it leaves the box and only this app ever holds the key, so
-/// GitHub stores opaque base64. The key is derived from the permanent numeric user.id of the
-/// GitHub account plus a pepper built into Akashic, which is what makes the round trip zero-touch:
-/// sign in on the new computer and the same key comes back, with no sync passphrase to set or to
-/// remember.
-///
-/// Being exact about what that buys. user.id is public and the pepper ships inside the binary, so
-/// this is strong obfuscation against GitHub, against anyone holding the gist, and against anyone
-/// watching the transfer — it is not a secret that survives someone who has both the gist and
-/// Akashic itself. The previous design derived the key from the OAuth token in the keyring, which
-/// was genuinely secret but rotated on every sign-in and silently locked people out of their own
-/// backup. The envelope still carries a four-byte key fingerprint, so restoring under another
-/// account reports that rather than blaming a corrupt file.
-///
-/// DPAPI blobs are never shipped. The three storefront sessions are decrypted here, put in the
-/// bundle as plain cookies, and re-protected by the local vault on the way back in — a copied
-/// <c>sessions/*.bin</c> would be worthless on another machine anyway.
-/// </summary>
 public sealed class ConfigSyncService : IConfigSyncService
 {
     private const string BundleKind = "akashic-bundle";
@@ -50,16 +27,8 @@ public sealed class ConfigSyncService : IConfigSyncService
     private static readonly byte[] KeyPrefix = "Akashic.Sync.v2:github-id:"u8.ToArray();
     private static readonly byte[] OwnerHintSalt = "Akashic.Sync.Owner.v1"u8.ToArray();
 
-    /// <summary>
-    /// Compiled into every copy of Akashic on purpose: it is what turns a public user.id into a key
-    /// nobody can rebuild from the gist alone. See the class summary for where that stops.
-    /// </summary>
     private const string KeyPepper = "Akashic_v1_AutoDeriveKey_9f8a7b6c!";
 
-    /// <summary>
-    /// The only files ever carried, by name relative to the data directory. Anything else in a
-    /// bundle is ignored, which is also what stops a crafted gist from writing outside it.
-    /// </summary>
     private static readonly (string Path, string Label)[] CacheFiles =
     [
         ("cache/booth-library.json", "Booth 已购清单"),
@@ -98,7 +67,6 @@ public sealed class ConfigSyncService : IConfigSyncService
     private static string DataRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Akashic");
 
-    // ---------------------------------------------------------------- status
 
     public async Task<SyncSnapshot> StatusAsync(CancellationToken ct = default)
     {
@@ -145,11 +113,6 @@ public sealed class ConfigSyncService : IConfigSyncService
         await SaveSettingsAsync(settings, ct);
     }
 
-    /// <summary>
-    /// The 启用 gist 同步 switch, honoured by both directions — including the automatic upload
-    /// that follows a first sign-in, which is the path that would otherwise sync behind a user
-    /// who has just turned it off.
-    /// </summary>
     private VcsRunResult? Blocked(string action) =>
         LoadSettings().SyncEnabled
             ? null
@@ -157,7 +120,6 @@ public sealed class ConfigSyncService : IConfigSyncService
                 "在 设置 → 配置同步 打开「启用 gist 同步」再试。GitHub 登录本身不受影响，" +
                 "私有仓库外部包照常可用。");
 
-    // ---------------------------------------------------------------- push
 
     public async Task<VcsRunResult> PushAsync(CancellationToken ct = default)
     {
@@ -194,8 +156,6 @@ public sealed class ConfigSyncService : IConfigSyncService
 
         using (var aes = new AesGcm(key, 16)) aes.Encrypt(iv, plain, cipher, tag);
 
-        // Taken before the key is wiped: it is what lets a restore blame the wrong identity
-        // rather than a corrupt file.
         var hint = OwnerHint(key);
 
         CryptographicOperations.ZeroMemory(key);
@@ -217,8 +177,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             ["kdf"] = new JsonObject
             {
                 ["algo"] = "PBKDF2-HMAC-SHA256",
-                // What fed PBKDF2. Public and stable on purpose (account id + built-in pepper), so a
-                // second machine derives the same key after one click in the browser.
                 ["secret"] = "github-id",
                 ["iterations"] = Iterations,
                 ["salt"] = Convert.ToBase64String(salt)
@@ -233,9 +191,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             ["summary"] = new JsonObject
             {
                 ["bytes"] = plainBytes,
-                // Names only. Everything outside "payload" travels unencrypted, so a DeepClone
-                // of the files here would ship the whole plaintext bundle — cookies included —
-                // to GitHub beside the ciphertext it is supposed to hide.
                 ["files"] = new JsonArray([.. bundle["files"]!.AsObject()
                     .Select(entry => (JsonNode?)JsonValue.Create(entry.Key))])
             }
@@ -260,7 +215,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             "明文从未离开本机，GitHub 只看到 base64。备份地址不在界面上出现，恢复时按当前账号自动定位。");
     }
 
-    // ---------------------------------------------------------------- pull
 
     public async Task<VcsRunResult> PullAsync(CancellationToken ct = default)
     {
@@ -277,8 +231,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             return VcsRunResult.Fail(action, string.Empty, "读不到 GitHub 数字 id",
                 "同步密钥是从账号 id 派生的，没有它无法解密。重新登录一次即可。");
 
-        // Nobody types or sees an id: this machine's own record first, then the account's gist list —
-        // which is how a second machine finds the backup after one click in the browser.
         var settings = LoadSettings();
         var target = settings.SyncGistId;
         if (string.IsNullOrWhiteSpace(target)) target = await _gitHub.FindGistAsync(ct) ?? string.Empty;
@@ -308,8 +260,6 @@ public sealed class ConfigSyncService : IConfigSyncService
         string owner;
         try
         {
-            // A field hand-edited into the wrong JSON type throws when it is read back, and that must
-            // not turn into an unhandled error in the middle of a restore.
             owner = envelope["owner"]?["login"]?.GetValue<string>() ?? string.Empty;
 
             if (envelope["kind"]?.GetValue<string>() != EnvelopeKind)
@@ -346,9 +296,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             var bundle = JsonSerializer.Deserialize<JsonElement>(plain);
             var restored = Restore(bundle, ct);
 
-            // The bundle holds settings.json as it looked when it was made — on a first push that is
-            // before the gist id and the upload stamp were written down. Put them back so a machine
-            // that has just been restored still knows where its backup lives.
             if (restored.Success) await RememberSourceAsync(envelope, target, ct).ConfigureAwait(false);
 
             return restored;
@@ -375,8 +322,6 @@ public sealed class ConfigSyncService : IConfigSyncService
         }
         catch (Exception)
         {
-            // Bookkeeping only. A restore that worked must not be reported as a failure because the
-            // stamp could not be written back.
         }
     }
 
@@ -426,12 +371,10 @@ public sealed class ConfigSyncService : IConfigSyncService
                 : entry.Value.GetRawText();
             if (string.IsNullOrEmpty(text)) continue;
 
-            // Handled wholesale further down, and re-protected by the local vault.
             if (entry.Name == "sessions") continue;
 
             if (entry.Name == "settings.json")
             {
-                // Refuse to write a settings file that would break every service on next read.
                 try
                 {
                     JsonDocument.Parse(text);
@@ -502,7 +445,6 @@ public sealed class ConfigSyncService : IConfigSyncService
                         string.IsNullOrWhiteSpace(path) ? "/" : path));
                 }
 
-                // The vault treats an empty set as a sign-out, so only a real list is written back.
                 if (cookies.Count == 0) continue;
 
                 _vault.Save(site.Site, cookies);
@@ -524,7 +466,6 @@ public sealed class ConfigSyncService : IConfigSyncService
             ? value.GetString()
             : null;
 
-    // ---------------------------------------------------------------- bundle
 
     private JsonObject BuildBundle()
     {
@@ -586,13 +527,7 @@ public sealed class ConfigSyncService : IConfigSyncService
         };
     }
 
-    // ---------------------------------------------------------------- helpers
 
-    /// <summary>
-    /// PBKDF2 over "<prefix><user.id>_<pepper>". The numeric account id never changes and the pepper
-    /// is identical in every build, so two machines that sign into the same GitHub account land on the
-    /// same key without anyone setting or remembering a sync password.
-    /// </summary>
     private static byte[] DeriveKey(long userId, byte[] salt, int iterations = Iterations)
     {
         var material = $"{userId}_{KeyPepper}";
@@ -610,15 +545,9 @@ public sealed class ConfigSyncService : IConfigSyncService
         }
     }
 
-    /// <summary>
-    /// Four bytes of HMAC over the key, hex-encoded. Enough to tell "this backup was made by a
-    /// different GitHub authorisation" apart from "the file is corrupt", and it leaks nothing
-    /// about the token that produced the key.
-    /// </summary>
     private static string OwnerHint(byte[] key) =>
         Convert.ToHexString(HMACSHA256.HashData(key, OwnerHintSalt), 0, 4);
 
-    /// <summary>Resolves a bundle name against the data directory, refusing anything that escapes.</summary>
     private string? Resolve(string relative)
     {
         var clean = relative.Replace('\\', '/').TrimStart('/');
@@ -664,7 +593,6 @@ public sealed class ConfigSyncService : IConfigSyncService
 
     private async Task SaveSettingsAsync(AppSettings settings, CancellationToken ct)
     {
-        // Re-read first: every other service owns different fields of the same file.
         var current = LoadSettings();
         current.SyncGistId = settings.SyncGistId;
         current.SyncUploadedAt = settings.SyncUploadedAt;

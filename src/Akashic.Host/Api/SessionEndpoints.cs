@@ -2,12 +2,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// The browser lives in the frontend now, so the stored session has to travel both
-/// ways: injected before the first navigation, exported after a login. Domains and
-/// paths come along because a flattened name-to-value view loses the Booth pair and
-/// plants Unity's token on the wrong host.
-/// </summary>
 public static class SessionEndpoints
 {
     public static RouteGroupBuilder MapSessions(this RouteGroupBuilder group)
@@ -37,8 +31,6 @@ public static class SessionEndpoints
                 .Select(c => new StoredCookie(c.Name, c.Value, c.Domain, c.Path ?? "/"))
                 .ToList();
 
-            // ImportSession ignores an empty set on purpose, so a reset browser profile
-            // cannot wipe a session that still works.
             session.Value.Import(entries);
             return Results.Json(new { accepted = entries.Count, signedIn = session.Value.HasSession });
         });

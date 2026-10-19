@@ -2,11 +2,6 @@ using System.Security.Cryptography;
 
 namespace Akashic.Host;
 
-/// <summary>
-/// Launch parameters of the sidecar. The token is generated per run unless the caller
-/// (the Flutter shell that spawns this process) supplies one, and is handed back on
-/// stdout so only that parent ever learns it.
-/// </summary>
 public sealed record SidecarOptions(int Port, string Token, int? ParentPid)
 {
     public const string TokenHeader = "X-Akashic-Token";

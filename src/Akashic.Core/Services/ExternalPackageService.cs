@@ -6,16 +6,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Keeps the 外部包 library in settings.json and installs its entries into Unity projects:
-/// local folders are referenced with a file: path, GitHub repositories are downloaded as
-/// zipballs and embedded under Packages/.
-///
-/// GitHub is reached through the GitHub CLI rather than anonymous HTTP, which is what lets a
-/// private repository install at all and stops the shared unauthenticated rate limit from
-/// breaking the download halfway through a list. GitLab and Gitee have no CLI here, so they
-/// keep plain HTTP.
-/// </summary>
 public class ExternalPackageService : IExternalPackageService
 {
     private static readonly string[] GitHubPackageDirs = ["", "Package", "Packages", "upm", "src", "Unity"];
@@ -72,7 +62,6 @@ public class ExternalPackageService : IExternalPackageService
         var existing = settings.ExternalPackages.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
-            // Re-adding a folder through Booth or Asset Store labels it, but never clears a label.
             if (existing.Origin == PackageOrigin.Local && origin != PackageOrigin.Local)
             {
                 existing.Origin = origin;
@@ -115,7 +104,6 @@ public class ExternalPackageService : IExternalPackageService
         var existing = settings.ExternalPackages.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
         if (existing != null) return existing;
 
-        // A branch name is only needed for the package.json probe; archive downloads accept HEAD.
         var refName = reference?.Trim();
         if (string.IsNullOrEmpty(refName)) refName = await FetchDefaultBranchAsync(repo, ct);
 
@@ -227,7 +215,6 @@ public class ExternalPackageService : IExternalPackageService
 
         await _installer.RemoveUpmPackageAsync(project, package.Name, ct);
 
-        // Git installs embed a copy under Packages/, local folders are only referenced.
         if (package.Kind != ExternalPackageKind.LocalFolder)
         {
             var dir = Path.Combine(project.PackagesPath, package.Name);
@@ -235,7 +222,6 @@ public class ExternalPackageService : IExternalPackageService
         }
     }
 
-    /// <summary>Stores the package.json values discovered during the first GitHub install.</summary>
     private async Task AdoptResolvedNameAsync(ExternalPackage package, string name, PackageJson meta, CancellationToken ct)
     {
         var settings = LoadSettings();
@@ -284,10 +270,6 @@ public class ExternalPackageService : IExternalPackageService
         repo.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
         repo.Host.EndsWith(".github.com", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>
-    /// GitHub has no anonymous fallback any more, so a missing or signed-out CLI is reported as
-    /// the thing to fix instead of as a download that mysteriously failed.
-    /// </summary>
     private async Task RequireGitHubAsync(GitRepo repo, CancellationToken ct)
     {
         if (!IsGitHub(repo)) return;
@@ -302,7 +284,6 @@ public class ExternalPackageService : IExternalPackageService
                 "已装 GitHub CLI，但没有登录的 GitHub 账号。在 设置 → 配置同步 点「使用浏览器登录 GitHub」后重试。");
     }
 
-    /// <summary>GitHub goes through gh; the other hosts keep the plain archive endpoint.</summary>
     private async Task DownloadArchiveAsync(GitRepo repo, string reference, string target, CancellationToken ct)
     {
         if (!IsGitHub(repo))
@@ -359,7 +340,6 @@ public class ExternalPackageService : IExternalPackageService
     {
         if (IsGitHub(repo)) return await ProbeWithCliAsync(repo, reference, ct);
 
-        // Assets/<repo> covers the layout git-hosted UPM packages usually ship with.
         foreach (var dir in GitHubPackageDirs.Append($"Assets/{repo.Repository}"))
         {
             var path = string.IsNullOrEmpty(dir) ? "package.json" : $"{dir}/package.json";
@@ -381,11 +361,6 @@ public class ExternalPackageService : IExternalPackageService
         return null;
     }
 
-    /// <summary>
-    /// One tree call names every path the ref holds, so the handful of candidate folders are
-    /// settled without a request each; the winner is then read through gh, which is the only
-    /// thing here allowed to see a private repository.
-    /// </summary>
     private async Task<PackageJson?> ProbeWithCliAsync(GitRepo repo, string reference, CancellationToken ct)
     {
         var tree = await _gitHub!.ApiAsync(
@@ -426,7 +401,6 @@ public class ExternalPackageService : IExternalPackageService
         return null;
     }
 
-    /// <summary>The raw-file URL each host serves package.json from.</summary>
     private static string RawUrl(GitRepo repo, string reference, string path) => repo.Host switch
     {
         "github.com" => $"https://raw.githubusercontent.com/{repo.Owner}/{repo.Repository}/{Uri.EscapeDataString(reference)}/{path}",
@@ -435,7 +409,6 @@ public class ExternalPackageService : IExternalPackageService
         _ => $"https://{repo.Host}/{repo.Owner}/{repo.Repository}/raw/{Uri.EscapeDataString(reference)}/{path}"
     };
 
-    /// <summary>The archive download each host serves a branch snapshot from.</summary>
     private static string ArchiveUrl(GitRepo repo, string reference) => repo.Host switch
     {
         "github.com" => $"https://codeload.github.com/{repo.Owner}/{repo.Repository}/legacy.zip/{Uri.EscapeDataString(reference)}",
@@ -458,7 +431,6 @@ public class ExternalPackageService : IExternalPackageService
         }
     }
 
-    /// <summary>Finds the shallowest folder holding a package.json, following how GitHub repos nest packages.</summary>
     private static string? FindPackageRoot(string root)
     {
         var queue = new Queue<(string Path, int Depth)>();
@@ -514,16 +486,11 @@ public class ExternalPackageService : IExternalPackageService
 
     private sealed record GitRepo(ExternalPackageKind Kind, string Host, string Owner, string Repository, string? Reference);
 
-    /// <summary>
-    /// Recognises a git repository URL on any of the supported hosts (GitHub, GitLab, Gitee —
-    /// plus self-hosted GitLab instances, which answer to the same URL shapes as gitlab.com).
-    /// </summary>
     private static GitRepo? ParseGitRepo(string url)
     {
         var raw = url.Trim().Trim('"');
         if (raw.Length == 0) return null;
 
-        // git@host:owner/repo(.git) style
         var scp = raw.Split(':');
         if (raw.Contains('@') && scp.Length == 2 && scp[1].Contains('/'))
         {
@@ -537,7 +504,6 @@ public class ExternalPackageService : IExternalPackageService
         var host = uri.Host.ToLowerInvariant();
         if (!IsGitHost(host)) return null;
 
-        // Self-hosted GitLab keeps the gitlab.com URL shapes, so it rides the same kind.
         var kind = host == "github.com" ? ExternalPackageKind.GitHub
                  : host == "gitee.com" ? ExternalPackageKind.Gitee
                  : ExternalPackageKind.GitLab;
@@ -551,7 +517,6 @@ public class ExternalPackageService : IExternalPackageService
             : segments[1];
 
         string? reference = null;
-        // /tree/<ref> (GitHub, Gitee) and /- /tree/<ref> (GitLab) both name a branch or tag.
         var skip = segments.Length > 2 && segments[2] == "-" ? 1 : 0;
         if (segments.Length >= 4 + skip && segments[2 + skip].Equals("tree", StringComparison.OrdinalIgnoreCase))
             reference = Uri.UnescapeDataString(segments[3 + skip]);
@@ -560,7 +525,6 @@ public class ExternalPackageService : IExternalPackageService
         return new GitRepo(kind, host, owner, repository, reference);
     }
 
-    /// <summary>Any host ending in one of the known domains, so gitlab.example.com counts too.</summary>
     private static bool IsGitHost(string host) =>
         host.Equals("github.com", StringComparison.OrdinalIgnoreCase) ||
         host.Equals("gitee.com", StringComparison.OrdinalIgnoreCase) ||
@@ -585,7 +549,7 @@ public class ExternalPackageService : IExternalPackageService
                 return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             }
         }
-        catch { /* Fall back to defaults */ }
+        catch {  }
 
         return new AppSettings();
     }
@@ -595,7 +559,6 @@ public class ExternalPackageService : IExternalPackageService
         var dir = Path.GetDirectoryName(_settingsPath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        // Re-read so edits made by the other services sharing settings.json are not clobbered.
         var current = LoadSettings();
         current.ExternalPackages = settings.ExternalPackages;
 

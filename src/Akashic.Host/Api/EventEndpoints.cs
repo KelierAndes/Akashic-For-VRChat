@@ -3,10 +3,6 @@ using Akashic.Host;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// Server-sent events: download / install / backup progress and any state the core
-/// changes on its own. Long jobs report through the hub instead of blocking a response.
-/// </summary>
 public static class EventEndpoints
 {
     private static readonly JsonSerializerOptions StreamJson = new()

@@ -10,15 +10,12 @@ using Microsoft.Extensions.Logging;
 
 var options = SidecarOptions.Read(args);
 
-// The shell spawns this process and reads exactly one line back: the bound url and the
-// run token. Anything written to stdout would corrupt that handshake.
 Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args });
 builder.Logging.ClearProviders();
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
-    // ListenLocalhost(0) refuses a dynamic port, so name the loopback address itself.
     kestrel.Listen(System.Net.IPAddress.Loopback, options.Port);
 });
 
@@ -32,8 +29,6 @@ builder.Services.ConfigureHttpJsonOptions(json =>
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<EventHub>();
 
-// The same core graph the WinUI container builds. Only the views move to Flutter; every
-// service, and every behaviour verified against them, stays exactly where it is.
 builder.Services.AddSingleton<HttpClient>();
 builder.Services.AddSingleton<IProjectService, ProjectService>();
 builder.Services.AddSingleton<IVpmRegistryService, VpmRegistryService>();

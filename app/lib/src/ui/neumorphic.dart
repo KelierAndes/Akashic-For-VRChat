@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'theme.dart';
 
-/// Dark surfaces swallow shadows, so caller-provided shadow alphas are
-/// amplified in dark mode (and white ambience capped) to keep the emboss
-/// readable.
 Color _ampDark(Color c, NeuTokens t) {
   if (!t.isDark) return c;
   return c.withValues(alpha: (c.a * 2.6).clamp(0.0, 0.85));
@@ -15,9 +12,6 @@ Color _capLight(Color c, NeuTokens t) {
   return c.withValues(alpha: c.a.clamp(0.0, 0.16));
 }
 
-/// Convex (raised) look as in the reference: the surface itself is lighter
-/// than its surroundings and casts ONE soft dark shadow toward the bottom,
-/// with only a faint white ambient at the top-left. Never a white halo.
 List<BoxShadow> neuRaised({
   double depth = 6,
   Color? dark,
@@ -39,9 +33,6 @@ List<BoxShadow> neuRaised({
   ];
 }
 
-/// Concave (inset) look per neumorphic rules: a UNIFORM, low-contrast inner
-/// shadow all around the edge, with the top-left lip slightly darker and the
-/// bottom-right lip slightly lighter. Never a chunky or uneven border.
 class InsetShadowPainter extends CustomPainter {
   InsetShadowPainter({
     required this.radius,
@@ -61,7 +52,6 @@ class InsetShadowPainter extends CustomPainter {
         RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(radius));
     canvas.clipRRect(rrect);
 
-    // A blurred ring hugging the inside of the edge — uniform by construction.
     Path innerRing() {
       return Path.combine(
         PathOperation.difference,
@@ -72,14 +62,12 @@ class InsetShadowPainter extends CustomPainter {
 
     final blur = depth * 2.0;
 
-    // Base uniform inner shadow.
     canvas.drawPath(
       innerRing(),
       Paint()
         ..color = dark
         ..maskFilter = MaskFilter.blur(BlurStyle.normal, blur),
     );
-    // Directional pass: dark lip pushed toward top-left interior.
     canvas
       ..save()
       ..translate(depth * 0.5, depth * 0.5)
@@ -90,7 +78,6 @@ class InsetShadowPainter extends CustomPainter {
           ..maskFilter = MaskFilter.blur(BlurStyle.normal, blur),
       )
       ..restore();
-    // Light lip pushed toward bottom-right interior.
     canvas
       ..save()
       ..translate(-depth * 0.5, -depth * 0.5)
@@ -116,7 +103,6 @@ enum NeuMode { flat, raised, inset }
 Border glassBorder({double alpha = 0.6}) =>
     Border.all(color: Colors.white.withValues(alpha: alpha));
 
-/// Glass edge reflection spec: bright top lip fading to a faint bottom lip.
 class GlassEdgeStyle {
   const GlassEdgeStyle({this.top = 0.95, this.bottom = 0.2, this.width = 1.2});
 
@@ -125,8 +111,6 @@ class GlassEdgeStyle {
   final double width;
 }
 
-/// Strokes a rounded rect with a vertical white gradient — the specular
-/// highlight along a glass edge.
 class GlassEdgePainter extends CustomPainter {
   GlassEdgePainter(this.radius, this.style);
 
@@ -159,7 +143,6 @@ class GlassEdgePainter extends CustomPainter {
       old.radius != radius || old.style != style;
 }
 
-/// Wraps any rounded widget with a glass edge reflection stroke.
 class GlassEdgeOverlay extends StatelessWidget {
   const GlassEdgeOverlay({
     super.key,
@@ -188,7 +171,6 @@ class GlassEdgeOverlay extends StatelessWidget {
   }
 }
 
-/// A neumorphic box that switches between flat / convex / concave.
 class NeuBox extends StatelessWidget {
   const NeuBox({
     super.key,
@@ -253,7 +235,6 @@ class NeuBox extends StatelessWidget {
         child: child,
       );
     } else {
-      // concave
       final content = padding != null
           ? Padding(padding: padding!, child: child ?? const SizedBox.shrink())
           : (child ?? const SizedBox.shrink());
@@ -309,8 +290,6 @@ class NeuBox extends StatelessWidget {
   }
 }
 
-/// Interactive neumorphic control: press sinks the surface (convex -> concave),
-/// hover lifts it, selected stays convex.
 class NeuButton extends StatefulWidget {
   const NeuButton({
     super.key,
@@ -410,13 +389,6 @@ class _NeuButtonState extends State<NeuButton> {
   }
 }
 
-/// Frosted glass window sheet. The app canvas is fully transparent, so this
-/// sheet carries its own fill and reads as an independent window: hairline
-/// highlight edge, no drop shadow. A shadow here used to paint a gray halo into
-/// the transparent margin, which made the window edge look dirty.
-///
-/// `opacity` is the only alpha here — the sheet tokens are opaque — so 1 really
-/// is a solid window and the slider number is what gets painted.
 class GlassSheet extends StatelessWidget {
   const GlassSheet({
     super.key,
@@ -428,7 +400,6 @@ class GlassSheet extends StatelessWidget {
   final Widget child;
   final double radius;
 
-  /// Alpha of the sheet gradient — the 全局不透明度 knob.
   final double opacity;
 
   @override
@@ -472,8 +443,6 @@ class GlassSheet extends StatelessWidget {
   }
 }
 
-/// A carved groove separator — concave per neumorphic rules:
-/// dark hairline on top, light hairline below.
 class NeuDivider extends StatelessWidget {
   const NeuDivider(
       {super.key,

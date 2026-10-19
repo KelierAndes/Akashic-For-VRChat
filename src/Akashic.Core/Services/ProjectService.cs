@@ -5,9 +5,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Manages Unity project discovery, registration, and metadata reading.
-/// </summary>
 public partial class ProjectService : IProjectService
 {
     private readonly string _settingsPath;
@@ -119,7 +116,6 @@ public partial class ProjectService : IProjectService
     {
         var packages = new List<InstalledPackage>();
 
-        // Read UPM manifest
         if (File.Exists(project.ManifestPath))
         {
             try
@@ -130,7 +126,6 @@ public partial class ProjectService : IProjectService
                 {
                     foreach (var (name, version) in manifest.Dependencies)
                     {
-                        // Unity's own modules track the editor version, so they are out of scope here.
                         if (IsUnityModule(name)) continue;
 
                         packages.Add(new InstalledPackage
@@ -143,10 +138,9 @@ public partial class ProjectService : IProjectService
                     }
                 }
             }
-            catch { /* Ignore parse errors */ }
+            catch {  }
         }
 
-        // Read VPM manifest and override/add entries
         if (project.HasVpmManifest && File.Exists(project.VpmManifestPath))
         {
             try
@@ -178,10 +172,9 @@ public partial class ProjectService : IProjectService
                     }
                 }
             }
-            catch { /* Ignore parse errors */ }
+            catch {  }
         }
 
-        // package.json inside an embedded package carries the friendly name and the real version.
         foreach (var pkg in packages)
             ApplyPackageMetadata(project, pkg);
 
@@ -192,7 +185,6 @@ public partial class ProjectService : IProjectService
     {
         var metaPath = Path.Combine(project.PackagesPath, pkg.Name, "package.json");
 
-        // A file: reference keeps its files outside Packages/, so the metadata lives next to them.
         if (!File.Exists(metaPath) && pkg.Version.StartsWith("file:"))
             metaPath = Path.Combine(ResolveFilePath(project, pkg.Version), "package.json");
 
@@ -206,7 +198,7 @@ public partial class ProjectService : IProjectService
             if (!string.IsNullOrWhiteSpace(meta.DisplayName)) pkg.DisplayName = meta.DisplayName;
             if (!IsVersionLike(pkg.Version) && IsVersionLike(meta.Version)) pkg.Version = meta.Version!;
         }
-        catch { /* Ignore parse errors */ }
+        catch {  }
     }
 
     private static string ResolveFilePath(UnityProject project, string version)
@@ -246,7 +238,7 @@ public partial class ProjectService : IProjectService
                 return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             }
         }
-        catch { /* Use defaults */ }
+        catch {  }
         return new AppSettings();
     }
 
@@ -256,8 +248,6 @@ public partial class ProjectService : IProjectService
         if (dir != null && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
 
-        // This service only owns ProjectPaths; re-read so edits made by the registry
-        // and UnityPackage library services in the same file are not clobbered.
         var current = LoadSettings();
         current.ProjectPaths = [.. _settings.ProjectPaths];
 
@@ -298,11 +288,6 @@ public partial class ProjectService : IProjectService
         catch { }
     }
 
-    /// <summary>
-    /// Picks the editor for a project version out of the same list the settings page shows, so what
-    /// you see is what launches. A version that no editor matches returns null rather than some
-    /// other release — opening a project with the wrong editor rewrites it.
-    /// </summary>
     public string? FindUnityEditor(string? version = null)
     {
         var editors = DiscoverUnityEditors();
@@ -359,10 +344,6 @@ public partial class ProjectService : IProjectService
 
     private string VccSettingsPath() => LoadSettings().VccSettingsPath;
 
-    /// <summary>
-    /// Every editor this machine can point at: the manual list first, then Unity Hub, VCC and the
-    /// scanned folders. A path is kept once, so the first source to report it owns the label.
-    /// </summary>
     public List<UnityEditorEntry> DiscoverUnityEditors()
     {
         var found = new List<UnityEditorEntry>();
@@ -383,7 +364,6 @@ public partial class ProjectService : IProjectService
         foreach (var entry in settings.UnityEditorEntries)
             Add(entry.Path, entry.Version, SourceManual);
 
-        // Unity Hub stores its registry with the version as the key.
         try
         {
             var hubEditorsPath = Path.Combine(
@@ -401,7 +381,6 @@ public partial class ProjectService : IProjectService
         catch (JsonException) { }
         catch (IOException) { }
 
-        // VCC lists the editors it was pointed at, keyed by version.
         try
         {
             var vccPath = VccSettingsPath();
@@ -426,7 +405,6 @@ public partial class ProjectService : IProjectService
         catch (JsonException) { }
         catch (IOException) { }
 
-        // A scanned path is either an editor root itself or the folder that holds several of them.
         foreach (var root in settings.UnityEditorPaths)
         {
             if (!Directory.Exists(root)) continue;
@@ -447,9 +425,6 @@ public partial class ProjectService : IProjectService
             catch (UnauthorizedAccessException) { }
         }
 
-        // Editors installed outside Hub's registry — a copied Editor folder, or one Hub forgot to
-        // report — still have to be startable, so each drive's usual Unity homes are walked a level
-        // or two deep.
         foreach (var drive in DriveInfo.GetDrives()
                      .Where(d => d.DriveType == DriveType.Fixed)
                      .Select(d => d.RootDirectory.FullName))
@@ -465,7 +440,6 @@ public partial class ProjectService : IProjectService
         return found.OrderByDescending(e => e.Version, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    /// <summary>Adds the editors under a folder that is either an editor itself or holds several.</summary>
     private static void ScanEditorRoot(
         string root, Action<string?, string?, string> add)
     {
@@ -481,7 +455,6 @@ public partial class ProjectService : IProjectService
             {
                 Try(sub);
 
-                // Hub-style layouts nest once more: <root>\Editor\<version>\Editor.
                 foreach (var inner in Directory.GetDirectories(sub))
                     Try(inner);
             }
@@ -490,10 +463,6 @@ public partial class ProjectService : IProjectService
         catch (UnauthorizedAccessException) { }
     }
 
-    /// <summary>
-    /// Registers an editor by hand. The picked path may be the folder that holds Unity.exe, its
-    /// Editor subfolder, or the executable itself.
-    /// </summary>
     public async Task<string> AddUnityEditorAsync(string pickedPath)
     {
         var full = ResolveEditorExecutable(pickedPath);
@@ -548,7 +517,6 @@ public partial class ProjectService : IProjectService
         return removed > 0 ? "已从手动列表移除。" : "只有手动添加的编辑器可以移除。";
     }
 
-    /// <summary>Backup target: this app's setting wins, then VCC's, then the app data folder.</summary>
     public string GetBackupDirectory()
     {
         var configured = LoadSettings().ProjectBackupPath;
@@ -613,7 +581,6 @@ public partial class ProjectService : IProjectService
         var dir = Path.GetDirectoryName(_settingsPath);
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
 
-        // Re-read so the paths other services own are never clobbered.
         var current = LoadSettings();
         current.UnityEditorEntries = updated.UnityEditorEntries;
         current.ProjectBackupPath = updated.ProjectBackupPath;
@@ -653,10 +620,6 @@ public partial class ProjectService : IProjectService
         _ => null
     };
 
-    /// <summary>
-    /// The version string Unity itself prints, e.g. 2022.3.22f1: a known key wins, then the exe's
-    /// ProductVersion, then the folder name the editor lives in.
-    /// </summary>
     private static string ResolveVersion(string exePath, string? known)
     {
         if (!string.IsNullOrWhiteSpace(known)) return known.Trim();
@@ -752,9 +715,6 @@ public partial class ProjectService : IProjectService
                     var dirPath = Path.Combine(project.Path, folder);
                     if (!Directory.Exists(dirPath)) continue;
 
-                    // Dropping the package folders is where the size saving is: the manifests left
-                    // behind say which packages the project wants, and the Resolver can fetch the
-                    // packages themselves again.
                     var files = folder == "Packages" && excludePackages
                         ? Directory.GetFiles(dirPath, "*.json")
                         : Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories);
@@ -776,7 +736,6 @@ public partial class ProjectService : IProjectService
         }
     }
 
-    /// <summary>The only folders a backup is allowed to write into.</summary>
     private static readonly string[] BackupRoots = ["Assets", "Packages", "ProjectSettings"];
 
     public List<BackupArchive> ListBackupArchives()
@@ -794,12 +753,6 @@ public partial class ProjectService : IProjectService
         return archives.OrderByDescending(a => a.CreatedAt).ToList();
     }
 
-    /// <summary>
-    /// Unpacks a backup with a light touch: nothing already in the project is ever removed,
-    /// so a restore that turns out to be the wrong archive still leaves the old one openable.
-    /// Entries outside the three project folders are ignored rather than followed, because a
-    /// zip can carry "../" paths and a stray absolute path would write outside the project.
-    /// </summary>
     public async Task<(bool Success, string Message)> RestoreBackupAsync(
         BackupArchive archive, string targetProjectPath, bool overwrite,
         IProgress<double>? progress = null, CancellationToken ct = default)
@@ -846,7 +799,6 @@ public partial class ProjectService : IProjectService
                     ct.ThrowIfCancellationRequested();
                     var entry = entries[i];
 
-                    // Directory entries have an empty Name; the files below them make the folders.
                     if (string.IsNullOrEmpty(entry.Name)) continue;
 
                     var rel = entry.FullName.Replace('\\', '/');
@@ -878,7 +830,6 @@ public partial class ProjectService : IProjectService
                     }
                     catch (Exception)
                     {
-                        // A read-only or locked file stops that one entry, not the whole restore.
                         failed++;
                     }
 
@@ -905,16 +856,11 @@ public partial class ProjectService : IProjectService
         }
     }
 
-    // ── Templates, new projects and folder detection ───────────────────────────────────────────
 
     private static string TemplatesRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Akashic", "Templates");
 
-    /// <summary>
-    /// The official VCC templates come first so the new project dialog opens on a real VRChat starting
-    /// point rather than an empty folder.
-    /// </summary>
     public List<ProjectTemplate> GetTemplates()
     {
         var builtins = BuiltinTemplates.Discover().Select(t => new ProjectTemplate
@@ -934,11 +880,6 @@ public partial class ProjectService : IProjectService
 
     public string GetTemplatesDirectory() => TemplatesRoot;
 
-    /// <summary>
-    /// Snapshots a project as a template. Only ProjectSettings and the package manifests are kept:
-    /// the packages themselves are re-resolvable, so copying them would make every template as large
-    /// as the project it came from.
-    /// </summary>
     public async Task<string> SaveTemplateFromProjectAsync(UnityProject project, string name, string notes)
     {
         var trimmed = name.Trim();
@@ -987,7 +928,6 @@ public partial class ProjectService : IProjectService
 
     public async Task<string> DeleteTemplateAsync(ProjectTemplate template)
     {
-        // Built-ins are compiled in, so there is nothing on disk to forget.
         if (template.IsBuiltIn) return $"{template.Name} 是应用自带的模板，不能删除。";
 
         var settings = LoadSettings();
@@ -1004,10 +944,6 @@ public partial class ProjectService : IProjectService
         return removed > 0 ? $"已删除模板“{template.Name}”。" : "这个模板已经不在列表里了。";
     }
 
-    /// <summary>
-    /// Only ever removes a folder inside this app's own template root, so a stale or hand-edited
-    /// Directory value can never take a real project with it.
-    /// </summary>
     private static void TryDeleteTemplateFolder(string? directory)
     {
         if (string.IsNullOrWhiteSpace(directory)) return;
@@ -1059,9 +995,6 @@ public partial class ProjectService : IProjectService
 
             if (builtin is not null && Directory.Exists(builtin.Directory))
             {
-                // An official template is a complete skeleton, so it is copied the way Creator
-                // Companion copies it. The template's own package.json describes the template rather
-                // than the project, so it is deliberately left behind.
                 foreach (var part in new[] { "Assets", "Packages", "ProjectSettings" })
                     CopyDirectory(Path.Combine(builtin.Directory, part), Path.Combine(target, part));
 
@@ -1072,8 +1005,6 @@ public partial class ProjectService : IProjectService
             }
             else if (builtin is not null)
             {
-                // No VCC on this machine: the compiled-in stand-in writes the smallest manifest that
-                // still gives Unity its built-in modules, and the SDK packages are installed after.
                 Directory.CreateDirectory(Path.Combine(target, "ProjectSettings"));
                 await File.WriteAllTextAsync(Path.Combine(packages, "manifest.json"),
                     BuiltinTemplates.ManifestJson);
@@ -1120,11 +1051,6 @@ public partial class ProjectService : IProjectService
         }
     }
 
-    /// <summary>
-    /// Registers the folder itself when it is a project, otherwise every project directly inside it.
-    /// Going one level deep is what makes a "E:\VRChat" archive show up without dragging in the
-    /// nested folders of a single project.
-    /// </summary>
     public async Task<(int Added, int Already, string Message)> DetectProjectsAsync(string directory)
     {
         if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
@@ -1156,7 +1082,6 @@ public partial class ProjectService : IProjectService
         return (added, already, $"在 {root} 下发现 {candidates.Count} 个工程 · 新登记 {added} 个 · 已登记 {already} 个");
     }
 
-    /// <summary>Copies one file across, keeping its relative path, and says nothing when it is absent.</summary>
     private static void CopyRelative(string source, string target, string relative)
     {
         var from = Path.Combine(source, relative);

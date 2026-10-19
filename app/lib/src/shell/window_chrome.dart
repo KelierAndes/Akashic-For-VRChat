@@ -7,9 +7,6 @@ import '../ui/theme.dart';
 
 enum WindowAction { close, minimize, maximize }
 
-/// Strip that owns the window: traffic lights on the left, drag surface in
-/// the middle, optional trailing control. Only this band is draggable, so
-/// clicks below it still reach the page.
 class WindowChrome extends StatelessWidget {
   const WindowChrome({
     super.key,

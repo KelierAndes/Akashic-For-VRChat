@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../state/app_model.dart';
 
-/// Hands the one app model to the tree; every dependent rebuilds when it notifies.
 class AppScope extends InheritedNotifier<AppModel> {
   const AppScope({super.key, required AppModel model, required super.child})
       : super(notifier: model);

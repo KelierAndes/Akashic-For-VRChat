@@ -4,11 +4,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Reads the Unity Asset Store from two sides: the .unitypackage files Unity already dropped into
-/// a local cache folder, and the signed-in account's 我的资产 list. The session comes from the
-/// WebView2 login and is kept in memory only, exactly like Booth's.
-/// </summary>
 public class AssetStoreService : IAssetStoreService
 {
     private const string StoreHost = "assetstore.unity.com";
@@ -29,12 +24,8 @@ public class AssetStoreService : IAssetStoreService
     private List<StoredCookie> _entries = [];
     private bool _vaultChecked;
 
-    /// <summary>Name of this site's slot in the encrypted session store.</summary>
     private const string VaultKey = "assetstore";
 
-    // Product covers remembered by name, so cache-only rows and list rows can share them
-    // without hitting the storefront again. Filled from 我的资产 reads and search lookups,
-    // and persisted to disk so they survive restarts.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _coverCache =
         new(StringComparer.OrdinalIgnoreCase);
 
@@ -44,8 +35,6 @@ public class AssetStoreService : IAssetStoreService
     {
         _vault = vault;
 
-        // Private clients: the shared HttpClient in the container also serves the registry
-        // services, and a Unity session header must never travel with those requests.
         _apiClient = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false });
         _fileClient = new HttpClient(new HttpClientHandler { UseCookies = false });
         _library = library;
@@ -92,7 +81,6 @@ public class AssetStoreService : IAssetStoreService
         }
     }
 
-    /// <summary>Loads the disk snapshot of the last 我的资产 read, if any.</summary>
     public AssetStoreAccountCache LoadAccountCache()
     {
         try
@@ -109,7 +97,6 @@ public class AssetStoreService : IAssetStoreService
         return new AssetStoreAccountCache();
     }
 
-    /// <summary>Overwrites the disk snapshot with the given account read.</summary>
     public async Task SaveAccountCacheAsync(IReadOnlyList<AssetStoreAsset> items, CancellationToken ct = default)
     {
         var path = AccountCachePath;
@@ -132,11 +119,6 @@ public class AssetStoreService : IAssetStoreService
         }
     }
 
-    /// <summary>
-    /// The same session with each cookie's own domain and path, which is the only form the WebView2
-    /// seed can use — Unity's session token is issued for <c>assetstore.unity.com</c>, and writing it
-    /// to any other domain means the storefront never receives it.
-    /// </summary>
     public IReadOnlyList<StoredCookie>? SessionEntries
     {
         get
@@ -157,8 +139,6 @@ public class AssetStoreService : IAssetStoreService
                     fresh.Add(cookie);
         }
 
-        // An empty export means the browser had nothing to hand over — a reset profile, or a page
-        // that never set cookies — so it must never overwrite a session that still works.
         if (fresh.Count == 0) return;
 
         _entries = fresh;
@@ -176,10 +156,6 @@ public class AssetStoreService : IAssetStoreService
         }
     }
 
-    /// <summary>
-    /// Unity's session is the one the 我的资产 read and the download endpoint both need, so a stored
-    /// copy is picked up here rather than waiting for the storefront to be signed into again.
-    /// </summary>
     private void RestoreFromVault()
     {
         if (_entries.Count > 0 || _vaultChecked) return;
@@ -227,10 +203,6 @@ public class AssetStoreService : IAssetStoreService
     private static string Configured(string configured, string fallback) =>
         string.IsNullOrWhiteSpace(configured) ? fallback : configured;
 
-    /// <summary>
-    /// Walks the cache and the download folder two levels deep, which is how Unity lays the store
-    /// out: publisher, then category, then the .unitypackage itself.
-    /// </summary>
     public async Task<List<AssetStoreAsset>> ScanCacheAsync(CancellationToken ct = default)
     {
         var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -270,9 +242,6 @@ public class AssetStoreService : IAssetStoreService
                     Size = info.Size,
                     LastModified = info.LastModified,
                     IsInLibrary = known.Contains(file),
-                    // The cover this name has already been matched to. Without it a cache-only row
-                    // always came back blank, so the page reopened the storefront search for it
-                    // on every visit and the downloaded thumbnails looked like they had vanished.
                     ImageUrl = TryGetCoverUrl(name, out var cover) ? cover : string.Empty
                 });
             }
@@ -293,8 +262,6 @@ public class AssetStoreService : IAssetStoreService
         {
             var (current, depth) = pending.Pop();
 
-            // An iterator cannot yield inside a try with a catch, so each directory is read into
-            // a local list first and handed out after the guarded block.
             var files = new List<string>();
             var children = new List<(string Path, int Depth)>();
 
@@ -321,18 +288,12 @@ public class AssetStoreService : IAssetStoreService
         var relative = Path.GetRelativePath(root, file);
         var parts = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
-        // parts = [publisher, category, name.unitypackage] for the store's own layout; anything
-        // shallower is a file the user dropped in themselves, so it has no publisher.
         var publisher = parts.Length >= 3 ? parts[0] : string.Empty;
         var category = parts.Length >= 3 ? parts[1] : string.Empty;
 
         return (publisher, category);
     }
 
-    /// <summary>
-    /// Attaches a downloaded file to the account row that owns it. Names are matched loosely because
-    /// the cache carries only the file name, while the store reports a display name.
-    /// </summary>
     public void MergeCachedFiles(IEnumerable<AssetStoreAsset> accountItems, IEnumerable<AssetStoreAsset> cached)
     {
         var byKey = new Dictionary<string, AssetStoreAsset>(StringComparer.OrdinalIgnoreCase);
@@ -353,9 +314,6 @@ public class AssetStoreService : IAssetStoreService
             asset.IsInLibrary = hit.IsInLibrary;
             if (string.IsNullOrWhiteSpace(asset.Category)) asset.Category = hit.Category;
 
-            // The account row's cover also answers for the cache file it now owns. Both names get
-            // the URL, because the file name and the display name differ often enough that
-            // matching one of them alone left the other looking for a cover forever.
             if (string.IsNullOrWhiteSpace(asset.ImageUrl) && TryGetCoverUrl(asset.Name, out var stored))
                 asset.ImageUrl = stored;
 
@@ -393,9 +351,6 @@ public class AssetStoreService : IAssetStoreService
 
         try
         {
-            // WebView2 hands script results back JSON-encoded, so a script that returns a string
-            // arrives double-wrapped. The page reader may also hand back an array, one entry per
-            // rendered 我的资源 page.
             var payload = extractorResultJson.Trim();
             if (payload.StartsWith('"'))
                 payload = JsonSerializer.Deserialize<string>(payload) ?? string.Empty;
@@ -445,13 +400,6 @@ public class AssetStoreService : IAssetStoreService
         }
     }
 
-    /// <summary>
-    /// Reads one page of 我的资源 the way the storefront actually renders it: every row is a
-    /// [data-test="asset-item-&lt;id&gt;"] div whose product name is plain text, not a link — the
-    /// only /packages/ anchor on that page belongs to a footer banner. The script stays
-    /// synchronous because WebView2's ExecuteScriptAsync does not wait for promises; walking the
-    /// 下一页 pagination is done from C#. Multiple page results arrive as a JSON array.
-    /// </summary>
     public string MyAssetsExtractorScript => """
         (() => {
           try {
@@ -517,7 +465,6 @@ public class AssetStoreService : IAssetStoreService
 
         using var response = await _apiClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
 
-        // A redirect to the sign-in flow is how the store answers an expired session.
         if (response.StatusCode is System.Net.HttpStatusCode.Found or System.Net.HttpStatusCode.MovedPermanently
             or System.Net.HttpStatusCode.SeeOther or System.Net.HttpStatusCode.Unauthorized
             or System.Net.HttpStatusCode.Forbidden)
@@ -551,10 +498,6 @@ public class AssetStoreService : IAssetStoreService
         return target;
     }
 
-    /// <summary>
-    /// The store names the file through Content-Disposition; a purchase without one keeps the
-    /// product name plus the extension Unity expects.
-    /// </summary>
     private static string FileNameFrom(HttpResponseMessage response, AssetStoreAsset asset)
     {
         var disposition = response.Content.Headers.ContentDisposition;
@@ -591,10 +534,6 @@ public class AssetStoreService : IAssetStoreService
 
     public string SearchCoverExtractorScript => SearchCoverScript;
 
-    /// <summary>
-    /// Reads the rendered search result cards. Covers there are plain &lt;img&gt; key-images and
-    /// every product card is an article[data-test=search-results-product-card-&lt;id&gt;].
-    /// </summary>
     public string SearchCoverScript => """
         (() => {
           try {
@@ -662,7 +601,6 @@ public class AssetStoreService : IAssetStoreService
         var directory = Path.GetDirectoryName(_settingsPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-        // Re-read so edits made by the other services sharing settings.json are not clobbered.
         var current = LoadSettings();
         current.AssetStoreCacheDirectory = settings.AssetStoreCacheDirectory;
         current.AssetStoreDownloadDirectory = settings.AssetStoreDownloadDirectory;

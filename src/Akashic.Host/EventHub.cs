@@ -4,11 +4,6 @@ namespace Akashic.Host;
 
 public sealed record HostEvent(string Kind, object Data, long AtUnixMs);
 
-/// <summary>
-/// Fan-out for the server-sent events stream. Long jobs (download, install, backup)
-/// report through <see cref="Progress"/> so the shell can draw a bar without polling.
-/// A slow reader drops its oldest events rather than stalling the worker thread.
-/// </summary>
 public sealed class EventHub
 {
     private readonly object _gate = new();
@@ -43,7 +38,6 @@ public sealed class EventHub
             channel.Writer.TryWrite(hostEvent);
     }
 
-    /// <summary>Progress sink for one job, keyed so several bars can run at once.</summary>
     public IProgress<double> Progress(string kind, string id) =>
         new Progress<double>(fraction => Publish(kind, new { id, fraction }));
 }

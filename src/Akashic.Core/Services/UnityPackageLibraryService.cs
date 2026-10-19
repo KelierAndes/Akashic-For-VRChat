@@ -4,10 +4,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Local .unitypackage library: scans configured folders plus manually added files,
-/// and keeps a per-project ledger of what was imported so it can be reported and undone.
-/// </summary>
 public partial class UnityPackageLibraryService : IUnityPackageLibraryService
 {
     private readonly string _settingsPath;
@@ -69,8 +65,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
         if (!covered && !settings.UnityPackageFiles.Contains(full, StringComparer.OrdinalIgnoreCase))
             settings.UnityPackageFiles.Add(full);
 
-        // A file that came from Booth or Asset Store keeps that label even when a library folder
-        // already covers it, so the tag survives moving the file into a scanned directory.
         if (origin == PackageOrigin.Local)
             settings.UnityPackageOrigins.Remove(Key(full));
         else
@@ -102,8 +96,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
             if (!string.IsNullOrWhiteSpace(path))
                 origins[Key(path)] = origin;
 
-        // Files sitting in the Booth cache came from a Booth purchase even when they were imported
-        // before per-file origins were recorded, so infer the tag rather than leaving them 本地.
         var boothRoot = NormalizeRoot(settings.BoothDownloadDirectory);
 
         var result = new List<UnityPackageFileInfo>();
@@ -224,7 +216,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
     private static string NormalizeKey(string projectPath) =>
         Path.GetFullPath(projectPath).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
 
-    /// <summary>Origin keys are compared case-insensitively, so the stored form is normalised too.</summary>
     private static string Key(string path) => path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     private static string NormalizeRoot(string root)
@@ -277,7 +268,7 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
                 return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             }
         }
-        catch { /* Fall back to defaults */ }
+        catch {  }
 
         return new AppSettings();
     }
@@ -286,7 +277,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
     {
         EnsureDirectory(_settingsPath);
 
-        // Re-read so concurrent edits by other services are not clobbered.
         var current = LoadSettings();
         current.UnityPackageLibraryPaths = settings.UnityPackageLibraryPaths;
         current.UnityPackageFiles = settings.UnityPackageFiles;
@@ -306,7 +296,7 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
                 return JsonSerializer.Deserialize<Dictionary<string, List<UnityPackageInstallRecord>>>(json, JsonOptions) ?? [];
             }
         }
-        catch { /* A corrupt ledger only loses installed-state reporting */ }
+        catch {  }
 
         return [];
     }

@@ -5,19 +5,11 @@ namespace Akashic.Core.Services;
 
 public interface IRailLayoutService
 {
-    /// <summary>The tiles the icon rail shows, in order, as <c>nav:&lt;id&gt;</c> or
-    /// <c>proj:&lt;path&gt;</c>.</summary>
     IReadOnlyList<string> Items { get; }
 
-    /// <summary>Persists the rail. An empty list is stored as empty, which reads back as
-    /// the built-in set.</summary>
     Task SetItemsAsync(IReadOnlyList<string> items, CancellationToken ct = default);
 }
 
-/// <summary>
-/// Keeps the rail's contents in the shared settings.json, reading the file afresh on every
-/// write so the sections owned by the other services survive.
-/// </summary>
 public class RailLayoutService : IRailLayoutService
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
@@ -52,7 +44,6 @@ public class RailLayoutService : IRailLayoutService
         Items = settings.RailItems;
     }
 
-    /// <summary>Drops anything that is not one of the two supported shapes.</summary>
     private static bool Shaped(string raw) =>
         raw.StartsWith("nav:") && raw.Length > 4 ||
         raw.StartsWith("proj:") && raw.Length > 6;

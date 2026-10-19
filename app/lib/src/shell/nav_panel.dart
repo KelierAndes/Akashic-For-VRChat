@@ -9,8 +9,6 @@ import '../ui/theme.dart';
 import 'app_scope.dart';
 import 'window_chrome.dart';
 
-/// Side panel: window chrome, account tile, the full destination list with
-/// counts, and the theme switch pinned at the bottom.
 class NavPanel extends StatefulWidget {
   const NavPanel({
     super.key,
@@ -149,12 +147,8 @@ class _AccountTile extends StatelessWidget {
   final String name;
   final String detail;
 
-  /// Tapping the card goes to the GitHub login on the settings page.
   final VoidCallback? onTap;
 
-  /// Who the GitHub CLI is signed in as, and when the config last went up. The card shows
-  /// the account rather than the app because that identity is what private external packages
-  /// and the sync gist both run on.
   final Map<String, dynamic> github;
   final Map<String, dynamic> sync;
 
@@ -162,7 +156,6 @@ class _AccountTile extends StatelessWidget {
       github['signedIn'] == true ? '${github['login']}' : name;
 
   String get _subline {
-    // Before the first probe lands, the card still says what is on screen.
     if (github.isEmpty) return detail;
     if (github['found'] != true) return 'GitHub CLI 未安装';
     if (github['signedIn'] != true) return 'GitHub 未登录';
@@ -172,7 +165,6 @@ class _AccountTile extends StatelessWidget {
     return when.isEmpty ? 'GitHub · 尚未同步' : 'GitHub · 同步于 $when';
   }
 
-  /// The sidecar writes a full ISO stamp; the card only has room for the minute.
   static String _stamp(Object? raw) {
     final parsed = DateTime.tryParse('$raw');
     if (parsed == null) return '';
@@ -338,8 +330,6 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// What the panel's search box matches: registered projects by name or path, and
-/// registry packages by name, display name, description or keyword.
 class _SearchResults extends StatelessWidget {
   const _SearchResults({required this.model, required this.onPicked});
 

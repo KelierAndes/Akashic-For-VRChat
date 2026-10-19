@@ -4,20 +4,6 @@ using System.Text.Json;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// The GitHub OAuth App Akashic ships with. The pair is registered once by the project owner and
-/// stored as an AES-GCM blob inside the assembly, so a user never sees it, never configures it, and
-/// never has to leave the settings page to start a sync.
-///
-/// Honest about what the encryption buys: the pepper that derives the key sits in the same binary,
-/// so this conceals the pair from a casual reader of the DLL or the source — it does not keep it from
-/// someone willing to reverse a release. That is unavoidable for a native client that talks to an
-/// OAuth App, and the real limit on abuse is the registered callback URL, which pins where a token
-/// may be sent. Rotate the secret at GitHub if it ever matters.
-///
-/// Development override: <c>AKASHIC_GITHUB_CLIENT_ID</c> and <c>AKASHIC_GITHUB_CLIENT_SECRET</c>
-/// replace the built-in pair, so a second OAuth App can be tested without rebuilding.
-/// </summary>
 public static class GitHubOAuthApp
 {
     private const string Pepper = "Akashic.OAuthApp.v1:7f2c9be41a";
@@ -25,14 +11,9 @@ public static class GitHubOAuthApp
     private static readonly byte[] Salt = "Akashic.OAuthApp.Salt.v1"u8.ToArray();
     private const int Iterations = 100_000;
 
-    /// <summary>
-    /// The blob to ship. Regenerated with <see cref="Protect"/> whenever the App is edited at
-    /// GitHub; the plaintext never belongs in the repository.
-    /// </summary>
     private const string BuiltIn =
         "/8w2DFggy7cU/1FgoBoGbk00ytxl3cVmMNp19h2NWKKUhjio/Nlea4aefwjI1M/aXocjKFuc6uKzkmf5cQlv2sEFpltXxL+lv9tl8HQ1DuRSaYDiK9+TmBJo/RZX/wYH67zGs04H8i53Zeo4k/Xlfdt81GOuK1BSaw==";
 
-    /// <summary>What the App's 授权回调网址 has to be set to. No port: GitHub lets the port vary.</summary>
     public const string CallbackUrl = "http://127.0.0.1/callback/";
 
     public static (string clientId, string clientSecret) Resolve()
@@ -45,10 +26,6 @@ public static class GitHubOAuthApp
         return Unprotect(BuiltIn);
     }
 
-    /// <summary>
-    /// Build-time twin of <see cref="Resolve"/>: wraps a JSON pair into the blob to paste into
-    /// <see cref="BuiltIn"/>. Nothing at runtime calls it.
-    /// </summary>
     public static string Protect(string plainJson)
     {
         var plain = Encoding.UTF8.GetBytes(plainJson);
@@ -104,7 +81,6 @@ public static class GitHubOAuthApp
         }
         catch (Exception)
         {
-            // A tampered or mismatched blob is the same as having none: the login page says so.
             return (string.Empty, string.Empty);
         }
     }

@@ -2,10 +2,6 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// Flat unified package item for the ALCOM-style package management table.
-/// Combines VPM packages and .unitypackage assets.
-/// </summary>
 public partial class UnifiedPackageItem : ObservableObject
 {
     public string Id { get; set; } = string.Empty;
@@ -14,7 +10,6 @@ public partial class UnifiedPackageItem : ObservableObject
     public PackageCategory Category { get; set; } = PackageCategory.Vpm;
     public string SourceName { get; set; } = "Official";
 
-    /// <summary>Who supplied a local package, so a Booth import can be filtered as its own class.</summary>
     public PackageOrigin Origin { get; set; } = PackageOrigin.Local;
 
     [ObservableProperty]
@@ -43,10 +38,8 @@ public partial class UnifiedPackageItem : ObservableObject
     [ObservableProperty]
     private bool _isSelected;
 
-    /// <summary>Installed from a repository this app does not list, so it cannot be (re)installed from here.</summary>
     public bool ForeignRepository { get; set; }
 
-    /// <summary>Only VPM packages have a version stream to pick from; everything else shows plain text.</summary>
     public bool ShowVersionSelector => IsInstalled && Category == PackageCategory.Vpm && AvailableVersions.Count > 0;
     public bool ShowInstalledVersionText => !ShowVersionSelector;
 }

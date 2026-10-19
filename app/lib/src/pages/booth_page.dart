@@ -8,19 +8,12 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// Booth purchases. The sidecar owns parsing, de-duplication and the archive cache;
-/// this page only drives the embedded browser with the extractor scripts the sidecar
-/// hands out and feeds their JSON back.
 class BoothPage extends StatefulWidget {
   const BoothPage({super.key});
 
   static const kinds = ['已购商品', '礼物领取', '免费商品'];
   static const views = ['全部商品', '未下载', '已下载'];
 
-  /// Index 0 keeps demo videos, illustration packs and comics out of sight — the free
-  /// and gift lists are full of them and none of it installs into Unity. Titles and
-  /// file labels are matched by keyword, best effort; anything caught can still be
-  /// reviewed under 演示·图集.
   static const mediaFilters = ['可用软件包', '全部商品', '演示·图集'];
   static const mediaKeywords = [
     'デモ動画', 'デモムービー', 'サンプル動画', '紹介動画', '宣伝動画', '予告動画',
@@ -91,8 +84,6 @@ class BoothPageState extends State<BoothPage> {
     }
   }
 
-  /// The sidecar folds the superseded versions of one product away and reports what
-  /// each survivor stands in for, so the page only has to show the counts.
   void _applySnapshot(Map<String, dynamic> snapshot) {
     _rows = ((snapshot['items'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
@@ -125,8 +116,6 @@ class BoothPageState extends State<BoothPage> {
         return true;
       }).toList();
 
-  /// The library keeps one row per downloadable, so a re-read merges by number
-  /// instead of dropping the other kinds that were already collected.
   void _absorb(List<Map<String, dynamic>> incoming) {
     final byNumber = {for (final row in _rows) '${row['number']}': row};
     for (final row in incoming) {
@@ -157,7 +146,6 @@ class BoothPageState extends State<BoothPage> {
     final host = AppScope.of(context).host;
     if (host == null) return;
 
-    // Reuse whatever is on the vault before asking the user to log in again.
     await _seed();
     await _showBrowser('https://account.booth.pm/');
     setState(() => _status = '请在内嵌页面中完成登录，然后点「保存登录态」。');
@@ -207,8 +195,6 @@ class BoothPageState extends State<BoothPage> {
     return null;
   }
 
-  /// Walks every page of the selected list. The extractor reports the highest
-  /// pagination link it can see, which is how the loop knows where to stop.
   Future<void> _read() async {
     final host = AppScope.of(context).host;
     if (host == null) return;
@@ -284,8 +270,6 @@ class BoothPageState extends State<BoothPage> {
       final zip = await host.boothDownload(number);
       _downloaded.add(number);
 
-      // A Booth archive usually wraps the real deliverable, so the .unitypackage
-      // files inside it — not the zip — are what gets registered.
       final contents = await host.boothInspect(number);
       final packages = ((contents['unityPackageFiles'] as List?) ?? const [])
           .cast<String>();

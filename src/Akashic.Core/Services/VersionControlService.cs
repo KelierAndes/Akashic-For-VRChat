@@ -6,33 +6,20 @@ namespace Akashic.Core.Services;
 
 public interface IVersionControlService
 {
-    /// <summary>Which hosting tools this machine has, with their versions.</summary>
     Task<VcsTools> DetectToolsAsync(CancellationToken ct = default);
 
-    /// <summary>
-    /// Drops the memo so the next probe sees a tool that was installed, uninstalled or updated
-    /// outside this app. Without it the settings page's 重新检测 answers from cache forever.
-    /// </summary>
     void ForgetTools();
 
-    /// <summary>
-    /// Reads how one project is hosted. Cheap by default: the markers on disk are parsed and no
-    /// external tool is asked. <paramref name="deep"/> adds the changed-file counts and history,
-    /// which does have to run git or cm.
-    /// </summary>
     Task<ProjectVcsState> ReadStateAsync(string projectPath, bool deep = false, CancellationToken ct = default);
 
     Task<VcsRunResult> InitializeAsync(string projectPath, string kind, CancellationToken ct = default);
 
     Task<VcsRunResult> WriteGitignoreAsync(string projectPath, CancellationToken ct = default);
 
-    /// <summary>Installs a missing tool with winget, then re-detects.</summary>
     Task<VcsRunResult> InstallAsync(string tool, CancellationToken ct = default);
 
-    /// <summary>Turns LFS on for one repository only, and writes the Unity attribute file.</summary>
     Task<VcsRunResult> EnableLfsAsync(string projectPath, CancellationToken ct = default);
 
-    /// <summary>Takes the LFS filters back out of this repository only.</summary>
     Task<VcsRunResult> DisableLfsAsync(string projectPath, CancellationToken ct = default);
 
     Task<VcsRunResult> SetRemoteAsync(string projectPath, string url, CancellationToken ct = default);
@@ -44,11 +31,6 @@ public interface IVersionControlService
     Task<VcsRunResult> PushAsync(string projectPath, CancellationToken ct = default);
 }
 
-/// <summary>
-/// Talks to git and to Unity Version Control (cm) for the projects that are hosted, and hosts the
-/// ones that are not. Everything runs as an argument array against the executable, never through a
-/// shell, so a folder or a commit message with spaces or quotes cannot turn into a command.
-/// </summary>
 public class VersionControlService : IVersionControlService
 {
     private static readonly TimeSpan QuickTimeout = TimeSpan.FromSeconds(45);
@@ -56,11 +38,9 @@ public class VersionControlService : IVersionControlService
 
     private Task<VcsTools>? _toolsTask;
 
-    // ── Tool discovery ────────────────────────────────────────────────────────────────────────
 
     public Task<VcsTools> DetectToolsAsync(CancellationToken ct = default)
     {
-        // A cancelled probe must not poison every later read, so only a finished one is kept.
         if (_toolsTask is { IsCompletedSuccessfully: true }) return _toolsTask;
         return _toolsTask = ProbeAsync(ct);
     }
@@ -85,8 +65,6 @@ public class VersionControlService : IVersionControlService
             ]);
 
         var gitVersion = await FirstLineAsync(gitPath, ["--version"], ct);
-        // git-lfs is a separate binary that git finds next to itself, so the only
-        // portable question to ask git is whether the subcommand answers.
         var lfsVersion = gitPath == null
             ? null
             : await FirstLineAsync(gitPath, ["lfs", "version"], ct);
@@ -145,8 +123,6 @@ public class VersionControlService : IVersionControlService
     {
         if (exe == null) return null;
 
-        // git and gh always answer in UTF-8; cm writes in the console codepage, so it has to
-        // keep the system default.
         var utf8 = exe.EndsWith("git.exe", StringComparison.OrdinalIgnoreCase) ||
                    exe.EndsWith("gh.exe", StringComparison.OrdinalIgnoreCase);
 
@@ -155,12 +131,6 @@ public class VersionControlService : IVersionControlService
         return code == 0 ? output.Split('\n').FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)) : null;
     }
 
-    /// <summary>
-    /// Each tool prints its version differently: `git version 2.42.0.windows.1`,
-    /// `git-lfs/3.8.0 (GitHub; windows amd64; go 1.25.9; git 77deabdf)` and a bare
-    /// `11.0.16.10275` from cm. Taking the last word, as this once did, reads the build
-    /// hash out of the LFS line and shows that as the version.
-    /// </summary>
     private static string? ShortVersion(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return null;
@@ -177,7 +147,6 @@ public class VersionControlService : IVersionControlService
         return match.Success ? match.Value : text;
     }
 
-    // ── State ─────────────────────────────────────────────────────────────────────────────────
 
     public async Task<ProjectVcsState> ReadStateAsync(
         string projectPath, bool deep = false, CancellationToken ct = default)
@@ -326,7 +295,6 @@ public class VersionControlService : IVersionControlService
 
             if (line.StartsWith("# branch.ab "))
             {
-                // "# branch.ab +2 -1": two to push, one to pull.
                 var parts = line[12..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
                 foreach (var part in parts)
                 {
@@ -357,7 +325,6 @@ public class VersionControlService : IVersionControlService
         };
     }
 
-    // ── Markers on disk ───────────────────────────────────────────────────────────────────────
 
     private sealed record MarkerRead(
         bool Found, string? Branch = null, string? Remote = null, string? Provider = null,
@@ -386,13 +353,9 @@ public class VersionControlService : IVersionControlService
         {
             var config = ReadAll(configPath);
             remote = ReadOriginUrl(config);
-            // Reading the section is enough to know LFS is on, and it costs nothing:
-            // the alternative is spawning `git config` once per project just to list them.
             lfs = config.Contains("[filter \"lfs\"]", StringComparison.OrdinalIgnoreCase);
         }
 
-        // A .git folder with no config at all is a repo that has never committed; saying
-        // "已托管" for it would be a lie, so the branch stays empty and the note explains.
         var note = branch == null ? "（.git 存在但读不出分支）" : string.Empty;
         return new MarkerRead(true, branch, remote, remote == null ? "本地仓库" : ProviderOf(remote), note, lfs);
     }
@@ -403,7 +366,6 @@ public class VersionControlService : IVersionControlService
         if (Directory.Exists(direct)) return direct;
         if (!File.Exists(direct)) return null;
 
-        // Worktrees and submodules leave a .git file that points at the real directory.
         var text = ReadAll(direct);
         const string marker = "gitdir:";
         if (!text.StartsWith(marker, StringComparison.OrdinalIgnoreCase)) return null;
@@ -427,7 +389,6 @@ public class VersionControlService : IVersionControlService
         return File.Exists(config) ? config : null;
     }
 
-    /// <summary>Picks the origin URL out of git's ini-ish config without needing git itself.</summary>
     private static string? ReadOriginUrl(string config)
     {
         string? section = null;
@@ -462,8 +423,6 @@ public class VersionControlService : IVersionControlService
         string? remote = null;
         string? provider = null;
 
-        // Unity writes the workspace selector next to the workspace tree; it names the repository
-        // and the branch or changeset the folder is currently loaded at.
         var selector = Path.Combine(plasticDir, "plastic.selector");
         if (File.Exists(selector))
         {
@@ -515,7 +474,6 @@ public class VersionControlService : IVersionControlService
         }
     }
 
-    // ── Operations ────────────────────────────────────────────────────────────────────────────
 
     public async Task<VcsRunResult> InitializeAsync(string projectPath, string kind, CancellationToken ct = default)
     {
@@ -554,7 +512,6 @@ public class VersionControlService : IVersionControlService
         logText.AppendLine($"git init\n{Trim(initOut)}");
         if (initCode != 0)
         {
-            // Older git has no -b; the branch is then renamed instead.
             var (fallbackCode, fallbackOut) = await RunProcAsync(tools.GitPath, path, ["init"],
                 QuickTimeout, Encoding.UTF8, ct);
             logText.AppendLine($"git init\n{Trim(fallbackOut)}");
@@ -564,8 +521,6 @@ public class VersionControlService : IVersionControlService
 
         logText.Append(await WriteIgnoreFileAsync(path, ".gitignore", UnityGitignore));
 
-        // Unity projects are mostly binary art, so a fresh repository starts with LFS on
-        // whenever the machine has it; without it the first push of a few gigabytes fails.
         if (tools.GitLfsFound)
         {
             var (lfsCode, lfsOut) = await RunProcAsync(tools.GitPath, path,
@@ -611,10 +566,6 @@ public class VersionControlService : IVersionControlService
         return VcsRunResult.Ok("gitignore", path, "忽略规则已就绪", log.ToString().Trim());
     }
 
-    /// <summary>
-    /// The three things the hosting features need. Git for Windows ships LFS with it, but
-    /// LFS is listed separately because a hand-rolled git install often lacks it.
-    /// </summary>
     private static readonly Dictionary<string, (string Id, string Name, string Url)> Installable =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -642,8 +593,6 @@ public class VersionControlService : IVersionControlService
             "--accept-package-agreements", "--accept-source-agreements"
         ], TimeSpan.FromMinutes(15), null, ct);
 
-        // A binary installed moments ago is not on this process's PATH, so the probe has to
-        // run again against the fixed install folders; dropping the cache is what makes it.
         _toolsTask = null;
         var after = await DetectToolsAsync(ct);
 
@@ -662,11 +611,6 @@ public class VersionControlService : IVersionControlService
                 text + $"\n\n也可以手动安装：{package.Url}");
     }
 
-    /// <summary>
-    /// Turns LFS on for one repository only. A global <c>git lfs install</c> would
-    /// rewrite the user's own git config, and a <c>migrate</c> would rewrite history
-    /// that may already be pushed, so neither is offered from here.
-    /// </summary>
     public async Task<VcsRunResult> EnableLfsAsync(string projectPath, CancellationToken ct = default)
     {
         var path = Path.GetFullPath(projectPath);
@@ -716,8 +660,6 @@ public class VersionControlService : IVersionControlService
         if (code != 0)
             return VcsRunResult.Fail("unlfs", path, "禁用 LFS 失败", log.ToString().Trim());
 
-        // The attribute file this app wrote exists only to point at those filters. Leaving it
-        // behind would have git ask for a clean/smudge command that is no longer configured.
         var attributes = Path.Combine(path, ".gitattributes");
         if (File.Exists(attributes))
         {
@@ -767,7 +709,6 @@ public class VersionControlService : IVersionControlService
         if (code != 0)
             return VcsRunResult.Fail("remote", path, "设置远程失败", Trim(output));
 
-        // Tell the user which commits belong where without waiting for a push.
         await RunProcAsync(tools.GitPath, path, ["fetch", "--quiet", "origin"], NetworkTimeout,
             Encoding.UTF8, CancellationToken.None);
 
@@ -895,7 +836,6 @@ public class VersionControlService : IVersionControlService
         return VcsRunResult.Fail("push", path, "工程尚未接入版本托管", "先接入 git 或 Unity Version Control。");
     }
 
-    // ── Process plumbing ──────────────────────────────────────────────────────────────────────
 
     private static async Task<string> RunAsync(
         string exe, string workDir, string[] args, TimeSpan timeout, Encoding? encoding, CancellationToken ct)
@@ -925,8 +865,6 @@ public class VersionControlService : IVersionControlService
             psi.StandardErrorEncoding = encoding;
         }
 
-        // A push to a private remote should open the credential window, not hang waiting for a
-        // terminal that was never attached.
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["LC_ALL"] = "C";
 
@@ -1012,7 +950,6 @@ public class VersionControlService : IVersionControlService
         return ok;
     }
 
-    // ── Ignore files ──────────────────────────────────────────────────────────────────────────
 
     private static async Task<string> WriteIgnoreFileAsync(string path, string fileName, string content)
     {
@@ -1086,10 +1023,6 @@ public class VersionControlService : IVersionControlService
         crashlytics-build.properties
         """;
 
-    /// <summary>
-    /// Binary art goes through LFS; the .meta sidecars stay in the repository because
-    /// they are text and their diffs are what a merge conflict actually needs.
-    /// </summary>
     private const string UnityGitattributes = """
         # 由 Akashic 生成：Unity / VRChat 工程里的二进制资源交给 Git LFS。
         # 需要增减类型时，直接改这里，然后重新提交。

@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// A single navigation destination. The icon rail and the side panel both
-/// render from this list, so selecting in one always moves the other.
 class NavEntry {
   const NavEntry({
     required this.id,
@@ -14,7 +12,6 @@ class NavEntry {
   final String label;
   final IconData icon;
 
-  /// Panel group header shown above this entry, first entry of a group only.
   final String? section;
 }
 
@@ -58,15 +55,12 @@ class AppNav {
     NavEntry(id: 'about', label: '关于', icon: Icons.info_outline_rounded),
   ];
 
-  /// The rail mirrors everything above the panel footer group.
   static const railCount = 9;
 
-  /// What the rail shows before the user rearranges it.
   static List<String> get defaultRail => [
         for (var i = 0; i < railCount; i++) 'nav:${entries[i].id}',
       ];
 
-  /// One rail tile: `nav:<id>` for a destination, `proj:<path>` for a pinned project.
   static String navTile(String id) => 'nav:$id';
 
   static String projectTile(String path) => 'proj:$path';
@@ -76,7 +70,6 @@ class AppNav {
   static String tileValue(String raw) =>
       raw.startsWith('proj:') ? raw.substring(5) : raw.substring(4);
 
-  /// Settings lives in its own card under the rail.
   static int settingsIndex =
       entries.indexWhere((e) => e.id == 'settings');
 

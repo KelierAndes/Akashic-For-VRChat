@@ -4,10 +4,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// Everything the shell needs before it can draw its first frame: which account is
-/// signed in, where the folders are, and how many projects the nav badge should show.
-/// </summary>
 public static class BootstrapEndpoints
 {
     private static readonly Lazy<string> HostVersion = new(() =>
@@ -50,7 +46,6 @@ public static class BootstrapEndpoints
                 Rail: rail.Items);
         });
 
-        // The rail is the one piece of shell layout worth remembering across runs.
         group.MapPost("/rail", async Task<IResult> (RailLayout layout, IRailLayoutService rail,
             CancellationToken ct) =>
         {
@@ -58,8 +53,6 @@ public static class BootstrapEndpoints
             return Results.Json(new { items = rail.Items });
         });
 
-        // Only Booth can be asked cheaply whether a stored session still works; Unity and
-        // VRChat answer 200 for anonymous requests too, so those stay "restored".
         group.MapPost("/sessions/probe", async (IBoothService booth, CancellationToken ct) =>
             new SessionProbe(booth.HasSession, await booth.ProbeSessionAsync(ct)));
 
@@ -69,8 +62,6 @@ public static class BootstrapEndpoints
             return new { dark = theme.IsDarkTheme };
         });
 
-        // Alpha of the glass surfaces. Answered with what was actually stored, because the
-        // service clamps and the slider has to snap back to the allowed range.
         group.MapPost("/visual", async Task<IResult> (VisualSettings visual, IThemeService theme,
             CancellationToken ct) =>
         {

@@ -1,7 +1,5 @@
 import 'package:flutter/widgets.dart';
 
-/// Theme-aware neumorphic tokens (light / dark variants of the same
-/// physical materials).
 class NeuTokens {
   const NeuTokens({
     required this.isDark,
@@ -38,7 +36,6 @@ class NeuTokens {
   final Color sheetB;
   final Color sheetC;
 
-  /// Damage and refusal ink — restore warnings, failed tool output.
   final Color warn;
   final double edgeTop;
   final double edgeBottom;

@@ -3,17 +3,10 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// The three account-backed surfaces. Reading Booth's and Unity's lists still needs a
-/// real browser, but that browser now lives in the frontend: the sidecar hands out the
-/// extractor scripts and turns whatever JSON they return back into rows, so all of the
-/// parsing, de-duplication and cache rules stay in the verified C# layer.
-/// </summary>
 public static class AccountEndpoints
 {
     public static RouteGroupBuilder MapAccounts(this RouteGroupBuilder group)
     {
-        // ---------- Booth ----------
 
         group.MapGet("/booth/scripts", (IBoothService booth) => new
         {
@@ -41,16 +34,12 @@ public static class AccountEndpoints
                 _ => booth.ParseLibraryPage(request.Json),
             }));
 
-        // LocalZipPath and IsDownloaded are [JsonIgnore] on the model, so the numbers that
-        // already have an archive are handed to the frontend next to the rows.
         group.MapGet("/booth/library", (IBoothService booth, IUnityPackageLibraryService library) =>
             Results.Json(Snapshot(booth, library)));
 
         group.MapPost("/booth/library", async Task<IResult> (BoothLibrarySave request, IBoothService booth,
             IUnityPackageLibraryService library, CancellationToken ct) =>
         {
-            // Reconciling marks which rows already have a local archive before the list is stored,
-            // and folding keeps one row per product so the snapshot is not a pile of old versions.
             booth.ReconcileLocalArchives(request.Items);
             booth.FoldOldVersions(request.Items, new Dictionary<string, int>());
             await booth.SaveLibraryCacheAsync(request.Items, ct);
@@ -81,7 +70,6 @@ public static class AccountEndpoints
             return Results.Json(await booth.InspectAsync(item, ct));
         });
 
-        // ---------- Unity Asset Store ----------
 
         group.MapGet("/assetstore/scripts", (IAssetStoreService store) => new
         {
@@ -111,9 +99,6 @@ public static class AccountEndpoints
             return Results.Json(store.LoadAccountCache());
         });
 
-        // Account rows first with their local file attached, then whatever the cache
-        // folder holds that the account list did not claim — otherwise the shelf
-        // looks empty for everyone whose account list has not been read yet.
         group.MapPost("/assetstore/merge", async Task<IResult> (AssetStoreSave request,
             IAssetStoreService store, CancellationToken ct) =>
         {
@@ -129,8 +114,6 @@ public static class AccountEndpoints
                 .Where(c => c.LocalPath is null || !claimed.Contains(System.IO.Path.GetFullPath(c.LocalPath)))
                 .ToList();
 
-            // A collection expression has no type to infer from here, so the union is
-            // spelled out as a list.
             return Results.Json(request.Items.Concat(extra).ToList());
         });
 
@@ -145,9 +128,6 @@ public static class AccountEndpoints
                 ? Results.Json(new { url })
                 : Results.Problem("没有这个名称的封面缓存。", statusCode: 404));
 
-        // When the store never gave a cover, the package itself can: the first preview image
-        // inside the .unitypackage, extracted once and kept on disk. Answered as a local path,
-        // which the shell reads directly instead of pulling bytes through this socket.
         group.MapPost("/assetstore/thumbnail", async Task<IResult> (AssetStoreThumbnail request,
             IUnityPackageIconService icons, CancellationToken ct) =>
             Results.Json(new { path = await icons.GetThumbnailAsync(request.Path, ct) }));
@@ -171,7 +151,6 @@ public static class AccountEndpoints
             return Results.Json(new { path });
         });
 
-        // ---------- VRChat ----------
 
         group.MapGet("/vrchat/self", (IVRChatSyncService vrchat, CancellationToken ct) =>
             vrchat.GetSelfAsync(ct));
@@ -185,8 +164,6 @@ public static class AccountEndpoints
             if (!Enum.TryParse<VRChatContentKind>(request.Kind, true, out var kind))
                 return Results.Problem("未知的内容类型。", statusCode: 400);
 
-            // Always edit against a freshly fetched record: VRChat's PUT resets any field
-            // the request leaves out, so the list row is not a safe base.
             var source = await vrchat.GetContentAsync(kind, request.Id, ct);
             if (source is null) return Results.Problem("云端找不到这条内容。", statusCode: 404);
 
@@ -254,8 +231,6 @@ public static class AccountEndpoints
             return Results.Json(vrchat.LoadContentCache());
         });
 
-        // One scan per call: the map is computed, published, and returned from the same pass,
-        // because walking every project's Packages folder is the slow part of this page.
         group.MapPost("/vrchat/local-map", async Task<IResult> (IProjectService projects,
             IVRChatBlueprintScanService scan, CancellationToken ct) =>
         {
@@ -273,8 +248,6 @@ public static class AccountEndpoints
         var cache = booth.LoadLibraryCache();
         booth.ReconcileLocalArchives(cache.Items);
 
-        // A snapshot written before folding existed still carries every version, so the
-        // page gets the same view either way, plus what the survivors stand in for.
         var hiddenByNumber = new Dictionary<string, int>(StringComparer.Ordinal);
         var hiddenTotal = booth.FoldOldVersions(cache.Items, hiddenByNumber);
 
@@ -289,9 +262,6 @@ public static class AccountEndpoints
             savedAt = cache.SavedAt,
             items = cache.Items,
             downloaded = cache.Items.Where(i => i.IsDownloaded).Select(i => i.Number).ToList(),
-            // A purchase counts as shelved when one of the .unitypackage files the library knows
-            // about came out of that archive's own -extracted folder. Matching on the product
-            // title never works: the package carries the file name, and versions differ.
             shelved = cache.Items.Where(i => Shelved(i, paths)).Select(i => i.Number).ToList(),
             hiddenVersions = hiddenByNumber,
             hiddenTotal = hiddenTotal,
@@ -313,9 +283,6 @@ public static class AccountEndpoints
     private static BoothPurchaseItem? Find(IBoothService booth, string number)
     {
         var cache = booth.LoadLibraryCache();
-        // The archive path is not part of the cached JSON, so the download folder is
-        // walked again here — otherwise inspect would report "还没有下载" for a zip
-        // that is plainly on disk.
         booth.ReconcileLocalArchives(cache.Items);
         return cache.Items.FirstOrDefault(i =>
             string.Equals(i.Number, number, StringComparison.Ordinal));

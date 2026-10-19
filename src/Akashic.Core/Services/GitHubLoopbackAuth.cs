@@ -19,46 +19,15 @@ public sealed record GitHubLoginResult
     public string Error { get; init; } = string.Empty;
     public string Guidance { get; init; } = string.Empty;
 
-    /// <summary>The page handed to the browser, so the UI can offer it when no browser opened.</summary>
     public string AuthorizeUrl { get; init; } = string.Empty;
 }
 
-/// <summary>
-/// Signs a user into GitHub the way VS Code and JetBrains do: open GitHub's own authorisation page in
-/// the user's browser, catch the redirect on <c>http://127.0.0.1:&lt;random port&gt;/callback/</c>,
-/// and trade the code for a token here.
-///
-/// What the user does is click one green <em>Authorize</em> button. They never type an account, a
-/// password, an 8-character device code, or a second sync passphrase into Akashic, and Akashic never
-/// sees those secrets — the browser already holds the GitHub session.
-///
-/// PKCE (<c>code_verifier</c> + S256 challenge) binds the code to this socket and the random
-/// <c>state</c> binds the callback to this attempt, so a request that reaches the port from anywhere
-/// else is answered and ignored. The token then goes into the GitHub CLI's own credential store, which
-/// keeps every GitHub call in this app behind the single <see cref="GitHubCli"/> door and makes one
-/// authorisation cover private repositories as well as the sync gist.
-///
-/// The exchange also sends the client secret that <see cref="GitHubOAuthApp"/> ships with, because
-/// GitHub documents it as required and does not distinguish public from confidential clients: PKCE is
-/// an extra binding there rather than a replacement.
-/// </summary>
 public sealed class GitHubLoopbackAuth
 {
-    /// <summary>
-    /// Redirect path. The OAuth App's 授权回调网址 has to be <c>http://127.0.0.1/callback/</c>: GitHub
-    /// matches the registered URL as a prefix of the redirect it is sent and lets the port vary, which
-    /// is what makes a random loopback port legal (RFC 8252 §7.3).
-    /// </summary>
     public const string CallbackPath = "/callback/";
 
     public const string RegisteredCallback = GitHubOAuthApp.CallbackUrl;
 
-    /// <summary>
-    /// Classic scopes. <c>gist</c> is what config sync needs; <c>repo</c> covers the private
-    /// repositories the package browser reads. <c>read:org</c> is not optional in practice: the GitHub
-    /// CLI refuses to store a token that lacks it ("error validating token: missing required scope
-    /// 'read:org'"), and gh is where this app keeps the credential.
-    /// </summary>
     public static readonly string[] Scopes = ["repo", "read:org", "gist"];
 
     private static readonly TimeSpan DefaultWindow = TimeSpan.FromMinutes(5);
@@ -67,10 +36,6 @@ public sealed class GitHubLoopbackAuth
     private readonly string _authority;
     private readonly string _apiAuthority;
 
-    /// <summary>
-    /// Both authorities exist so the self-test can run the whole flow against a local mock; shipped
-    /// Akashic always lands on github.com and api.github.com.
-    /// </summary>
     public GitHubLoopbackAuth(GitHubCli gitHub,
         string authority = "https://github.com",
         string? apiAuthority = null)
@@ -128,7 +93,6 @@ public sealed class GitHubLoopbackAuth
                 .ConfigureAwait(false);
             if (code.Length == 0) return Fail(error, string.Empty, authorizeUrl);
 
-            // 私有 HttpClient：登录换到的东西绝不能进 DI 里那个共享客户端，三站请求靠它带 cookie。
             using var http = new HttpClient(new HttpClientHandler
             {
                 UseCookies = false,
@@ -183,11 +147,6 @@ public sealed class GitHubLoopbackAuth
             $"code_challenge={Uri.EscapeDataString(challenge)}",
             "code_challenge_method=S256");
 
-    /// <summary>
-    /// Binds 127.0.0.1 only — never <c>localhost</c>, which can resolve to ::1 while GitHub hands back a
-    /// v4 redirect, and never a wildcard, so nothing off this machine can be sent the code. The port is
-    /// whatever the OS has free, which is why the registered callback leaves it out.
-    /// </summary>
     private static (HttpListener listener, int port) OpenLoopback()
     {
         Exception? last = null;
@@ -222,11 +181,6 @@ public sealed class GitHubLoopbackAuth
         return port;
     }
 
-    /// <summary>
-    /// Keeps answering the browser until the callback arrives with our <c>state</c>, the window closes,
-    /// or GitHub reports a refusal. A stale request from an earlier attempt must not be able to log
-    /// anyone in, so anything else is discarded and the wait continues.
-    /// </summary>
     private static async Task<(string code, string error)> WaitForCodeAsync(
         HttpListener listener, string state, TimeSpan window, CancellationToken ct)
     {
@@ -299,7 +253,6 @@ public sealed class GitHubLoopbackAuth
         }
         catch (Exception)
         {
-            // The browser may close the tab the moment it has the redirect; nothing to report.
         }
         finally
         {
@@ -391,10 +344,6 @@ public sealed class GitHubLoopbackAuth
         }
     }
 
-    /// <summary>
-    /// GitHub answers JSON when asked for it, but a misconfigured App or an intermediate can hand back
-    /// the older urlencoded body. Both are read here instead of trusting the Accept header.
-    /// </summary>
     private static JsonDocument Parse(string text)
     {
         var body = text.TrimStart();

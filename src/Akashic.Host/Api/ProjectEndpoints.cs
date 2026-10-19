@@ -3,11 +3,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// Local projects, the editors that open them, the templates new ones start from, and
-/// the blueprint ids that tie them to the cloud. Everything is addressed by folder path,
-/// which is the only identifier a Unity project really has.
-/// </summary>
 public static class ProjectEndpoints
 {
     public static RouteGroupBuilder MapProjects(this RouteGroupBuilder group)
@@ -95,8 +90,6 @@ public static class ProjectEndpoints
             return new { ids = scan.CloudIds };
         });
 
-        // One project at a time: the shell renders the list first and fills the cloud
-        // badge in as these come back, exactly like the desktop version does.
         group.MapPost("/blueprints/scan", async Task<IResult> (ScanBlueprintRequest request,
             IProjectService projects, IVRChatBlueprintScanService scan, CancellationToken ct) =>
             await Project(projects, request.Path, async found => new
@@ -108,7 +101,6 @@ public static class ProjectEndpoints
         return group;
     }
 
-    /// <summary>Runs <paramref name="action"/> against the project at that folder, or answers 404.</summary>
     private static async Task<IResult> Project<T>(IProjectService projects, string path,
         Func<UnityProject, Task<T>> action)
     {

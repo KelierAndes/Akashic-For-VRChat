@@ -6,8 +6,6 @@ import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 import 'project_picker.dart';
 
-/// The VPM registry: every package every configured source advertises, checked
-/// against one target project so install state is readable per row.
 class PackagesPage extends StatefulWidget {
   const PackagesPage({super.key});
 
@@ -77,7 +75,6 @@ class _PackagesPageState extends State<PackagesPage> {
     final host = model.host;
     if (host == null) return;
 
-    // A package picked from the panel's search arrives as a query to apply.
     if (model.packageQuery.isNotEmpty) {
       _search.text = model.packageQuery;
       model.packageQuery = '';
@@ -109,8 +106,6 @@ class _PackagesPageState extends State<PackagesPage> {
     }
   }
 
-  /// Install state comes from the project's own manifest, which is already parsed
-  /// into `model.projects`, so this costs nothing extra.
   Future<void> _matchTarget() async {
     final model = AppScope.of(context);
     _installed

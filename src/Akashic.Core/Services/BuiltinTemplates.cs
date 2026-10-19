@@ -4,43 +4,24 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// A template the app did not create: either a folder VCC ships, or a compiled-in stand-in for when
-/// VCC is not installed.
-/// </summary>
 public sealed class BuiltinTemplate
 {
     public required string Key { get; init; }
 
     public required string Name { get; init; }
 
-    /// <summary>世界 / 虚拟形象 / 空白, matching how the rest of the app labels content kinds.</summary>
     public required string Kind { get; init; }
 
-    /// <summary>Editor version the template itself declares, read from its ProjectVersion.txt.</summary>
     public required string UnityVersion { get; init; }
 
-    /// <summary>The template folder to copy; empty for a compiled-in stand-in, which writes its own.</summary>
     public string Directory { get; init; } = string.Empty;
 
-    /// <summary>VPM packages the project needs, with the version range the template asks for.</summary>
     public IReadOnlyDictionary<string, string> PackageRanges { get; init; } =
         new Dictionary<string, string>();
 
     public string Description { get; init; } = string.Empty;
 }
 
-/// <summary>
-/// The official VRChat project templates, taken from wherever Creator Companion keeps them:
-/// <c>%LOCALAPPDATA%\VRChatCreatorCompanion\VRCTemplates</c>. Each folder is a complete project
-/// skeleton — Assets, .gitignore, Packages and a full ProjectSettings — plus a package.json naming
-/// it, so copying one produces exactly what VCC produces.
-///
-/// Reading them from disk rather than embedding a copy means the app follows VCC when VRChat updates
-/// a template or its SDK range, and it is what makes the 2019 variants real: those ask for SDK
-/// <c>~3.4.x</c> on Unity 2019.4.31f1, while the current ones ask for <c>~3.10.x</c> on 2022.3.22f1.
-/// The compiled-in list is only a fallback for a machine with no VCC.
-/// </summary>
 public static partial class BuiltinTemplates
 {
     public const string Base = "com.vrchat.base";
@@ -53,7 +34,6 @@ public static partial class BuiltinTemplates
         PropertyNameCaseInsensitive = true
     };
 
-    /// <summary>Where Creator Companion keeps its project templates on this machine.</summary>
     public static string VccTemplatesRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "VRChatCreatorCompanion", "VRCTemplates");
@@ -101,8 +81,6 @@ public static partial class BuiltinTemplates
         var unity = ReadProjectVersion(folder);
         var ranges = ReadVpmRanges(folder);
 
-        // VCC names these com.vrchat.template.{world,avatar,base}; the folder is the fallback when a
-        // hand-made template has no package.json at all.
         var (displayName, description) = ReadPackageInfo(folder, name);
 
         return new BuiltinTemplate
@@ -133,10 +111,6 @@ public static partial class BuiltinTemplates
         }
     }
 
-    /// <summary>
-    /// The template's own vpm-manifest is the authoritative list of what a new project needs, and it
-    /// carries the range VCC would resolve — so the app installs the same thing VCC would.
-    /// </summary>
     private static Dictionary<string, string> ReadVpmRanges(string folder)
     {
         var ranges = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -160,8 +134,6 @@ public static partial class BuiltinTemplates
             return [];
         }
 
-        // The resolver is what lets the user manage packages inside Unity afterwards; VCC adds it to
-        // every project it creates even though no template declares it.
         if (!ranges.ContainsKey(Resolver)) ranges[Resolver] = "*";
 
         return ranges;
@@ -202,7 +174,6 @@ public static partial class BuiltinTemplates
         _ => "空白"
     };
 
-    /// <summary>Only used when VCC is absent, so it mirrors what the real templates declare.</summary>
     private static readonly BuiltinTemplate[] Fallback =
     [
         new()
@@ -251,10 +222,6 @@ public static partial class BuiltinTemplates
         }
     ];
 
-    /// <summary>
-    /// Unity's built-in modules, all versioned by the editor itself. Only the compiled-in fallback
-    /// needs this; a real VCC template brings its own manifest.
-    /// </summary>
     public static string ManifestJson { get; } = BuildManifest();
 
     private static string BuildManifest()
@@ -274,11 +241,6 @@ public static partial class BuiltinTemplates
         return "{\n  \"dependencies\": {\n" + string.Join(",\n", deps) + "\n  }\n}\n";
     }
 
-    /// <summary>
-    /// Chooses the advertised version a template's range asks for: <c>~3.10.x</c> and <c>^3.4.x</c>
-    /// both mean "this minor, newest patch". A range that matches nothing falls back to the newest
-    /// version the target editor can load, then to whatever the registry calls latest.
-    /// </summary>
     public static string? ChooseVersion(VpmPackage package, string? range, string? targetUnityVersion)
     {
         if (package.Versions.Count == 0) return package.Version;
@@ -315,11 +277,6 @@ public static partial class BuiltinTemplates
         return package.Version;
     }
 
-    /// <summary>
-    /// Orders editor versions newest first by their (major, minor), so Unity 6's 6000.x sorts above
-    /// 2022.x rather than losing to it the way a plain string compare does. A version that will not
-    /// parse sorts last instead of disappearing.
-    /// </summary>
     public static int CompareUnityVersions(string? left, string? right)
     {
         var a = ParseMinor(left);
@@ -335,12 +292,6 @@ public static partial class BuiltinTemplates
         return Compare(a, b);
     }
 
-    /// <summary>
-    /// Whether a template can be opened by the given editor. Unity only guarantees a project loads on
-    /// its own minor line, so 2022.3.62f1 takes a 2022.3.22f1 template while a 2019.4 one is out of
-    /// the question. Either side without a readable version filters nothing, which keeps a hand-made
-    /// template that never recorded its editor on the table.
-    /// </summary>
     public static bool MatchesUnity(string? templateVersion, string? editorVersion)
     {
         var template = ParseMinor(templateVersion);
@@ -349,7 +300,6 @@ public static partial class BuiltinTemplates
         return template is null || editor is null || Compare(template, editor) == 0;
     }
 
-    /// <summary>Reads "2022.3", "2019.4.31f1" or "~3.10.x" down to a comparable (major, minor).</summary>
     private static (int Major, int Minor)? ParseMinor(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
@@ -361,7 +311,6 @@ public static partial class BuiltinTemplates
         if (!int.TryParse(Digits(parts[0]), out var major)) return null;
         if (!int.TryParse(Digits(parts[1]), out var minor)) return null;
 
-        // "x" is a wildcard patch, not a number, so a bare 0 would wrongly read as minor 0.
         return parts[1].Contains('x') || parts[1].Contains('*') ? null : (major, minor);
     }
 

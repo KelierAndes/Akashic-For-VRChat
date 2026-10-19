@@ -2,9 +2,6 @@ using System.Text.Json.Serialization;
 
 namespace Akashic.Core.Models;
 
-/// <summary>
-/// Represents a VPM package from a registry.
-/// </summary>
 public class VpmPackage
 {
     [JsonPropertyName("name")]
@@ -43,7 +40,6 @@ public class VpmPackage
     [JsonIgnore]
     public string SourceRegistry { get; set; } = string.Empty;
 
-    /// <summary>Registry URL that advertises this package, so the 来源 column can name the repository.</summary>
     [JsonIgnore]
     public string SourceRegistryUrl { get; set; } = string.Empty;
 }

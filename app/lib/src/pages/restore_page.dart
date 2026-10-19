@@ -10,8 +10,6 @@ import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/theme.dart';
 
-/// Getting a project back and keeping it in sync: the archives in the backup folder,
-/// and the hosting tools installed on the machine.
 class RestorePage extends StatefulWidget {
   const RestorePage({super.key, this.initialTab = 0});
 
@@ -58,7 +56,6 @@ class _RestorePageState extends State<RestorePage> {
   }
 }
 
-// ---------- 1 · 备份还原 ----------
 
 class _RestoreTab extends StatelessWidget {
   const _RestoreTab();
@@ -250,9 +247,6 @@ class _RestoreFormState extends State<_RestoreForm> {
     super.initState();
     final model = AppScope.of(context);
 
-    // Only a backup that names a registered project may pre-fill that project:
-    // otherwise the form has to open on an empty 新目录, so no click can land on
-    // somebody's real project by accident.
     final matchPath = widget.archive['projectPath'] as String?;
     final index = matchPath == null
         ? -1
@@ -366,7 +360,6 @@ class _RestoreFormState extends State<_RestoreForm> {
   }
 }
 
-// ---------- 2 · 版本托管 ----------
 
 class _VcsTab extends StatelessWidget {
   const _VcsTab();
@@ -462,8 +455,6 @@ class _VcsTab extends StatelessWidget {
 List<String> _missingOf(Map<String, dynamic> tools) =>
     ((tools['missing'] as List?) ?? const []).cast<String>();
 
-/// A hosting operation ends with the tool's own words in a dialog: a one-line
-/// status is not enough to act on when git or cm refuses something.
 Future<void> runVcsAndShow(AppModel model, String action, String path,
     {String? kind, String? message, String? url, bool push = false}) async {
   await model.runVcs(action, path,
@@ -484,8 +475,6 @@ class _VcsCard extends StatelessWidget {
     final path = state['projectPath'] as String? ?? '';
     final kind = state['kind'] as String? ?? '';
     final managed = kind.isNotEmpty;
-    // LFS is a git-only concern: a UVCS workspace already stores its binaries
-    // natively, so offering the button there only invites a needless repo change.
     final isGit = kind == 'git' || kind == 'both';
     final busy = model.vcsBusyPath == path;
 
@@ -543,8 +532,6 @@ class _VcsCard extends StatelessWidget {
           ),
           if ((state['remote'] as String? ?? '').isNotEmpty) ...[
             const SizedBox(height: 8),
-            // A UVCS workspace has no git remote: that string is the repository the
-            // workspace pulls from, and UVCS itself owns it.
             Text('${isGit ? '远端' : '仓库'}：${state['remote']}',
                 style: TextStyle(fontSize: 12, color: t.inkSecondary),
                 overflow: TextOverflow.ellipsis),
@@ -641,8 +628,6 @@ class _VcsCard extends StatelessWidget {
   }
 }
 
-/// Picking the hosting tool is the only thing this form does, so the two options
-/// say what will actually happen to the folder.
 class _InitForm extends StatefulWidget {
   const _InitForm(this.path, this.gitFound, this.cmFound, this.lfsFound);
 

@@ -5,18 +5,10 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Talks to VRChat's own JSON API through the site's same-origin proxy: the browser session cookies
-/// are accepted there, while the standalone api.vrchat.cloud host is a different registrable domain
-/// and never receives them. Requests use a private HttpClient so these cookies can never travel
-/// with the shared client the registry services use.
-/// </summary>
 public class VRChatSyncService : IVRChatSyncService
 {
-    // Verified live against the account's own content: the list, detail and every write route below.
     private const string ApiBase = "https://vrchat.com/api/1";
 
-    /// <summary>Name of this site's slot in the encrypted session store.</summary>
     private const string VaultKey = "vrchat";
 
     private const string BrowserAgent =
@@ -55,7 +47,6 @@ public class VRChatSyncService : IVRChatSyncService
         }
     }
 
-    /// <summary>The session with each cookie's own domain and path, for seeding the WebView2 back.</summary>
     public IReadOnlyList<StoredCookie>? SessionEntries
     {
         get
@@ -76,15 +67,12 @@ public class VRChatSyncService : IVRChatSyncService
                     fresh.Add(cookie);
         }
 
-        // An empty export means the browser had nothing to hand over — a reset profile, or a page
-        // that never set cookies — so it must never overwrite a session that still works.
         if (fresh.Count == 0) return;
 
         _entries = fresh;
         _cookies = StoredCookies.ToNameValue(fresh);
         _vaultChecked = true;
 
-        // Whatever the page just handed over is the freshest truth about this session.
         _vault.Save(VaultKey, fresh);
     }
 
@@ -97,10 +85,6 @@ public class VRChatSyncService : IVRChatSyncService
         }
     }
 
-    /// <summary>
-    /// Picks up a session saved by an earlier run, which is the point: a WebView2 profile reset used
-    /// to cost the user a fresh sign-in to vrchat.com.
-    /// </summary>
     private void RestoreFromVault()
     {
         if (_entries.Count > 0 || _vaultChecked) return;
@@ -128,14 +112,11 @@ public class VRChatSyncService : IVRChatSyncService
         items.AddRange(await GetPagedAsync("/avatars", VRChatContentKind.Avatar, ct));
         var worlds = await GetPagedAsync("/worlds", VRChatContentKind.World, ct);
 
-        // The list endpoint reports capacity on a different scale than the record endpoint, and it
-        // omits descriptions entirely, so each world is re-read through its own record.
         items.AddRange(await EnrichAsync(worlds, ct));
 
         return items;
     }
 
-    /// <summary>Replaces list rows with their full records, a few requests at a time.</summary>
     private async Task<List<VRChatContentItem>> EnrichAsync(List<VRChatContentItem> rows, CancellationToken ct)
     {
         const int batch = 6;
@@ -159,18 +140,12 @@ public class VRChatSyncService : IVRChatSyncService
     {
         var (root, error) = await SendRawAsync(HttpMethod.Get, $"/{Endpoint(kind)}/{id}", null, ct);
 
-        // A missing row is an answer, not a failure: the page shows it as "内容已不存在".
         if (root is null)
             return error?.Contains("没有找到") == true ? null : throw new InvalidOperationException(error ?? "读取失败。");
 
         return Read(root.Value, kind);
     }
 
-    /// <summary>
-    /// The update endpoint resets anything it is not given, so every writable field is echoed back
-    /// from the freshly read record unless the edit changes it — a name-only edit once dropped a
-    /// world's capacity to the server default.
-    /// </summary>
     public async Task<VRChatContentItem> UpdateContentAsync(VRChatContentEdit edit, CancellationToken ct = default)
     {
         var current = await GetContentAsync(edit.Source.Kind, edit.Source.Id, ct) ?? edit.Source;
@@ -209,7 +184,6 @@ public class VRChatSyncService : IVRChatSyncService
 
         var root = await SendAsync(HttpMethod.Put, $"/{Endpoint(current.Kind)}/{current.Id}", body, ct);
 
-        // Publishing is a separate endpoint on the site, so it follows the metadata write.
         if (current.Kind == VRChatContentKind.World && edit.Publish is { } publish)
         {
             if (publish) await PublishWorldAsync(current.Id, ct);
@@ -219,10 +193,6 @@ public class VRChatSyncService : IVRChatSyncService
         return Read(root, current.Kind) ?? current;
     }
 
-    /// <summary>
-    /// Only the switches the dialog actually shows are merged in; every other key the server
-    /// reported is written back untouched, so unknown settings survive an edit.
-    /// </summary>
     private static Dictionary<string, JsonElement> MergeSettings(VRChatContentItem current, VRChatContentEdit edit)
     {
         var merged = new Dictionary<string, JsonElement>(current.DefaultContentSettings, StringComparer.Ordinal);
@@ -273,7 +243,6 @@ public class VRChatSyncService : IVRChatSyncService
                 .ToList();
     }
 
-    /// <summary>Uploads a cover image the way the site does and returns the file URL to store.</summary>
     public async Task<string> UploadImageAsync(string filePath, CancellationToken ct = default)
     {
         if (!File.Exists(filePath)) throw new FileNotFoundException("找不到要上传的图片。", filePath);
@@ -285,17 +254,12 @@ public class VRChatSyncService : IVRChatSyncService
 
         var root = await SendFormAsync(form, "/file/image", ct);
 
-        // The response is the File record; its id is what imageUrl expects.
         var id = root.TryGetProperty("id", out var i) ? i.GetString() : null;
         if (string.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("VRChat 没有接受这张封面图。");
 
         return $"{ApiBase}/file/{id}/1/file";
     }
 
-    /// <summary>
-    /// The list lives beside the app's other read caches. It is plain content metadata — the session
-    /// that made the read possible is deliberately not part of it.
-    /// </summary>
     private static string ContentCachePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Akashic", "cache", "vrchat-content.json");
@@ -345,7 +309,6 @@ public class VRChatSyncService : IVRChatSyncService
 
         for (var offset = 0; offset < 500; offset += pageSize)
         {
-            // releaseStatus defaults to "public" server-side, which would hide every private draft.
             var root = await SendAsync(HttpMethod.Get,
                 $"{endpoint}?user=me&n={pageSize}&offset={offset}&sort=updated&order=descending&releaseStatus=all",
                 null, ct);
@@ -433,7 +396,6 @@ public class VRChatSyncService : IVRChatSyncService
         return item;
     }
 
-    /// <summary>The API answers errors both as a string and as an object with a message.</summary>
     private static string? DescribeError(string payload)
     {
         if (string.IsNullOrWhiteSpace(payload)) return null;

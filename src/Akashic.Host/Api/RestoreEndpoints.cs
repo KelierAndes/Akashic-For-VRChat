@@ -3,11 +3,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// The two ways a project comes back or goes out: the backup archives on disk, and the
-/// hosting tools installed on the machine. Both address a project by its folder, and both
-/// keep their answers in one shape so the page can render a list plus a result line.
-/// </summary>
 public static class RestoreEndpoints
 {
     public static RouteGroupBuilder MapRestore(this RouteGroupBuilder group)
@@ -30,8 +25,6 @@ public static class RestoreEndpoints
             return Results.Json(new BackupList(projects.GetBackupDirectory(), rows));
         });
 
-        // The project cards want just a count, so this avoids shipping the whole archive
-        // list to a page that shows one pill.
         group.MapGet("/backups/counts", async Task<IResult> (IProjectService projects) =>
         {
             var known = await projects.GetProjectsAsync();
@@ -67,8 +60,6 @@ public static class RestoreEndpoints
             return Results.Json(new RestoreResult(success, message, request.TargetPath));
         });
 
-        // refresh=true is what the settings page's 重新检测 sends: without it a tool installed
-        // or removed outside this app would never be noticed.
         group.MapGet("/vcs/tools", async Task<object> (IVersionControlService vcs,
             CancellationToken ct, bool refresh = false) =>
         {
@@ -80,7 +71,6 @@ public static class RestoreEndpoints
             bool deep = false, CancellationToken ct = default) =>
             await vcs.ReadStateAsync(path, deep, ct));
 
-        // No paths means "every registered project", which is what the page opens with.
         group.MapPost("/vcs/states", async Task<object> (VcsPathsRequest request,
             IProjectService projects, IVersionControlService vcs, CancellationToken ct) =>
         {
@@ -98,7 +88,6 @@ public static class RestoreEndpoints
             return states;
         });
 
-        // An install runs winget, which may raise a UAC prompt; the caller waits on it.
         group.MapPost("/vcs/install", async Task<IResult> (VcsInstallRequest request,
             IVersionControlService vcs, CancellationToken ct) =>
             Results.Json(await vcs.InstallAsync(request.Tool, ct)));

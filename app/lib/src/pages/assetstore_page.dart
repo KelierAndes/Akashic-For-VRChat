@@ -8,10 +8,6 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 
-/// Unity Asset Store 我的资产. The store's GraphQL endpoint refuses a replayed
-/// cookie, so the only way in is the signed-in page: this side runs the extractor the
-/// sidecar provides, clicks through the pager, and hands the rows back for merging
-/// with whatever already sits in the cache folder.
 class AssetStorePage extends StatefulWidget {
   const AssetStorePage({super.key});
 
@@ -67,8 +63,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
       final accountRows =
           ((saved['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
 
-      // The cache folder is walked on the way in, so the assets that are already on
-      // disk show up even before 我的资产 has ever been read.
       final merged = await host.assetStoreMerge(accountRows);
       _rows = (merged as List).cast<Map<String, dynamic>>();
 
@@ -160,7 +154,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
     });
   }
 
-  /// Waits for the grid to paint, then runs the extractor until it answers with rows.
   Future<List<Map<String, dynamic>>?> _extract(String script) async {
     final host = AppScope.of(context).host;
     final controller = _browser.currentState?.controller;
@@ -225,8 +218,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
       if (!mounted) return;
       setState(() => _status = '第 ${page + 1} 次抓取 · 已有 ${byName.length} 项');
 
-      // The grid repaints after the pager settles, so an unchanged read is retried
-      // a couple of times before it is taken for the end of the list.
       if (byName.length == before) {
         if (++stalled >= 3) break;
         await Future<void>.delayed(const Duration(milliseconds: 900));
@@ -259,15 +250,11 @@ class _AssetStorePageState extends State<AssetStorePage> {
     unawaited(_refreshCovers());
   }
 
-  /// Storefront covers first, then whatever is left gets one cut out of its own package.
   Future<void> _refreshCovers() async {
     await _fillMissingCovers();
     await _fillLocalThumbnails();
   }
 
-  /// Rows the storefront has no cover for still have their .unitypackage on disk, and the
-  /// sidecar can pull a preview image straight out of it. Best effort, and cheap after the
-  /// first pass because the extraction is cached next to the package thumbnails.
   Future<void> _fillLocalThumbnails() async {
     final host = AppScope.of(context).host;
     if (host == null || _busy) return;
@@ -332,13 +319,9 @@ class _AssetStorePageState extends State<AssetStorePage> {
 
   bool _fillingCovers = false;
 
-  /// The loose key the storefront uses to match a cache file name to a search card.
   static String _key(String raw) =>
       raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toLowerCase();
 
-  /// Cache-only rows carry no cover: the storefront search page is opened for each
-  /// missing name in the parked browser and the first matching card's key image is
-  /// remembered. Best effort — a failed lookup keeps the placeholder glyph.
   Future<void> _fillMissingCovers() async {
     final host = AppScope.of(context).host;
     final script = _scripts?['searchCover'] as String?;
@@ -353,8 +336,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
     }
     if (pending.isEmpty) return;
 
-    // The parked browser is built during the first layout, which can land after this
-    // page's own load has already asked it for a cover.
     for (var wait = 0; wait < 40 && _browser.currentState?.controller == null; wait++) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
@@ -396,8 +377,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
     }
   }
 
-  /// One search page read: wait for the cards to render, then hand the extractor
-  /// result back to the sidecar, which knows how to pick the right one.
   Future<String?> _readCover(String name, String script) async {
     final host = AppScope.of(context).host;
     final panel = _browser.currentState;
@@ -627,9 +606,6 @@ class _AssetStorePageState extends State<AssetStorePage> {
                   ),
             ),
           ),
-          // The reader stays mounted off-canvas when the page is hidden: filling
-          // covers walks a dozen storefront search pages, and a widget that is not
-          // built has no browser to walk them in.
           Positioned(
             left: 0,
             right: 0,

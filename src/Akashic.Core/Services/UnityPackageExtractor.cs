@@ -5,11 +5,6 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Extracts and parses .unitypackage files using native .NET 8 TarReader and GZipStream.
-/// A .unitypackage is a GZipped tar archive where each asset is stored under
-/// a GUID-named directory containing: pathname, asset, asset.meta, and optionally preview.png.
-/// </summary>
 public class UnityPackageExtractor : IUnityPackageExtractor
 {
     public async Task<UnityPackageArchive> ParseAsync(string filePath, CancellationToken ct = default)
@@ -83,10 +78,6 @@ public class UnityPackageExtractor : IUnityPackageExtractor
         return archive;
     }
 
-    /// <summary>
-    /// A package `pathname` blob is stored as "&lt;asset path&gt;\n&lt;flags&gt;" (e.g. "Assets/Foo/Bar.cs\n00"),
-    /// so only its first line is usable as a path.
-    /// </summary>
     private static string ReadPathName(byte[] data)
     {
         var text = Encoding.UTF8.GetString(data);

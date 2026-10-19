@@ -6,9 +6,6 @@ import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/theme.dart';
 
-/// Template list plus the two forms that create or capture one. The new-project
-/// form picks the Unity version first, because the sidecar already knows which
-/// templates that version can actually load.
 class TemplatesPage extends StatefulWidget {
   const TemplatesPage({super.key});
 

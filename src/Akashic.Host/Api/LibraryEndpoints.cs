@@ -3,10 +3,6 @@ using Akashic.Core.Services;
 
 namespace Akashic.Host.Api;
 
-/// <summary>
-/// The local .unitypackage library, the import ledger per project, external packages
-/// and the archive preview the import page draws its checklist from.
-/// </summary>
 public static class LibraryEndpoints
 {
     public static RouteGroupBuilder MapLibrary(this RouteGroupBuilder group)
@@ -39,8 +35,6 @@ public static class LibraryEndpoints
             return Results.Json(await library.ScanAsync(ct));
         });
 
-        // Removing a row never deletes the file on disk; the library is a list of
-        // pointers into folders the user owns.
         group.MapPost("/library/files/remove", async (PathRequest request,
             IUnityPackageLibraryService library, CancellationToken ct) =>
         {
@@ -54,8 +48,6 @@ public static class LibraryEndpoints
         group.MapPost("/library/describe", (DescribeRequest request,
             IUnityPackageLibraryService library) => Results.Json(library.DescribePackage(request.Path)));
 
-        // The archive holds every asset's bytes, so the preview sends a trimmed view —
-        // shipping AssetData would put the whole package through JSON.
         group.MapPost("/library/parse", async Task<IResult> (DescribeRequest request,
             IUnityPackageExtractor extractor, CancellationToken ct) =>
         {

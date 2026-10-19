@@ -5,7 +5,6 @@ import 'dart:math';
 
 import 'host_models.dart';
 
-/// Raised for a refused request, carrying whatever `Problem` detail the Host sent.
 class HostException implements Exception {
   HostException(this.message, {this.status});
 
@@ -16,11 +15,6 @@ class HostException implements Exception {
   String toString() => message;
 }
 
-/// Owns the sidecar process and talks to it over loopback HTTP.
-///
-/// The token is generated here and handed to the child through the environment, so
-/// nothing sensitive ever has to be parsed back out of its output; the only thing
-/// read from stdout is the bound url.
 class HostClient {
   HostClient._(this._base, this._token, this._process, this.log);
 
@@ -72,8 +66,6 @@ class HostClient {
     return HostClient._(Uri.parse(handshake['url'] as String), token, process, log);
   }
 
-  /// Connects to a sidecar that is already running, which is how the app is driven
-  /// while the Host is being debugged from a terminal.
   factory HostClient.attach(String url, String token) =>
       HostClient._(Uri.parse(url), token, null, []);
 
@@ -134,15 +126,11 @@ class HostClient {
         .timeout(const Duration(seconds: 15));
     request.headers.set('X-Akashic-Token', _token);
 
-    // A GET with a body trips dart:io's content-length guard, so only the
-    // methods that actually send something write one.
     if (body != null) {
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
     }
 
-    // Unpacking a multi-gigabyte backup, or a first commit over 30 000 files,
-    // runs well past the ordinary read timeout.
     final response = await request.close()
         .timeout(responseTimeout ?? const Duration(seconds: 60));
     final text = await response.transform(utf8.decoder).join();
@@ -177,7 +165,6 @@ class HostClient {
   Future<LaunchResult> launchProject(String path) async => LaunchResult.fromJson(
       await _send('POST', 'api/projects/launch', {'path': path}) as Map<String, dynamic>);
 
-  /// Returns the line the service wrote, so the shell can show it verbatim.
   Future<String> backupProject(String path) async {
     final result = await _send('POST', 'api/projects/backup', {'path': path});
     return (result as Map)['message'] as String? ?? '备份完成';
@@ -194,7 +181,6 @@ class HostClient {
 
   Future<void> setDarkTheme(bool dark) => _send('POST', 'api/theme', {'dark': dark});
 
-  /// Answers with what the sidecar actually kept, because it clamps the value.
   Future<Map<String, dynamic>> setVisual(double opacity) async =>
       await _send('POST', 'api/visual', {'opacity': opacity})
           as Map<String, dynamic>;
@@ -254,13 +240,11 @@ class HostClient {
   Future<void> forgetSession(String site) =>
       _send('POST', 'api/settings/forget-session', {'site': site});
 
-  /// Rewrites the icon rail and returns what the sidecar kept.
   Future<List<String>> setRail(List<String> items) async {
     final result = await _send('POST', 'api/rail', {'items': items});
     return (((result as Map)['items'] as List?) ?? const []).cast<String>();
   }
 
-  /// The stored session for one site, ready to inject into the embedded browser.
   Future<List<CookieSpec>> sessionCookies(String site) async {
     final result = await _send('GET', 'api/sessions/$site/cookies');
     return ((result as Map)['cookies'] as List)
@@ -286,7 +270,6 @@ class HostClient {
   Future<void> openUrl(String url) =>
       _send('POST', 'api/shell/open', {'target': url, 'kind': 'url'});
 
-  // ---------- registry ----------
 
   Future<List<dynamic>> packages() async =>
       await _send('GET', 'api/packages') as List<dynamic>;
@@ -303,7 +286,6 @@ class HostClient {
       await _send('POST', 'api/packages/remove',
           {'path': path, 'packageName': package}) as Map<String, dynamic>;
 
-  // ---------- local library ----------
 
   Future<List<dynamic>> libraryFiles() async =>
       await _send('GET', 'api/library/files') as List<dynamic>;
@@ -346,7 +328,6 @@ class HostClient {
       await _send('POST', 'api/library/uninstall',
           {'path': projectPath, 'packageId': packageId}) as Map<String, dynamic>;
 
-  // ---------- external packages ----------
 
   Future<List<dynamic>> externalPackages() async =>
       await _send('GET', 'api/external') as List<dynamic>;
@@ -365,10 +346,7 @@ class HostClient {
       await _send('POST', 'api/external/install',
           {'path': projectPath, 'id': id}) as Map<String, dynamic>;
 
-  // ---------- registry sources ----------
 
-  /// Every repository endpoint answers with the whole `{urls, known}` object, so the
-  /// caller gets the list back out of it rather than a cast that would throw.
   List<dynamic> _urlsOf(Object? result) =>
       ((result as Map)['urls'] as List?) ?? const [];
 
@@ -389,7 +367,6 @@ class HostClient {
     return (result as Map)['name'] as String? ?? '';
   }
 
-  // ---------- booth ----------
 
   Future<Map<String, dynamic>> boothScripts() async =>
       await _send('GET', 'api/booth/scripts') as Map<String, dynamic>;
@@ -417,7 +394,6 @@ class HostClient {
   Future<Map<String, dynamic>> boothInspect(String number) async =>
       await _send('POST', 'api/booth/inspect', {'number': number}) as Map<String, dynamic>;
 
-  // ---------- asset store ----------
 
   Future<Map<String, dynamic>> assetStoreScripts() async =>
       await _send('GET', 'api/assetstore/scripts') as Map<String, dynamic>;
@@ -462,8 +438,6 @@ class HostClient {
   Future<void> cacheAssetStoreCover(String name, String url) =>
       _send('POST', 'api/assetstore/cover', {'name': name, 'url': url});
 
-  /// Local path of a thumbnail pulled out of the package itself, for rows the store never
-  /// gave a cover to. Null when the package holds no usable image.
   Future<String?> assetStoreThumbnail(String path) async {
     try {
       final result = await _send(
@@ -474,7 +448,6 @@ class HostClient {
     }
   }
 
-  // ---------- vrchat ----------
 
   Future<Map<String, dynamic>?> vrchatSelf() async {
     try {
@@ -520,7 +493,6 @@ class HostClient {
   Future<Map<String, dynamic>> vrchatLocalMap() async =>
       await _send('POST', 'api/vrchat/local-map') as Map<String, dynamic>;
 
-  // ---------- 备份还原与版本托管 ----------
 
   Future<Map<String, dynamic>> backups() async =>
       await _send('GET', 'api/backups') as Map<String, dynamic>;
@@ -544,7 +516,6 @@ class HostClient {
   Future<Map<String, dynamic>> vcsTools({bool refresh = true}) async =>
       await _send('GET', 'api/vcs/tools?refresh=$refresh') as Map<String, dynamic>;
 
-  /// Runs winget, which can raise a UAC prompt the user has to answer.
   Future<Map<String, dynamic>> vcsInstall(String tool) async =>
       await _send('POST', 'api/vcs/install', {'tool': tool},
           const Duration(minutes: 20)) as Map<String, dynamic>;
@@ -582,9 +553,7 @@ class HostClient {
         const Duration(minutes: 30),
       ) as Map<String, dynamic>;
 
-  // ---------- github ----------
 
-  /// Who gh is signed in as. Never carries the token itself.
   Future<Map<String, dynamic>> githubStatus() async =>
       await _send('GET', 'api/github/status', null,
           const Duration(seconds: 90)) as Map<String, dynamic>;
@@ -593,19 +562,14 @@ class HostClient {
       await _send('GET', 'api/sync/status', null,
           const Duration(seconds: 90)) as Map<String, dynamic>;
 
-  /// Shells out to gh and waits on GitHub, so this is a deliberate multi-minute call.
   Future<Map<String, dynamic>> syncPush() async =>
       await _send('POST', 'api/sync/push', {},
           const Duration(minutes: 5)) as Map<String, dynamic>;
 
-  /// No gist id in either direction: the sidecar finds the account's own backup, so the page never
-  /// has to show or carry an address that could be opened outside it.
   Future<Map<String, dynamic>> syncPull() async =>
       await _send('POST', 'api/sync/pull', {},
           const Duration(minutes: 5)) as Map<String, dynamic>;
 
-  /// The OAuth App that signs people in ships inside the sidecar, so the only GitHub login call is
-  /// this one: it opens the user's own browser and waits for them to click Authorize once.
   Future<Map<String, dynamic>> githubLogin() async =>
       await _send('POST', 'api/github/login', {},
           const Duration(minutes: 6)) as Map<String, dynamic>;

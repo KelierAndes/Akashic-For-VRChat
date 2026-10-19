@@ -8,16 +8,9 @@ import 'app_colors.dart';
 import 'neumorphic.dart';
 import 'theme.dart';
 
-/// Hairline used by the reference sheet for glass-tinted containers.
 Border glassEdgeBorderFallback() =>
     Border.all(color: Colors.white.withValues(alpha: 0.45));
 
-/// Page body shared by every Akashic page.
-///
-/// With `content` set, the title and the `fixed` rows stay put and that one region
-/// takes the rest of the tray: lists then reach the bottom edge instead of leaving
-/// dead space under a fixed-height box, and an embedded browser parked in the fixed
-/// area no longer shares a viewport with the scrolling list.
 class NeuPageBody extends StatelessWidget {
   const NeuPageBody({
     super.key,
@@ -68,9 +61,6 @@ class NeuPageBody extends StatelessWidget {
     final body = content;
 
     if (body == null) {
-      // A plain scroll view rather than a ListView: the settings page asks the shell to
-      // scroll to one of these cards, and a lazily built list has not created that card
-      // yet, so the request would find nothing to scroll to.
       return SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(28, 4, 28, 28),
         child: Column(
@@ -107,7 +97,6 @@ class NeuPageBody extends StatelessWidget {
   }
 }
 
-/// Convex content card — the default container for rows, tiles and groups.
 class NeuCard extends StatelessWidget {
   const NeuCard({
     super.key,
@@ -137,8 +126,6 @@ class NeuCard extends StatelessWidget {
   }
 }
 
-/// Pressable card, used for project tiles and every list row that opens a
-/// detail view.
 class NeuTileButton extends StatelessWidget {
   const NeuTileButton({
     super.key,
@@ -201,7 +188,6 @@ class NeuAvatar extends StatelessWidget {
   }
 }
 
-/// Small status chip: 已安装 / 有更新 / Booth / 未登录.
 class NeuPill extends StatelessWidget {
   const NeuPill(this.text,
       {super.key, this.bg, this.fg, this.onTap, this.tooltip});
@@ -261,8 +247,6 @@ class NeuSectionTitle extends StatelessWidget {
   }
 }
 
-/// Underline tabs — the resource page's three-section switch and any
-/// in-page view toggle.
 class NeuTabs extends StatelessWidget {
   const NeuTabs({
     super.key,
@@ -313,8 +297,6 @@ class NeuTabs extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 7),
-                      // Embossed underline: raised bar with a light top lip
-                      // and a cast shadow. Measured, so CJK labels work.
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         height: 3,
@@ -353,7 +335,6 @@ class NeuTabs extends StatelessWidget {
   }
 }
 
-/// The only inset (concave) surface in the kit — search boxes and text input.
 class NeuSearchField extends StatelessWidget {
   const NeuSearchField({
     super.key,
@@ -406,7 +387,6 @@ class NeuSearchField extends StatelessWidget {
   }
 }
 
-/// Bracket mark used at the corners of the empty state.
 class NeuCornerMark extends StatelessWidget {
   const NeuCornerMark({super.key, required this.color});
 
@@ -449,8 +429,6 @@ class NeuEmptyState extends StatelessWidget {
   final String text;
   final double height;
 
-  /// Fill whatever region the page gave instead of standing at a fixed height —
-  /// used inside `NeuPageBody(content:)`, where a short box would leave dead space.
   final bool expand;
 
   @override
@@ -496,7 +474,6 @@ class NeuEmptyState extends StatelessWidget {
   }
 }
 
-/// Overlay dropdown — filters, version pickers, per-row menus.
 class NeuDropdown extends StatefulWidget {
   const NeuDropdown({
     super.key,
@@ -537,9 +514,6 @@ class _NeuDropdownState extends State<NeuDropdown> {
     }
     final t = NeuTheme.of(context);
 
-    // A 25-entry project list used to run off the bottom of the window with nothing to
-    // scroll it, so the menu measures the room it has and flips above the trigger when
-    // the space below is too tight.
     final box = context.findRenderObject() as RenderBox?;
     final screen = MediaQuery.sizeOf(context);
     var flipUp = false;
@@ -669,7 +643,6 @@ class _NeuDropdownState extends State<NeuDropdown> {
   }
 }
 
-/// Primary command button (安装 / 下载 / 新建项目).
 class NeuActionButton extends StatelessWidget {
   const NeuActionButton({
     super.key,
@@ -765,7 +738,6 @@ class NeuSwitchTile extends StatelessWidget {
   }
 }
 
-/// Segmented control: light / dark / system, filter modes, view density.
 class NeuSegmented extends StatelessWidget {
   const NeuSegmented({
     super.key,
@@ -810,16 +782,6 @@ class NeuSegmented extends StatelessWidget {
   }
 }
 
-/// Cover thumbnail used by the Booth, Asset Store and VRChat lists.
-///
-/// Fetched by hand instead of with `Image.network(headers:)`: Flutter *adds* that
-/// header, so the request leaves with two User-Agent values, and VRChat's image CDN
-/// answers that with 403.
-///
-/// Two levels of cache, because these lists are re-read every time a page opens: the
-/// bytes stay in [fetched] for the run, and on disk under
-/// `<LOCALAPPDATA>\Akashic\cache\covers` across runs. Booth's CDN and VRChat's both
-/// rate-limit or refuse a cold reload of thirty covers.
 class NeuCover extends StatefulWidget {
   const NeuCover(this.url, {super.key, this.width = 64, this.height = 48});
 
@@ -840,12 +802,9 @@ class NeuCover extends StatefulWidget {
 class _NeuCoverState extends State<NeuCover> {
   static final HttpClient _client = HttpClient()..userAgent = null;
 
-  /// `%LOCALAPPDATA%\Akashic\cache\covers`, resolved once. [_noCache] is the negative
-  /// answer, so a machine with no writable folder does not retry it per thumbnail.
   static String? _directory;
   static const String _noCache = '';
 
-  /// Covers are thumbnails; anything bigger than this is not worth keeping on disk.
   static const int _maxBytes = 4 << 20;
 
   Uint8List? _image;
@@ -865,18 +824,14 @@ class _NeuCoverState extends State<NeuCover> {
   }
 
   Future<void> _resolve() async {
-    // The stores hand back protocol-relative covers ("//cdn…/x.png").
     var url = widget.url;
     if (url.isEmpty) return;
 
     if (!url.startsWith('//') && !url.startsWith('http')) {
-      // A cover the storefront never had is cut out of the package itself and handed over
-      // as a local path. It is already on disk, so it needs no cache of its own.
       try {
         final bytes = await File(url).readAsBytes();
         if (bytes.isNotEmpty && mounted) setState(() => _image = bytes);
       } catch (_) {
-        // The extraction folder may have been cleaned; the placeholder glyph answers.
       }
       return;
     }
@@ -899,7 +854,6 @@ class _NeuCoverState extends State<NeuCover> {
           return;
         }
       } catch (_) {
-        // A half-written or locked cache file is treated as no cache at all.
       }
     }
 
@@ -931,18 +885,14 @@ class _NeuCoverState extends State<NeuCover> {
           await file.create(recursive: true);
           await file.writeAsBytes(bytes, flush: true);
         } catch (_) {
-          // Cover art is disposable: a full or read-only cache folder only costs the next fetch.
         }
       }
 
       if (mounted) setState(() => _image = bytes);
     } catch (_) {
-      // A dead cover keeps the placeholder glyph, as it always has.
     }
   }
 
-  /// `null` when this machine has no writable cache directory, which leaves the old
-  /// fetch-every-launch behaviour as the fallback rather than failing the thumbnail.
   static Future<File?> _fileFor(String url) async {
     final directory = await _cacheDirectory();
     if (directory == null) return null;
@@ -953,8 +903,6 @@ class _NeuCoverState extends State<NeuCover> {
     final found = _directory;
     if (found != null) return found == _noCache ? null : found;
 
-    // The sidecar keeps its data under the same folder, so the covers land beside the
-    // list caches and the sync bundle picks nothing extra up.
     final local = Platform.environment['LOCALAPPDATA'];
     if (local == null || local.isEmpty) {
       _directory = _noCache;
@@ -972,9 +920,6 @@ class _NeuCoverState extends State<NeuCover> {
     }
   }
 
-  /// FNV-1a over the URL. Only ever a cache file name, so it needs no more than that —
-  /// and on the Dart VM the multiply already wraps at 64 bits, which is what FNV wants.
-  /// The top bit is dropped because Dart prints a negative int with a leading minus.
   static String _digest(String value) {
     var hash = 0xcbf29ce484222325;
     const prime = 0x100000001b3;
@@ -1015,7 +960,6 @@ class _NeuCoverState extends State<NeuCover> {
   }
 }
 
-/// Round check mark used by the batch bars and the import checklist.
 class NeuCheckbox extends StatelessWidget {
   const NeuCheckbox({super.key, required this.value, required this.onTap, this.size = 22});
 
@@ -1049,7 +993,6 @@ class NeuCheckbox extends StatelessWidget {
   }
 }
 
-/// One column of the flex table used by 资源 / 包浏览器 / Booth 列表.
 class NeuCell extends StatelessWidget {
   const NeuCell(this.text, {super.key, this.head = false, this.flex = 3});
 

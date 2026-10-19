@@ -6,24 +6,15 @@ using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
-/// <summary>
-/// Downloads what the signed-in Booth account already owns and classifies the unpacked archive
-/// so it can join the local libraries. The session comes from the WebView2 login: its booth.pm
-/// cookies are exported here so plain HTTP can follow the downloadables redirect.
-/// </summary>
 public class BoothService : IBoothService
 {
     private const string BoothHost = "booth.pm";
     private const string AccountHost = "accounts.booth.pm";
 
-    // Booth answers 403 to non-browser user agents, so the requests made with the exported
-    // cookies have to look like the WebView2 that produced them.
     private const string BrowserUserAgent =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0";
 
-    // The downloadables endpoint hands out the file URL through a chain of redirects; the
-    // signed link itself has to be fetched without cookies, so it is followed by hand.
     private const int MaxRedirectHops = 5;
 
     private static readonly string[] SkipDirectories =
@@ -44,20 +35,15 @@ public class BoothService : IBoothService
     private List<StoredCookie> _entries = [];
     private bool _vaultChecked;
 
-    /// <summary>Name of this site's slot in the encrypted session store.</summary>
     private const string VaultKey = "booth";
 
     public BoothService(ISessionVault vault, string? settingsPath = null)
     {
         _vault = vault;
 
-        // Private clients: the shared HttpClient in the container is also used by the registry
-        // services, and Booth's session header must never leak into those requests.
         _boothClient = new HttpClient(new HttpClientHandler
         {
             UseCookies = false,
-            // Redirecting away from booth.pm would drop the signed link into an unauthenticated
-            // CDN hop, so the chain is walked one step at a time instead.
             AllowAutoRedirect = false
         });
         _fileClient = new HttpClient(new HttpClientHandler { UseCookies = false });
@@ -76,10 +62,6 @@ public class BoothService : IBoothService
         }
     }
 
-    /// <summary>
-    /// The same session with each cookie's own domain and path, which is the only form the WebView2
-    /// seed can use — a cookie written to the wrong domain is simply never sent to the site.
-    /// </summary>
     public IReadOnlyList<StoredCookie>? SessionEntries
     {
         get
@@ -100,8 +82,6 @@ public class BoothService : IBoothService
                     fresh.Add(cookie);
         }
 
-        // An empty export means the browser had nothing to hand over — a reset profile, or a page
-        // that never set cookies — so it must never overwrite a session that still works.
         if (fresh.Count == 0) return;
 
         _entries = fresh;
@@ -110,8 +90,6 @@ public class BoothService : IBoothService
         _vault.Save(VaultKey, fresh);
     }
 
-    // Rails hands out a session cookie to anonymous visitors too, so this only says a cookie set
-    // was exported; whether it authenticates is Booth's answer.
     public bool HasSession
     {
         get
@@ -121,7 +99,6 @@ public class BoothService : IBoothService
         }
     }
 
-    /// <summary>Adopts a Booth session an earlier run stored, so a WebView2 reset is not a sign-out.</summary>
     private void RestoreFromVault()
     {
         if (_entries.Count > 0 || _vaultChecked) return;
@@ -134,14 +111,6 @@ public class BoothService : IBoothService
         _cookies = StoredCookies.ToNameValue(_entries);
     }
 
-    /// <summary>
-    /// Asks Booth whether the stored session still authenticates, without scraping the library.
-    /// A logged-out request for the library is redirected to the sign-in form, so the absence of that
-    /// redirect is the answer — one headers-only request instead of a paged DOM read.
-    ///
-    /// Null means "no answer": offline, or Cloudflare pushing back on a bare request. That is
-    /// deliberately not reported as signed out, so a flaky network cannot log the user out on screen.
-    /// </summary>
     public async Task<bool?> ProbeSessionAsync(CancellationToken ct = default)
     {
         if (!HasSession) return null;
@@ -241,8 +210,6 @@ public class BoothService : IBoothService
 
         try
         {
-            // WebView2 hands script results back JSON-encoded, so a script that returns a
-            // string arrives double-wrapped.
             var payload = extractorResultJson.Trim();
             if (payload.StartsWith('"'))
                 payload = JsonSerializer.Deserialize<string>(payload) ?? string.Empty;
@@ -274,11 +241,6 @@ public class BoothService : IBoothService
         await SaveSettingsAsync(settings, ct);
     }
 
-    /// <summary>
-    /// Points purchases at archives that already sit in the download folder, so reading the list
-    /// again does not forget what was downloaded in an earlier run. Each file is claimed by at most
-    /// one purchase.
-    /// </summary>
     public void ReconcileLocalArchives(IEnumerable<BoothPurchaseItem> items)
     {
         var directory = GetDownloadDirectory();
@@ -336,16 +298,11 @@ public class BoothService : IBoothService
         if (va is not null) return 1;
         if (vb is not null) return -1;
 
-        // Nothing states a version, so the larger downloadables id is the later upload.
         var na = long.TryParse(a.Number, out var x) ? x : 0;
         var nb = long.TryParse(b.Number, out var y) ? y : 0;
         return na.CompareTo(nb);
     }
 
-    /// <summary>
-    /// A version written into the file name or the product title: "UnyStylus_v1.3.zip",
-    /// "Soramoyou ver1.2". Two-part versions count, so a bare "1" never wins by accident.
-    /// </summary>
     private static Version? ParseVersion(BoothPurchaseItem item)
     {
         foreach (var source in new[] { item.FormLabel, item.DisplayTitle })
@@ -361,18 +318,11 @@ public class BoothService : IBoothService
         return null;
     }
 
-    /// <summary>
-    /// Normalises a file label or archive name for matching: letters and digits only,
-    /// case-insensitive by the caller's dictionary. Shared with the icon resolver so cached
-    /// covers can be matched back to their packages.
-    /// </summary>
     public static string NormalizeKey(string raw) => Key(raw);
 
     public async Task<string> DownloadAsync(BoothPurchaseItem item, IProgress<double>? progress = null,
         CancellationToken ct = default)
     {
-        // Free items download anonymously, so a session is not demanded up front; the redirect
-        // handler below reports a dead login only when Booth actually refuses the request.
         if (!int.TryParse(item.Number, out _))
             throw new InvalidOperationException($"商品 {item.DisplayTitle} 的编号无法识别，无法下载。");
 
@@ -463,10 +413,6 @@ public class BoothService : IBoothService
         return contents;
     }
 
-    /// <summary>
-    /// Walks booth.pm's redirect chain for a downloadables id until it lands somewhere that is
-    /// not Booth, which is the short-lived signed link the CDN actually serves.
-    /// </summary>
     private async Task<(Uri Url, string? FileName)> ResolveFileAsync(string number, CancellationToken ct)
     {
         var url = new Uri($"https://{BoothHost}/downloadables/{number}");
@@ -485,7 +431,6 @@ public class BoothService : IBoothService
                 continue;
             }
 
-            // Booth answers 200 with a sign-in page when the session has quietly expired.
             if (response.IsSuccessStatusCode)
                 return (url, FileNameFromUrl(url));
 
@@ -532,7 +477,6 @@ public class BoothService : IBoothService
 
         var response = await client.SendAsync(request, completion, ct);
 
-        // The session value rotates on every call, so any refreshed cookie is kept for the next one.
         if (sendCookies) AdoptRotatedCookies(response);
 
         return response;
@@ -607,7 +551,6 @@ public class BoothService : IBoothService
 
             var destination = Path.GetFullPath(Path.Combine(root, name));
 
-            // Archives from the web can carry traversal paths, so anything escaping the target is dropped.
             if (!destination.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 continue;
 
@@ -699,7 +642,7 @@ public class BoothService : IBoothService
                 return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_settingsPath), SerializerOptions)
                        ?? new AppSettings();
         }
-        catch { /* Fall back to defaults */ }
+        catch {  }
 
         return new AppSettings();
     }
@@ -709,7 +652,6 @@ public class BoothService : IBoothService
         var directory = Path.GetDirectoryName(_settingsPath);
         if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
-        // Re-read so edits made by the other services sharing settings.json are not clobbered.
         var current = LoadSettings();
         current.BoothDownloadDirectory = settings.BoothDownloadDirectory;
 
@@ -823,9 +765,6 @@ public class BoothService : IBoothService
         })()
         """;
 
-    // Runs on a product page (booth.pm/<shop>/items/<id>): free downloads show the same
-    // .js-download-button controls the library uses, and the page's og: tags carry the
-    // title and cover the library cards do not always expose.
     private const string ItemExtractorScript = """
         (function () {
           function meta(name) {
@@ -879,9 +818,6 @@ public class BoothService : IBoothService
         })()
         """;
 
-    // Runs on the 無料ダウンロード library page. Those cards carry no download control at all —
-    // just the product link, thumbnail, title and shop — so this yields product metadata whose
-    // item pages are visited afterwards to collect the real downloadables.
     private const string FreeExtractorScript = """
         (function () {
           function textOf(node) {

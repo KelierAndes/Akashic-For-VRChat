@@ -4,7 +4,6 @@ import '../shell/app_scope.dart';
 import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 
-/// A project picker used by every action that installs something somewhere.
 class ProjectPickerForm extends StatefulWidget {
   const ProjectPickerForm({super.key, required this.title, required this.onPick});
 

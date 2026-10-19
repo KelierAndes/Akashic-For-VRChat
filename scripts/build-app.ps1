@@ -1,13 +1,3 @@
-# Builds the Flutter shell together with the sidecar it spawns, and stages one into the other.
-#
-# The font step is not cosmetic: Flutter keeps its tree-shaken icon font in build\flutter_assets
-# and does not notice when the set of Icons.* used in the app changes, so an incremental build
-# ships the previous glyph list and buttons come out with blank icons. Deleting it forces a
-# regeneration without paying for a full "flutter clean".
-#
-# Keep this file ASCII only: Windows PowerShell reads a BOM-less .ps1 as ANSI, so any non-ASCII
-# character in a string breaks the parse.
-
 param(
     [switch]$SkipHost
 )
@@ -18,22 +8,15 @@ $app = Join-Path $root 'app'
 $hostOut = Join-Path $root 'src\Akashic.Host\bin\Release'
 $release = Join-Path $app 'build\windows\x64\runner\Release'
 
-# The WebView2 plugin restores its NuGet package at build time, and the repo carries the
-# client so a clean machine needs no global install.
 $env:PATH = "$(Join-Path $root 'tools');$env:PATH"
 
 if (-not $SkipHost) {
     Write-Host 'building Akashic.Host...'
     dotnet build (Join-Path $root 'src\Akashic.Host\Akashic.Host.csproj') -c Release -v q --nologo | Out-Host
 
-    # A native command's exit code does not raise, so without this check a failed C# build
-    # falls through to flutter and stages the PREVIOUS sidecar: the app then runs old code
-    # while looking like it was just rebuilt.
     if ($LASTEXITCODE -ne 0) { throw ('Akashic.Host build failed with exit code ' + $LASTEXITCODE) }
 }
 
-# A running exe locks its own output, and the build then fails with MSB3027 rather than a
-# clear message, so stop anything that is holding the directory.
 Get-Process akashic_ui, Akashic.Host -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Warning ("stopping {0} (pid {1}) - it locks the build output" -f $_.ProcessName, $_.Id)
     Stop-Process -Id $_.Id -Force
