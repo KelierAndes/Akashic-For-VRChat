@@ -15,6 +15,8 @@ import '../state/app_model.dart';
 import '../pages/stub_page.dart';
 import '../pages/templates_page.dart';
 import '../pages/vrchat_page.dart';
+import '../ui/neu_dialog.dart';
+import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 import 'app_scope.dart';
@@ -31,6 +33,46 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _navIndex = 0;
   bool _sideVisible = true;
+
+  AppModel? _model;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final model = AppScope.of(context);
+    if (identical(_model, model)) return;
+
+    _model?.removeListener(_announceUpdate);
+    _model = model;
+    model.addListener(_announceUpdate);
+  }
+
+  @override
+  void dispose() {
+    _model?.removeListener(_announceUpdate);
+    super.dispose();
+  }
+
+  void _announceUpdate() {
+    final model = _model;
+    if (model == null || !mounted) return;
+    if (!model.updateAvailable || model.updatePrompted || model.modal != null) {
+      return;
+    }
+
+    model.updatePrompted = true;
+    final bytes = (model.updateInfo?['assetBytes'] as num?)?.toInt() ?? 0;
+    model.showModal(UpdatePromptForm(
+      version: model.updateVersion,
+      notes: '${model.updateInfo?['notes'] ?? ''}',
+      sizeText: bytes > 0 ? formatBytes(bytes) : '',
+      onLater: model.closeModal,
+      onOpen: () {
+        model.closeModal();
+        model.jumpTo('about');
+      },
+    ));
+  }
 
   Widget _page(String id, AppModel model) {
     switch (id) {

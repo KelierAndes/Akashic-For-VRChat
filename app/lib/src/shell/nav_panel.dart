@@ -104,6 +104,7 @@ class _NavPanelState extends State<NavPanel> {
                       icon: AppNav.entries[i].icon,
                       label: AppNav.entries[i].label,
                       count: widget.badges[AppNav.entries[i].id],
+                      dot: AppNav.entries[i].id == 'settings' && model.updateAvailable,
                       selected: widget.navIndex == i,
                       onTap: () => widget.onNavChanged(i),
                     ),
@@ -272,11 +273,13 @@ class _NavItem extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.count,
+    this.dot = false,
   });
 
   final IconData icon;
   final String label;
   final int? count;
+  final bool dot;
   final bool selected;
   final VoidCallback onTap;
 
@@ -311,6 +314,14 @@ class _NavItem extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (dot)
+              Container(
+                width: 8,
+                height: 8,
+                margin: const EdgeInsets.only(right: 6),
+                decoration: const BoxDecoration(
+                    color: Color(0xFF3E9E63), shape: BoxShape.circle),
+              ),
             if (count != null)
               NeuBox(
                 mode: NeuMode.inset,

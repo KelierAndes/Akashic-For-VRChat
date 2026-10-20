@@ -42,12 +42,15 @@ builder.Services.AddSingleton<IAssetStoreService, AssetStoreService>();
 builder.Services.AddSingleton<IVRChatSyncService, VRChatSyncService>();
 builder.Services.AddSingleton<IVRChatBlueprintScanService, VRChatBlueprintScanService>();
 builder.Services.AddSingleton<IUnityPackageIconService, UnityPackageIconService>();
+builder.Services.AddSingleton<IResourceCatalogService, ResourceCatalogService>();
 builder.Services.AddSingleton<IThemeService, ThemeService>();
 builder.Services.AddSingleton<IRailLayoutService, RailLayoutService>();
 builder.Services.AddSingleton<IVersionControlService, VersionControlService>();
 builder.Services.AddSingleton<GitHubCli>();
 builder.Services.AddSingleton<GitHubLoopbackAuth>();
 builder.Services.AddSingleton<IConfigSyncService, ConfigSyncService>();
+builder.Services.AddSingleton<IUpdateService, UpdateService>();
+builder.Services.AddSingleton<AutoSync>();
 
 var app = builder.Build();
 
@@ -61,10 +64,15 @@ api.MapSettings();
 api.MapSessions();
 api.MapPackages();
 api.MapLibrary();
+api.MapResources();
 api.MapAccounts();
 api.MapRestore();
 api.MapGitHub();
+api.MapUpdates();
 api.MapEvents();
+
+app.Lifetime.ApplicationStarted.Register(() =>
+    app.Services.GetRequiredService<AutoSync>().Queue("启动"));
 
 await app.StartAsync();
 

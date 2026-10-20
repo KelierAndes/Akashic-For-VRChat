@@ -14,6 +14,11 @@ public interface IUnityPackageLibraryService
 
     Task<List<UnityPackageFileInfo>> ScanAsync(CancellationToken ct = default);
 
+    Task<List<ResourceRow>> ScanResourcesAsync(CancellationToken ct = default);
+
+    Task<List<string>> ExtractArchiveAsync(string archivePath, IReadOnlyList<string>? entries = null,
+        CancellationToken ct = default);
+
     UnityPackageFileInfo DescribePackage(string filePath);
 
     Task<List<UnityPackageInstallRecord>> GetRecordsAsync(string projectPath, CancellationToken ct = default);

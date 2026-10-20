@@ -4,7 +4,7 @@ namespace Akashic.Core.Services;
 
 public interface IVpmRegistryService
 {
-    Task<List<VpmPackage>> GetAllPackagesAsync(CancellationToken ct = default);
+    Task<List<VpmPackage>> GetAllPackagesAsync(bool refresh = false, CancellationToken ct = default);
     Task<List<VpmPackage>> GetPackagesFromRegistryAsync(string registryUrl, CancellationToken ct = default);
     Task<VpmPackage?> GetPackageAsync(string packageName, CancellationToken ct = default);
     Task<List<VpmPackage>> SearchPackagesAsync(string query, CancellationToken ct = default);

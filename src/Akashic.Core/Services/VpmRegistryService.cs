@@ -43,8 +43,13 @@ public class VpmRegistryService : IVpmRegistryService
             Directory.CreateDirectory(_cacheDir);
     }
 
-    public async Task<List<VpmPackage>> GetAllPackagesAsync(CancellationToken ct = default)
+    public async Task<List<VpmPackage>> GetAllPackagesAsync(bool refresh = false, CancellationToken ct = default)
     {
+        if (refresh)
+        {
+            lock (_packageCache) _packageCache.Clear();
+        }
+
         var packageMap = new Dictionary<string, VpmPackage>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var url in _registryUrls)
@@ -173,13 +178,13 @@ public class VpmRegistryService : IVpmRegistryService
 
     public async Task<VpmPackage?> GetPackageAsync(string packageName, CancellationToken ct = default)
     {
-        var allPackages = await GetAllPackagesAsync(ct);
+        var allPackages = await GetAllPackagesAsync(ct: ct);
         return allPackages.Find(p => p.Name == packageName);
     }
 
     public async Task<List<VpmPackage>> SearchPackagesAsync(string query, CancellationToken ct = default)
     {
-        var allPackages = await GetAllPackagesAsync(ct);
+        var allPackages = await GetAllPackagesAsync(ct: ct);
         if (string.IsNullOrWhiteSpace(query))
             return allPackages;
 

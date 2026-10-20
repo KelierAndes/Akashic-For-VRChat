@@ -74,7 +74,7 @@ public class AssetStoreService : IAssetStoreService
             if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
 
             File.WriteAllText(_coverCachePath,
-                JsonSerializer.Serialize(_coverCache.ToArray(), SerializerOptions));
+                JsonSerializer.Serialize(_coverCache, SerializerOptions));
         }
         catch (IOException)
         {

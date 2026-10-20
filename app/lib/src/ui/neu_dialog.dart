@@ -338,6 +338,67 @@ class NeuDialogActions extends StatelessWidget {
   }
 }
 
+class UpdatePromptForm extends StatelessWidget {
+  const UpdatePromptForm({
+    super.key,
+    required this.version,
+    required this.notes,
+    required this.onLater,
+    required this.onOpen,
+    this.sizeText = '',
+  });
+
+  final String version;
+  final String notes;
+  final String sizeText;
+  final VoidCallback onLater;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NeuTheme.of(context);
+    final body = notes.trim();
+
+    return NeuModalScaffold(
+      title: '发现新版本 $version',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (body.isNotEmpty)
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: SingleChildScrollView(
+                child: Text(body,
+                    style: TextStyle(
+                        fontSize: 12.5, height: 1.6, color: t.inkSecondary)),
+              ),
+            ),
+          const SizedBox(height: 14),
+          Text(
+              sizeText.isEmpty
+                  ? '更新会先下载并校验签名，确认后重启安装。'
+                  : '更新包 $sizeText · 下载后校验签名，确认后重启安装。',
+              style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              NeuActionButton(label: '稍后', onTap: onLater),
+              const SizedBox(width: 10),
+              NeuActionButton(
+                label: '查看更新',
+                icon: Icons.system_update_alt_rounded,
+                emphasised: true,
+                onTap: onOpen,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class NeuResultForm extends StatelessWidget {
   const NeuResultForm(this.log, {super.key});
 

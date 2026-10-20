@@ -37,16 +37,31 @@ public static class GitHubEndpoints
         });
 
         group.MapPost("/sync/pull", async Task<IResult> (
-            IConfigSyncService sync, CancellationToken ct) =>
-            Results.Json(await sync.PullAsync(ct)));
+            IConfigSyncService sync, IThemeService theme, IRailLayoutService rail, CancellationToken ct) =>
+        {
+            var result = await sync.PullAsync(ct);
+            if (result.Success)
+            {
+                theme.Reload();
+                rail.Reload();
+            }
+            return Results.Json(result);
+        });
+
+        group.MapPost("/sync/touch", (SyncTouch? request, AutoSync auto) =>
+        {
+            auto.Queue(string.IsNullOrWhiteSpace(request?.Reason) ? "手动" : request!.Reason!);
+            return Results.Json(auto.Snapshot());
+        });
 
         group.MapPost("/github/login", async Task<IResult> (
-            GitHubLoopbackAuth auth, GitHubCli gitHub, CancellationToken ct) =>
+            GitHubLoopbackAuth auth, GitHubCli gitHub, AutoSync auto, CancellationToken ct) =>
         {
             var (clientId, clientSecret) = GitHubOAuthApp.Resolve();
             var result = await auth.LoginAsync(clientId, clientSecret, ct: ct).ConfigureAwait(false);
 
             gitHub.Forget();
+            if (result.Ok) auto.Queue("GitHub 登录");
 
             var hasBackup = result.Ok && await gitHub.FindGistAsync(ct).ConfigureAwait(false) != null;
 
@@ -66,4 +81,6 @@ public static class GitHubEndpoints
     }
 
     internal sealed record SyncToggle(bool Enabled);
+
+    internal sealed record SyncTouch(string? Reason);
 }

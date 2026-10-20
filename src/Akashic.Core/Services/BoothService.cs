@@ -37,6 +37,8 @@ public class BoothService : IBoothService
 
     private const string VaultKey = "booth";
 
+    private const string AdultCookie = "adult=t";
+
     public BoothService(ISessionVault vault, string? settingsPath = null)
     {
         _vault = vault;
@@ -174,6 +176,34 @@ public class BoothService : IBoothService
     }
 
     public BoothLibraryPage ParseFreeLibraryPage(string extractorResultJson) => ParseItemPage(extractorResultJson);
+
+    public async Task<List<BoothMatchCandidate>> SearchAsync(string query, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(query)) return [];
+
+        var url = new Uri($"https://booth.pm/ja/search/{Uri.EscapeDataString(query.Trim())}?adult=include");
+        using var response = await SendAsync(_boothClient, url, HttpCompletionOption.ResponseContentRead,
+            sendCookies: true, ct, extraCookies: AdultCookie);
+
+        if (!response.IsSuccessStatusCode) return [];
+
+        var html = await response.Content.ReadAsStringAsync(ct);
+        return BoothHtml.ParseCards(html);
+    }
+
+    public async Task<BoothMatchCandidate?> GetItemAsync(string itemId, CancellationToken ct = default)
+    {
+        if (!System.Text.RegularExpressions.Regex.IsMatch(itemId, @"^\d+$")) return null;
+
+        var url = new Uri($"https://{BoothHost}/ja/items/{itemId}");
+        using var response = await SendAsync(_boothClient, url, HttpCompletionOption.ResponseContentRead,
+            sendCookies: true, ct);
+
+        if (!response.IsSuccessStatusCode) return null;
+
+        var html = await response.Content.ReadAsStringAsync(ct);
+        return BoothHtml.ParseItem(html, itemId);
+    }
 
     public BoothLibraryCache LoadLibraryCache()
     {
@@ -465,15 +495,22 @@ public class BoothService : IBoothService
     };
 
     private async Task<HttpResponseMessage> SendAsync(HttpClient client, Uri url, HttpCompletionOption completion,
-        bool sendCookies, CancellationToken ct)
+        bool sendCookies, CancellationToken ct, string? extraCookies = null)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.TryAddWithoutValidation("User-Agent", BrowserUserAgent);
         request.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml,*/*;q=0.8");
         request.Headers.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,ja;q=0.8");
         request.Headers.TryAddWithoutValidation("Referer", $"https://{BoothHost}/");
-        if (sendCookies && _cookies.Count > 0)
-            request.Headers.TryAddWithoutValidation("Cookie", BuildCookieHeader());
+
+        if (sendCookies)
+        {
+            var header = BuildCookieHeader();
+            if (!string.IsNullOrEmpty(extraCookies))
+                header = header.Length == 0 ? extraCookies : header + "; " + extraCookies;
+            if (header.Length > 0)
+                request.Headers.TryAddWithoutValidation("Cookie", header);
+        }
 
         var response = await client.SendAsync(request, completion, ct);
 

@@ -34,6 +34,9 @@ public class BoothPurchaseItem
     [JsonPropertyName("isFree")]
     public bool IsFree { get; set; }
 
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = string.Empty;
+
     [JsonIgnore]
     public string ProductKey
     {

@@ -41,7 +41,7 @@ class AppNav {
       icon: Icons.publish_rounded,
       section: '工具',
     ),
-    NavEntry(id: 'booth', label: 'Booth 已购', icon: Icons.shopping_bag_rounded),
+    NavEntry(id: 'booth', label: 'Booth', icon: Icons.shopping_bag_rounded),
     NavEntry(
         id: 'assetstore', label: 'Asset Store 导入',
         icon: Icons.collections_rounded),

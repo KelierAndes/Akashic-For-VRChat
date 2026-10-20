@@ -23,6 +23,8 @@ class _Row {
     required this.installed,
     required this.available,
     required this.origin,
+    required this.category,
+    required this.cover,
     required this.filePath,
   });
 
@@ -32,6 +34,8 @@ class _Row {
   final String installed;
   final String available;
   final String origin;
+  final String category;
+  final String cover;
   final String filePath;
 
   bool get isInstalled => installed != '无';
@@ -44,10 +48,29 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   List<_Row> _rows = [];
   final Set<String> _selected = {};
   String _filter = '全部';
+  String _origin = '全部来源';
+  String _category = '全部分类';
   String _status = '';
   bool _busy = false;
 
   static const _filters = ['全部', '已安装', '可升级', '未安装'];
+
+  List<String> get _origins => [
+        '全部来源',
+        ...{for (final row in _rows) if (row.origin.isNotEmpty) row.origin},
+      ];
+
+  List<String> get _categories => [
+        '全部分类',
+        '未分类',
+        ...{for (final row in _rows) if (row.category.isNotEmpty) row.category},
+      ];
+
+  static String _key(String raw) {
+    var text = raw.toLowerCase();
+    text = text.replaceAll(RegExp(r'\d+(?:\.\d+){1,3}[0-9a-z.+\-]*'), ' ');
+    return text.replaceAll(RegExp(r'[^a-z0-9\u3040-\u30ff\u4e00-\u9fff]'), '');
+  }
 
   @override
   void initState() {
@@ -55,7 +78,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false, bool reloadRegistry = false}) async {
     final model = AppScope.of(context);
     final host = model.host;
     if (host == null) return;
@@ -66,12 +89,41 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     });
 
     try {
-      await model.refreshProjects();
+      if (force || model.projects.isEmpty) await model.refreshProjects();
       final project = model.projects.firstWhere((p) => p.path == widget.projectPath);
-      final registry = (await host.packages()).cast<Map<String, dynamic>>();
-      final library = (await host.libraryFiles()).cast<Map<String, dynamic>>();
-      final records =
-          (await host.installRecords(project.path)).cast<Map<String, dynamic>>();
+      final registry = await model.packages(force: reloadRegistry);
+      final library = await model.libraryFiles(force: force);
+      final records = await model.installRecords(project.path, force: force);
+
+      final categoryByKey = <String, String>{};
+      final coverByKey = <String, String>{};
+      final sourceByKey = <String, String>{};
+      for (final row in await model.resourceRows(force: force)) {
+        final metaKey = '${row['metaKey']}';
+        if (metaKey.isEmpty) continue;
+
+        final category = '${row['category']}';
+        if (category.isNotEmpty) categoryByKey[metaKey] = category;
+
+        final cover = '${row['coverUrl']}';
+        if (cover.isNotEmpty) coverByKey[metaKey] = cover;
+
+        final source = '${row['matchSource']}';
+        if (source.isNotEmpty) sourceByKey[metaKey] = source;
+      }
+
+      String categoryOf(String name, String id) =>
+          categoryByKey[_key(name)] ?? categoryByKey[_key(id)] ?? '';
+      String coverOf(String name, String id) =>
+          coverByKey[_key(name)] ?? coverByKey[_key(id)] ?? '';
+      String originOf(String name, String id, String fallback) {
+        final source = sourceByKey[_key(name)] ?? sourceByKey[_key(id)] ?? '';
+        return switch (source) {
+          'Booth' => 'Booth',
+          'AssetStore' => 'Asset Store',
+          _ => fallback,
+        };
+      }
 
       final installedByName = <String, InstalledPackage>{
         for (final p in project.installedPackages) p.name.toLowerCase(): p
@@ -85,23 +137,29 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 
       for (final package in registry) {
         final name = '${package['name']}';
+        final display = '${package['displayName']}'.isEmpty
+            ? name
+            : '${package['displayName']}';
         registryNames.add(name.toLowerCase());
         rows.add(_Row(
           id: name,
-          name: '${package['displayName']}'.isEmpty ? name : '${package['displayName']}',
+          name: display,
           group: 'VPM 包',
           installed: installedByName[name.toLowerCase()]?.version ?? '无',
           available: '${package['version']}',
           origin: '注册表',
+          category: categoryOf(display, name),
+          cover: coverOf(display, name),
           filePath: '',
         ));
       }
 
       for (final entry in installedByName.values) {
         if (registryNames.contains(entry.name.toLowerCase())) continue;
+        final display = entry.displayName.isEmpty ? entry.name : entry.displayName;
         rows.add(_Row(
           id: entry.name,
-          name: entry.displayName.isEmpty ? entry.name : entry.displayName,
+          name: display,
           group: switch (entry.source) {
             'Local' => '本地包',
             'Git' => 'Git 仓库',
@@ -109,25 +167,38 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           },
           installed: entry.version,
           available: entry.version,
-          origin: entry.source,
+          origin: switch (entry.source) {
+            'Local' => '本地',
+            'Git' => 'Git',
+            'Registry' => '注册表',
+            'Embedded' => '内嵌',
+            _ => entry.source,
+          },
+          category: categoryOf(display, entry.name),
+          cover: coverOf(display, entry.name),
           filePath: '',
         ));
       }
 
       for (final file in library) {
         final path = '${file['filePath']}';
+        final display =
+            '${file['displayName']}'.isEmpty ? path : '${file['displayName']}';
         rows.add(_Row(
           id: 'unitypackage:$path',
-          name: '${file['displayName']}'.isEmpty ? path : '${file['displayName']}',
+          name: display,
           group: '.unitypackage',
           installed: recordByPath[path]?['version'] ?? '无',
           available: '${file['version']}',
-          origin: originLabel('${file['origin']}'),
+          origin: originOf(display, path, originLabel('${file['origin']}')),
+          category: categoryOf(display, path),
+          cover: coverOf(display, path),
           filePath: path,
-        ));
-      }
+        ));      }
 
       _rows = rows;
+      if (!_origins.contains(_origin)) _origin = '全部来源';
+      if (!_categories.contains(_category)) _category = '全部分类';
       _status = '共 ${rows.length} 项 · ${installedByName.length} 项已安装 · '
           '${recordByPath.length} 个 .unitypackage 台账';
     } catch (error) {
@@ -138,16 +209,20 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   }
 
   List<_Row> get _shown => _rows.where((row) {
-        switch (_filter) {
-          case '已安装':
-            return row.isInstalled;
-          case '可升级':
-            return row.upgradable;
-          case '未安装':
-            return !row.isInstalled;
-          default:
-            return true;
+        final matchesState = switch (_filter) {
+          '已安装' => row.isInstalled,
+          '可升级' => row.upgradable,
+          '未安装' => !row.isInstalled,
+          _ => true,
+        };
+        if (!matchesState) return false;
+        if (_origin != '全部来源' && row.origin != _origin) return false;
+        if (_category == '未分类') {
+          if (row.category.isNotEmpty) return false;
+        } else if (_category != '全部分类' && row.category != _category) {
+          return false;
         }
+        return true;
       }).toList()
         ..sort((a, b) {
           final byInstalled =
@@ -196,7 +271,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     _selected.clear();
     if (!mounted) return;
     setState(() => _busy = false);
-    await _load();
+    await _load(force: true);
   }
 
   Future<void> _removeSelected() async {
@@ -235,7 +310,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     _selected.clear();
     if (!mounted) return;
     setState(() => _busy = false);
-    await _load();
+    await _load(force: true);
   }
 
   @override
@@ -300,27 +375,37 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               value: _filter,
               items: _filters,
               icon: Icons.filter_alt_rounded,
-              onChanged: (value) => setState(() => _filter = value),
-            ),
-            const SizedBox(width: 14),
-            NeuCheckbox(
-              value: shown.isNotEmpty &&
-                  shown.every((r) => _selected.contains(r.id)),
-              onTap: () => setState(() {
-                final all = shown.every((r) => _selected.contains(r.id));
+              onChanged: (value) => setState(() {
+                _filter = value;
                 _selected.clear();
-                if (!all) _selected.addAll(shown.map((r) => r.id));
               }),
             ),
-            const SizedBox(width: 9),
-            Text('全选 ${shown.length} 项',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            const SizedBox(width: 10),
+            NeuDropdown(
+              value: _origin,
+              items: _origins,
+              icon: Icons.source_rounded,
+              onChanged: (value) => setState(() {
+                _origin = value;
+                _selected.clear();
+              }),
+            ),
+            const SizedBox(width: 10),
+            NeuDropdown(
+              value: _category,
+              items: _categories,
+              icon: Icons.category_rounded,
+              onChanged: (value) => setState(() {
+                _category = value;
+                _selected.clear();
+              }),
+            ),
             const Spacer(),
             if (_selected.isEmpty)
               NeuActionButton(
                 label: '刷新',
                 icon: Icons.refresh_rounded,
-                onTap: _busy ? null : _load,
+                onTap: _busy ? null : () => _load(force: true, reloadRegistry: true),
               )
             else ...[
               NeuActionButton(
@@ -338,6 +423,23 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
             ],
           ],
         ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            NeuCheckbox(
+              value: shown.isNotEmpty &&
+                  shown.every((r) => _selected.contains(r.id)),
+              onTap: () => setState(() {
+                final all = shown.every((r) => _selected.contains(r.id));
+                _selected.clear();
+                if (!all) _selected.addAll(shown.map((r) => r.id));
+              }),
+            ),
+            const SizedBox(width: 9),
+            Text('全选 ${shown.length} / ${_rows.length} 项',
+                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+          ],
+        ),
         const SizedBox(height: 12),
         Padding(
           padding: const EdgeInsets.only(left: 16),
@@ -347,6 +449,7 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               NeuCell('已安装', head: true, flex: 2),
               NeuCell('可用', head: true, flex: 2),
               NeuCell('来源', head: true, flex: 2),
+              NeuCell('分类', head: true, flex: 2),
               NeuCell('类型', head: true, flex: 2),
             ],
           ),
@@ -371,10 +474,27 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
                       : _selected.add(row.id)),
                 ),
                 const SizedBox(width: 14),
-                NeuCell(row.name, flex: 5),
+                Expanded(
+                  flex: 5,
+                  child: Row(
+                    children: [
+                      NeuCover(row.cover, width: 44, height: 32),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(row.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: t.ink)),
+                      ),
+                    ],
+                  ),
+                ),
                 NeuCell(row.installed, flex: 2),
                 NeuCell(row.available, flex: 2),
                 NeuCell(row.origin, flex: 2),
+                NeuCell(row.category.isEmpty ? '—' : row.category, flex: 2),
                 NeuCell(row.group, flex: 2),
                 if (row.upgradable)
                   const NeuPill('可升级',

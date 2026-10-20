@@ -70,10 +70,9 @@ class _PackagesPageState extends State<PackagesPage> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     final model = AppScope.of(context);
-    final host = model.host;
-    if (host == null) return;
+    if (model.host == null) return;
 
     if (model.packageQuery.isNotEmpty) {
       _search.text = model.packageQuery;
@@ -82,13 +81,12 @@ class _PackagesPageState extends State<PackagesPage> {
 
     setState(() {
       _busy = true;
-      _status = '正在读取注册表…';
+      _status = force ? '正在刷新注册表…' : '正在读取注册表…';
     });
 
     try {
-      if (model.projects.isEmpty) await model.refreshProjects();
-      _all = (await host.packages())
-          .cast<Map<String, dynamic>>()
+      if (force || model.projects.isEmpty) await model.refreshProjects();
+      _all = (await model.packages(force: force))
           .map(_Package.new)
           .toList()
         ..sort((a, b) =>
@@ -228,7 +226,7 @@ class _PackagesPageState extends State<PackagesPage> {
       trailing: NeuActionButton(
         label: '刷新',
         icon: Icons.refresh_rounded,
-        onTap: _busy ? null : _load,
+        onTap: _busy ? null : () => _load(force: true),
       ),
       fixed: [
         Row(

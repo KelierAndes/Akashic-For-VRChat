@@ -11,7 +11,6 @@ import '../ui/theme.dart';
 class BoothPage extends StatefulWidget {
   const BoothPage({super.key});
 
-  static const kinds = ['已购商品', '礼物领取', '免费商品'];
   static const views = ['全部商品', '未下载', '已下载'];
 
   static const mediaFilters = ['可用软件包', '全部商品', '演示·图集'];
@@ -23,18 +22,20 @@ class BoothPage extends StatefulWidget {
     'イラスト', '插画', '画集', '图集', 'artbook', 'art book', 'fanbook',
     'ファンブック', '設定資料集', '写真集', 'フォト集', 'photo book', 'photobook',
     'illustration', 'コミック', '漫画', 'comic', '小説', '小说', 'novel',
+    'サンプル', 'お試し', '体験版', '試聴', 'デモ', '素材集', '壁紙',
   ];
+
+  static const mediaTokens = {
+    'sample', 'samples', 'demo', 'preview', 'trailer', 'teaser', 'promo', 'pv',
+  };
 
   static bool looksLikeMedia(Map<String, dynamic> row) {
     final text = '${row['title']} ${row['formLabel']}'.toLowerCase();
-    return mediaKeywords.any(text.contains);
-  }
+    if (mediaKeywords.any(text.contains)) return true;
 
-  static String kindOf(String label) => switch (label) {
-        '礼物领取' => 'gifts',
-        '免费商品' => 'free',
-        _ => 'purchase',
-      };
+    final tokens = text.split(RegExp(r'[^0-9a-z\u3040-\u30ff\u4e00-\u9fff]+'));
+    return tokens.any(mediaTokens.contains);
+  }
 
   @override
   State<BoothPage> createState() => BoothPageState();
@@ -50,15 +51,17 @@ class BoothPageState extends State<BoothPage> {
   int _hiddenTotal = 0;
   final Set<String> _selected = {};
   Map<String, dynamic>? _scripts;
-  String _kind = BoothPage.kinds.first;
   String _view = BoothPage.views.first;
   String _media = BoothPage.mediaFilters.first;
+  String _category = '全部分类';
   String _status = '';
   String _directory = '';
   String _url = 'https://booth.pm/';
   bool _browserOpen = false;
   bool _signedIn = false;
   bool _busy = false;
+
+  String _lastProbe = '';
 
   @override
   void initState() {
@@ -106,26 +109,29 @@ class BoothPageState extends State<BoothPage> {
           '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}'
           ' · $_directory';
 
+  List<String> get _categories => [
+        '全部分类',
+        '未分类',
+        ...{
+          for (final row in _rows)
+            if ('${row['category']}'.isNotEmpty) '${row['category']}'
+        },
+      ];
+
   List<Map<String, dynamic>> get _shown => _rows.where((row) {
         final media = BoothPage.looksLikeMedia(row);
         if (_media == BoothPage.mediaFilters[0] && media) return false;
         if (_media == BoothPage.mediaFilters[2] && !media) return false;
+        final category = '${row['category']}';
+        if (_category == '未分类' && category.isNotEmpty) return false;
+        if (_category != '全部分类' && _category != '未分类' && category != _category) {
+          return false;
+        }
         final has = _downloaded.contains('${row['number']}');
         if (_view == BoothPage.views[1]) return !has;
         if (_view == BoothPage.views[2]) return has;
         return true;
       }).toList();
-
-  void _absorb(List<Map<String, dynamic>> incoming) {
-    final byNumber = {for (final row in _rows) '${row['number']}': row};
-    for (final row in incoming) {
-      byNumber['${row['number']}'] = row;
-    }
-    _rows = byNumber.values.toList()
-      ..sort((a, b) => '${a['title']}'
-          .toLowerCase()
-          .compareTo('${b['title']}'.toLowerCase()));
-  }
 
   Future<void> _nextFrame() async {
     final completer = Completer<void>();
@@ -178,30 +184,114 @@ class BoothPageState extends State<BoothPage> {
     });
   }
 
-  Future<Map<String, dynamic>?> _extract(String script) async {
+  Future<Map<String, dynamic>?> _extractWith(String kind, String script) async {
     final host = AppScope.of(context).host;
-    final controller = _browser.currentState?.controller;
-    if (host == null || controller == null) return null;
+    if (host == null) return null;
 
-    for (var attempt = 0; attempt < 40; attempt++) {
+    for (var wait = 0;
+        wait < 60 && _browser.currentState?.controller == null;
+        wait++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+
+    final controller = _browser.currentState?.controller;
+    if (controller == null) {
+      _lastProbe = '页面组件未就绪 · 页面 $_url';
+      return null;
+    }
+
+    Map<String, dynamic>? last;
+    var sawRaw = false;
+
+    for (var attempt = 0; attempt < 60; attempt++) {
       final raw = await controller.evaluateJavascript(source: script);
       if (raw != null) {
-        final page = await host.boothParse(BoothPage.kindOf(_kind), '$raw');
-        final items = ((page['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
-        if (items.isNotEmpty || page['loginRequired'] == true) return page;
+        sawRaw = true;
+        last = await host.boothParse(kind, '$raw');
+        final items = ((last['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        if (items.isNotEmpty || last['loginRequired'] == true) return last;
       }
       await Future<void>.delayed(const Duration(milliseconds: 350));
     }
+
+    final count = ((last?['items'] as List?) ?? const []).length;
+    _lastProbe = '${sawRaw ? '已解析 $count 项' : '脚本无响应'} · 页面 $_url';
     return null;
+  }
+
+  Future<Map<String, dynamic>?> _readList({
+    required String kind,
+    required String script,
+    required String label,
+    required void Function(List<Map<String, dynamic>> items) onItems,
+    bool navigateFirst = true,
+  }) async {
+    final host = AppScope.of(context).host;
+    if (host == null) return null;
+
+    if (navigateFirst) {
+      await _browser.currentState?.navigate(await host.boothUrl(kind, 1));
+    }
+    final first = await _extractWith(kind, script);
+    if (first == null || first['loginRequired'] == true) return first;
+
+    onItems(((first['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
+    final lastPage = (first['lastPage'] as num?)?.toInt() ?? 1;
+    if (mounted) setState(() => _status = '$label 第 1 / $lastPage 页');
+
+    for (var next = 2; next <= lastPage; next++) {
+      await _browser.currentState
+          ?.navigate(await host.boothUrl(kind, next));
+      final more = await _extractWith(kind, script);
+      if (more == null) break;
+      if (more['loginRequired'] == true) return more;
+
+      onItems(((more['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
+      if (!mounted) return more;
+      setState(() => _status = '$label 第 $next / $lastPage 页');
+    }
+
+    return first;
+  }
+
+  Future<List<Map<String, dynamic>>> _readFreeDownloads(String itemUrl,
+      String itemScript) async {
+    final host = AppScope.of(context).host;
+    if (host == null) return const [];
+
+    for (var wait = 0;
+        wait < 60 && _browser.currentState?.controller == null;
+        wait++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+
+    final controller = _browser.currentState?.controller;
+    if (controller == null) return const [];
+
+    await _browser.currentState?.navigate(itemUrl);
+
+    for (var attempt = 0; attempt < 12; attempt++) {
+      final raw = await controller.evaluateJavascript(source: itemScript);
+      if (raw != null) {
+        final page = await host.boothParse('item', '$raw');
+        final items =
+            ((page['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        if (items.isNotEmpty) return items;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+
+    return const [];
   }
 
   Future<void> _read() async {
     final host = AppScope.of(context).host;
     if (host == null) return;
-    final script = _scripts?[BoothPage.kindOf(_kind) == 'free'
-        ? 'freeLibrary'
-        : 'purchase'] as String?;
-    if (script == null) {
+
+    final purchaseScript = _scripts?['purchase'] as String?;
+    final freeScript = _scripts?['freeLibrary'] as String?;
+    final itemScript = _scripts?['itemPage'] as String?;
+    if (purchaseScript == null || freeScript == null || itemScript == null) {
       setState(() => _status = '还没有取到提取脚本。');
       return;
     }
@@ -211,16 +301,36 @@ class BoothPageState extends State<BoothPage> {
       _status = '正在注入登录态并打开 Booth…';
     });
     await _seed();
+    await _showBrowser(await host.boothUrl('purchase', 1));
 
-    final first = await host.boothUrl(BoothPage.kindOf(_kind), 1);
-    await _showBrowser(first);
+    final collected = <Map<String, dynamic>>[];
+    final seen = <String>{};
 
-    final page = await _extract(script);
-    if (page == null) {
-      if (mounted) setState(() { _busy = false; _status = '页面超时，没有抓到列表。'; });
+    void collect(List<Map<String, dynamic>> items) {
+      for (final item in items) {
+        final number = '${item['number']}';
+        if (number.isEmpty || !seen.add(number)) continue;
+        collected.add(item);
+      }
+    }
+
+    final paid = await _readList(
+      kind: 'purchase',
+      script: purchaseScript,
+      label: '已购列表',
+      onItems: collect,
+      navigateFirst: false,
+    );
+    if (paid == null) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _status = '页面超时，没有抓到已购列表（$_lastProbe）。';
+        });
+      }
       return;
     }
-    if (page['loginRequired'] == true) {
+    if (paid['loginRequired'] == true) {
       if (mounted) {
         setState(() {
           _busy = false;
@@ -230,28 +340,83 @@ class BoothPageState extends State<BoothPage> {
       return;
     }
 
-    _absorb(((page['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
-    final lastPage = (page['lastPage'] as num?)?.toInt() ?? 1;
-    if (mounted) {
-      setState(() => _status = '第 1 / $lastPage 页 · 已抓到 ${_rows.length} 项');
+    final paidCount = collected.length;
+
+    await _readList(
+      kind: 'gifts',
+      script: purchaseScript,
+      label: '礼物列表',
+      onItems: (items) {
+        for (final item in items) {
+          item['isFree'] = true;
+        }
+        collect(items);
+      },
+    );
+    final giftCount = collected.length - paidCount;
+
+    final cards = <Map<String, dynamic>>[];
+    final cardSeen = <String>{};
+
+    void collectCard(Map<String, dynamic> item) {
+      final number = '${item['number']}';
+      if (number.isEmpty || !cardSeen.add(number)) return;
+      cards.add(item);
     }
 
-    for (var next = 2; next <= lastPage; next++) {
-      await _browser.currentState
-          ?.navigate(await host.boothUrl(BoothPage.kindOf(_kind), next));
-      final more = await _extract(script);
-      if (more == null) break;
-      _absorb(((more['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
-      if (!mounted) return;
-      setState(() => _status = '第 $next / $lastPage 页 · 已抓到 ${_rows.length} 项');
+    await _readList(
+      kind: 'free',
+      script: freeScript,
+      label: '免费领取列表',
+      onItems: (items) {
+        for (final item in items) {
+          collectCard(item);
+        }
+      },
+    );
+
+    var withoutDownload = 0;
+    for (var i = 0; i < cards.length; i++) {
+      if (!mounted || !_busy) break;
+
+      final card = cards[i];
+      setState(() => _status =
+          '正在读取免费商品 ${i + 1} / ${cards.length}：${card['title']}');
+
+      final downloads =
+          await _readFreeDownloads('${card['itemUrl']}', itemScript);
+      if (downloads.isEmpty) {
+        withoutDownload++;
+        continue;
+      }
+
+      for (final item in downloads) {
+        item['isFree'] = true;
+        if ('${card['imageUrl']}'.isNotEmpty) item['imageUrl'] = card['imageUrl'];
+        if ('${item['title']}'.isEmpty) item['title'] = card['title'];
+        if ('${item['shop']}'.isEmpty) item['shop'] = card['shop'];
+        if ('${item['shopUrl']}'.isEmpty) item['shopUrl'] = card['shopUrl'];
+      }
+
+      collect(downloads);
     }
 
+    final freeCount = collected.length - paidCount - giftCount;
+
+    _rows = collected
+      ..sort((a, b) => '${a['title']}'
+          .toLowerCase()
+          .compareTo('${b['title']}'.toLowerCase()));
     _applySnapshot(await host.boothSaveLibrary(_rows));
 
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _status = _summary;
+      _status = collected.isEmpty
+          ? '已购列表是空的，确认一下登录的是购买过的账号。'
+          : '已读取 ${collected.length} 个商品（已购 $paidCount · 礼物 $giftCount · 免费 $freeCount）'
+              '${withoutDownload > 0 ? ' · $withoutDownload 个免费商品无下载文件' : ''}'
+              '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}';
     });
   }
 
@@ -315,7 +480,7 @@ class BoothPageState extends State<BoothPage> {
     final shown = _shown;
 
     return NeuPageBody(
-      title: 'Booth 已购',
+      title: 'Booth',
       subtitle: _status,
       trailing: Wrap(
         spacing: 10,
@@ -358,16 +523,6 @@ class BoothPageState extends State<BoothPage> {
       fixed: [
         Row(
           children: [
-            Text('读取',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
-            const SizedBox(width: 8),
-            NeuDropdown(
-              value: _kind,
-              items: BoothPage.kinds,
-              icon: Icons.category_rounded,
-              onChanged: (value) => setState(() => _kind = value),
-            ),
-            const SizedBox(width: 14),
             Text('显示',
                 style: TextStyle(fontSize: 12, color: t.inkTertiary)),
             const SizedBox(width: 8),
@@ -392,6 +547,19 @@ class BoothPageState extends State<BoothPage> {
                   _selected.clear();
                 }),
               ),
+            ),
+            const SizedBox(width: 14),
+            Text('分类',
+                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            const SizedBox(width: 8),
+            NeuDropdown(
+              value: _category,
+              items: _categories,
+              icon: Icons.category_rounded,
+              onChanged: (value) => setState(() {
+                _category = value;
+                _selected.clear();
+              }),
             ),
             const Spacer(),
             if (_selected.isNotEmpty)
@@ -510,6 +678,11 @@ class BoothPageState extends State<BoothPage> {
                                 child: NeuPill('演示·图集',
                                     bg: Color(0xFFEBD9B4),
                                     fg: Color(0xFF7A5514)),
+                              ),
+                            if ('${row['category']}'.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: NeuPill('${row['category']}'),
                               ),
                             if (_hidden[number] != null)
                               Padding(

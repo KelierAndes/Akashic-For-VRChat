@@ -21,7 +21,7 @@ public static class SessionEndpoints
 
         group.MapPost("/sessions/{site}/cookies",
             (string site, SessionCookies body, IBoothService booth, IAssetStoreService store,
-                IVRChatSyncService vrchat) =>
+                IVRChatSyncService vrchat, AutoSync auto) =>
         {
             var session = For(site, booth, store, vrchat);
             if (session is null) return Results.Problem("未知站点。", statusCode: 404);
@@ -32,6 +32,7 @@ public static class SessionEndpoints
                 .ToList();
 
             session.Value.Import(entries);
+            auto.Queue($"{site} 登录态");
             return Results.Json(new { accepted = entries.Count, signedIn = session.Value.HasSession });
         });
 

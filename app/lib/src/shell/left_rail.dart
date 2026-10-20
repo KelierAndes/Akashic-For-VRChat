@@ -348,8 +348,29 @@ class LeftRail extends StatelessWidget {
                             darkShadow: const Color(0x4D000000),
                             lightShadow: const Color(0x1FFFFFFF),
                             onTap: () => model.selectNav(AppNav.settingsIndex),
-                            child: const Icon(Icons.settings_rounded,
-                                size: 18, color: Colors.white),
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              alignment: Alignment.center,
+                              children: [
+                                const Icon(Icons.settings_rounded,
+                                    size: 18, color: Colors.white),
+                                if (model.updateAvailable)
+                                  Positioned(
+                                    right: -3,
+                                    top: -3,
+                                    child: Container(
+                                      width: 9,
+                                      height: 9,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF5BD68B),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                            color: AppColors.railTile, width: 1.5),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),

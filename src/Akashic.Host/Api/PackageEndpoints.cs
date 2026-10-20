@@ -7,8 +7,8 @@ public static class PackageEndpoints
 {
     public static RouteGroupBuilder MapPackages(this RouteGroupBuilder group)
     {
-        group.MapGet("/packages", (IVpmRegistryService registry, CancellationToken ct) =>
-            registry.GetAllPackagesAsync(ct));
+        group.MapGet("/packages", (bool? refresh, IVpmRegistryService registry, CancellationToken ct) =>
+            registry.GetAllPackagesAsync(refresh == true, ct));
 
         group.MapGet("/packages/search", (string query, IVpmRegistryService registry, CancellationToken ct) =>
             registry.SearchPackagesAsync(query, ct));

@@ -7,6 +7,8 @@ public interface IRailLayoutService
 {
     IReadOnlyList<string> Items { get; }
 
+    void Reload();
+
     Task SetItemsAsync(IReadOnlyList<string> items, CancellationToken ct = default);
 }
 
@@ -30,6 +32,11 @@ public class RailLayoutService : IRailLayoutService
     }
 
     public IReadOnlyList<string> Items { get; private set; }
+
+    public void Reload()
+    {
+        Items = Load().RailItems.Where(Shaped).ToList();
+    }
 
     public async Task SetItemsAsync(IReadOnlyList<string> items, CancellationToken ct = default)
     {

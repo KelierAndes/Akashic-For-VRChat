@@ -25,6 +25,9 @@ class AppModel extends ChangeNotifier {
 
     try {
       state = await client.state();
+      rail = state!.rail;
+      sheetOpacity = state!.sheetOpacity;
+      if (!_themeOverridden) themeChoice = state!.darkTheme ? 1 : 0;
     } on HostException catch (error) {
       status = error.message;
     }
@@ -43,6 +46,66 @@ class AppModel extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  List<Map<String, dynamic>>? _packagesCache;
+  List<dynamic>? _libraryCache;
+  List<dynamic>? _resourceRowsCache;
+  final Map<String, List<dynamic>> _recordCache = {};
+
+  Future<List<Map<String, dynamic>>> packages({bool force = false}) async {
+    final cached = _packagesCache;
+    if (!force && cached != null) return cached;
+
+    final client = host;
+    if (client == null) return const [];
+
+    final rows = (await client.packages(refresh: force))
+        .cast<Map<String, dynamic>>();
+    _packagesCache = rows;
+    return rows;
+  }
+
+  Future<List<dynamic>> libraryFiles({bool force = false}) async {
+    final cached = _libraryCache;
+    if (!force && cached != null) return cached;
+
+    final client = host;
+    if (client == null) return const [];
+
+    final rows = await client.libraryFiles();
+    _libraryCache = rows;
+    return rows;
+  }
+
+  Future<List<dynamic>> installRecords(String path, {bool force = false}) async {
+    final cached = _recordCache[path];
+    if (!force && cached != null) return cached;
+
+    final client = host;
+    if (client == null) return const [];
+
+    final rows = await client.installRecords(path);
+    _recordCache[path] = rows;
+    return rows;
+  }
+
+  Future<List<dynamic>> resourceRows({bool force = false}) async {
+    final cached = _resourceRowsCache;
+    if (!force && cached != null) return cached;
+
+    final client = host;
+    if (client == null) return const [];
+
+    final rows = await client.resources();
+    _resourceRowsCache = rows;
+    return rows;
+  }
+
+  void invalidatePackages() => _packagesCache = null;
+  void invalidateLibrary() => _libraryCache = null;
+  void invalidateResources() => _resourceRowsCache = null;
+
+  void invalidateInstallRecords(String path) => _recordCache.remove(path);
 
   Future<void> loadTemplates() async {
     final client = host;
@@ -308,6 +371,7 @@ class AppModel extends ChangeNotifier {
     unawaited(refreshVcsMarkers());
     unawaited(refreshBackupCounts());
     unawaited(loadGitHub());
+    unawaited(checkUpdate());
     unawaited(loadSync());
   }
 
@@ -373,6 +437,7 @@ class AppModel extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>>? _vrchatLocalMap;
+  Map<String, dynamic> _vrchatLocalMapKept = const {};
 
   Future<Map<String, dynamic>> vrchatLocalMap() {
     final cached = _vrchatLocalMap;
@@ -385,9 +450,12 @@ class AppModel extends ChangeNotifier {
         .vrchatLocalMap()
         .then((result) =>
             ((result['map'] as Map?) ?? const {}).cast<String, dynamic>())
-        .catchError((Object _) {
+        .then((map) {
+      _vrchatLocalMapKept = map;
+      return map;
+    }).catchError((Object _) {
       _vrchatLocalMap = null;
-      return const <String, dynamic>{};
+      return _vrchatLocalMapKept;
     });
     _vrchatLocalMap = started;
     return started;
@@ -397,6 +465,8 @@ class AppModel extends ChangeNotifier {
     _vrchatLocalMap = null;
     return vrchatLocalMap();
   }
+
+  final Set<String> coverAttempts = {};
 
 
   String backupDirectory = '';
@@ -634,6 +704,11 @@ class AppModel extends ChangeNotifier {
 
     try {
       syncLog = await client.syncPull();
+      _recordCache.clear();
+      _libraryCache = null;
+      _resourceRowsCache = null;
+      await refreshProjects();
+      await refreshState();
       await loadGitHub();
       await loadSync();
       status = '${syncLog['title'] ?? ''}';
@@ -646,6 +721,25 @@ class AppModel extends ChangeNotifier {
   }
 
   bool githubLoggingIn = false;
+
+  Map<String, dynamic>? updateInfo;
+  bool updatePrompted = false;
+
+  bool get updateAvailable => updateInfo?['hasUpdate'] == true;
+
+  String get updateVersion => '${updateInfo?['latest'] ?? ''}';
+
+  Future<void> checkUpdate({bool force = false}) async {
+    final client = host;
+    if (client == null) return;
+
+    try {
+      updateInfo = await client.updateCheck(force: force);
+    } on HostException catch (error) {
+      updateInfo = {'error': error.message};
+    }
+    notifyListeners();
+  }
 
   Future<void> githubLogin() async {
     final client = host;

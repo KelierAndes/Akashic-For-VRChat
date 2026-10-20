@@ -323,7 +323,8 @@ class _AssetStorePageState extends State<AssetStorePage> {
       raw.replaceAll(RegExp(r'[^A-Za-z0-9]'), '').toLowerCase();
 
   Future<void> _fillMissingCovers() async {
-    final host = AppScope.of(context).host;
+    final model = AppScope.of(context);
+    final host = model.host;
     final script = _scripts?['searchCover'] as String?;
     if (host == null || script == null || _fillingCovers || _busy) return;
 
@@ -331,6 +332,7 @@ class _AssetStorePageState extends State<AssetStorePage> {
     for (final row in _rows) {
       final name = '${row['name']}';
       if (name.isEmpty || '${row['imageUrl']}'.isNotEmpty) continue;
+      if (model.coverAttempts.contains(name)) continue;
       if (!pending.contains(name)) pending.add(name);
       if (pending.length == 20) break;
     }
@@ -347,6 +349,7 @@ class _AssetStorePageState extends State<AssetStorePage> {
       for (var i = 0; i < pending.length; i++) {
         if (!mounted || _busy) break;
         final name = pending[i];
+        model.coverAttempts.add(name);
         setState(() => _status =
             '正在从 Asset Store 获取封面 ${i + 1} / ${pending.length}：$name');
 

@@ -35,6 +35,7 @@ public sealed class ConfigSyncService : IConfigSyncService
         ("cache/assetstore-account.json", "Asset Store 资产清单"),
         ("cache/assetstore-covers.json", "Asset Store 封面链接"),
         ("cache/vrchat-content.json", "VRChat 内容清单"),
+        ("cache/resource-meta.json", "资源分类与匹配"),
         ("unitypackage-ledger.json", "unitypackage 安装台账")
     ];
 
@@ -74,7 +75,7 @@ public sealed class ConfigSyncService : IConfigSyncService
         var identity = exe == null ? null : await _gitHub.IdentityAsync(ct);
         var settings = LoadSettings();
 
-        var included = new List<string> { "设置（工程列表、路径、模板、快捷栏、主题）" };
+        var included = new List<string> { "设置（工程列表、路径、模板、快捷栏、主题与透明度）" };
         included.AddRange(CacheFiles.Where(file => File.Exists(Resolve(file.Path))).Select(file => file.Label));
         included.AddRange(Sessions
             .Where(site => _vault.Load(site.Site)?.Cookies.Count > 0)
@@ -455,7 +456,7 @@ public sealed class ConfigSyncService : IConfigSyncService
 
         var output = $"已还原 {written.Count} 项：{string.Join(" · ", written)}";
         if (skipped.Count > 0) output += $"\n\n跳过 {skipped.Count} 项：{string.Join(" · ", skipped)}";
-        output += "\n\n登录态与清单缓存立即可用；工程列表与其他设置在重启 Akashic 后生效。";
+        output += "\n\n登录态、清单缓存、主题与透明度、快捷栏立即可用；工程列表与其他设置在重启 Akashic 后生效。";
 
         return VcsRunResult.Ok("sync-pull", string.Empty,
             $"配置已还原（{restored} 站登录态）", output);

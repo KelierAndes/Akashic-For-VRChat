@@ -59,8 +59,11 @@ WinUI 3 前端已于 v2.0.0 整体下线，仓库里不再有 `src/Akashic`；�
             ├── ProjectService.cs                        # 工程扫描、清单解析、新建与目录检测
             ├── VpmRegistryService.cs / PackageInstaller.cs  # 多源注册表、依赖解析与安装
             ├── UnityPackageExtractor.cs                 # .unitypackage 流式解包
-            ├── UnityPackageLibraryService.cs            # 本地库扫描与导入台账
+            ├── UnityPackageLibraryService.cs            # 本地库扫描（含 zip 中央目录）与导入台账
             ├── UnityPackageIconService.cs               # 包内 preview.png 提取
+            ├── ResourceCatalogService.cs                # 资源目录、Booth 匹配与元数据缓存
+            ├── PackageCategory.cs                       # 分类词表、Booth 标签映射与匹配打分
+            ├── BoothHtml.cs                             # Booth 搜索卡片 / 商品页 HTML 解析
             ├── BoothService.cs / AssetStoreService.cs   # 两站会话复用、清单抓取与下载
             ├── VRChatSyncService.cs                     # 云端内容读取与编辑回写
             ├── VRChatBlueprintScanService.cs            # 本地工程蓝图 ID 扫描
@@ -111,8 +114,22 @@ powershell -ExecutionPolicy Bypass -File scripts\stage-dist.ps1   # → dist\Aka
 
 ```powershell
 git tag -a v<版本> -m "Akashic for VRChat v<版本>"; git push origin v<版本>
-gh release create v<版本> dist/Akashic.zip --title "Akashic for VRChat v<版本>" --notes-file <notes.md>
+powershell -ExecutionPolicy Bypass -File scripts\sign-release.ps1 dist\Akashic.zip
+gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashic.zip.sig --title "Akashic for VRChat v<版本>" --notes-file <notes.md>
 ```
+
+`sign-release.ps1` 用 openssl 对 zip 做 SHA256 + ECDSA P-256 签名，产出 `Akashic.zip.sha256` 与 `Akashic.zip.sig`；**三个文件都要作为 Release 资源上传**。私钥在 `E:\Akashic\backups\Akashic-UpdateSigning\update-signing-key.pem`（仓库外，绝不能提交），公钥已内置在 `UpdateService.PublicKey`。换密钥意味着老版本无法验证新包，只能靠用户手动下载覆盖。
+
+### 自动更新
+
+* 「关于」页打开时自动检查：匿名请求 GitHub 的 `releases/latest`，把 tag 的主版本号与侧车 informational version 比较；结果在侧车里缓存 10 分钟（失败缓存 2 分钟），手动「检查更新」会强制刷新。
+* 发布侧**必须给 Release 附一个 `.zip` 资源**（就是 `stage-dist.ps1` 的 `Akashic.zip`），否则界面会提示「没有附带 zip 资源」。压缩包内层 `Akashic/` 或直接平铺都能识别，只要里面找得到 `akashic_ui.exe`。
+* 下载与解压都在侧车里完成，落在 `%LOCALAPPDATA%\Akashic\updates\<版本>\`；只有确认 staged 目录里有 `akashic_ui.exe` 才标记「已就绪」。
+* 「重启并安装」会生成一个 `apply.ps1`：等 UI 与侧车的 pid 都退出、再等 2 秒，把 staged 覆盖到安装目录并重新启动。所以安装目录必须可写——解压到用户目录即可，装在 `Program Files` 下会失败。
+* 更新只替换程序文件，绝不碰 `%LOCALAPPDATA%` 里的设置与缓存。
+* 校验：下载后先比对 Release 里的 `.sha256`，再用内置 ECDSA 公钥验 `.sig`（openssl 的 DER 签名，校验时必须指定 `DSASignatureFormat.Rfc3279DerSequence`，默认的 P1363 格式对不上）。缺任一文件直接拒绝安装——**新版本必须签名，否则更新链会停在旧版**。
+* 网络按这个顺序试：**直连（含系统代理）→ 镜像站 → 本机代理端口**。镜像把原 URL 直接拼在站点后面（`https://gh-proxy.com/https://api.github.com/...`），对发布信息与 release 资源都生效（实测 gh-proxy.com 两者都通）；镜像按 `gh-proxy.com / ghfast.top / ghproxy.net / gh.llkk.cc` 依次尝试。代理只在端口监听时才试，覆盖 `7890 / 7897 / 10809 / 1080（http 与 socks5）/ 10808 / 1087 / 8889`。选中的路线在进程内记住，「关于」页显示「直连 / 镜像 xxx / 代理 xxx」。
+* 有更新时的提示：启动后第一次拿到检查结果就弹一次模态（同一进程只弹一次，「查看更新」跳到关于页）；侧栏底部设置齿轮与导航「设置」同时显示绿点。检查结果放在 `AppModel.updateInfo` 里，关于页与角标共用，不再各查各的。
 
 ### 版本号
 
@@ -170,8 +187,12 @@ gh release create v<版本> dist/Akashic.zip --title "Akashic for VRChat v<版�
 * 三站登录态以 DPAPI（CurrentUser）加密落盘。entropy 不是密钥，只是防同用户进程乱接；写盘走旁路临时文件，崩在半路不会把好端端的 blob 换成半截；解不开（换了 Windows 账户、或文件被动过）就当没有会话。
 * Booth：非浏览器 UA 直接 403，所以用导出 Cookie 发的请求必须长得像产生它的那个 WebView2；会话值每次调用都在轮换，任何刷新回来的 Cookie 都要留下一次用；**会话悄悄过期时 Booth 回的是 200 + 一个登录页**，不是 401；下载链接经一串重定向发出，签名链接本身不能带 Cookie 取，所以重定向手动一跳跳（上限 5），跳到 booth.pm 之外就断掉。Rails 对匿名访客也发会话 Cookie，所以「有 Cookie」不等于「已登录」。
 * Asset Store 的读取只有页面抓取一条路：它的 GraphQL 接口对复用 Cookie 的请求永远返回拒绝，别再试。缓存目录布局是 `publisher/category/name.unitypackage`，浅于这一层的文件是用户自己丢进去的，没有发布者。
+* Booth 的「读取清单」是三步：**已购 → 礼物 → 免费**。免费列表页的卡片没有下载控件，必须逐个打开商品页找 `/downloadables/`；打不开或找不到下载链接的计入「无下载文件」。演示视频/图集**不在抓取时按关键词剔除**——关键词判断会误伤正常包，它们照常入库，靠界面「类型」筛选（默认「可用软件包」）隐藏。只有全部读完才用本次结果覆盖缓存（旧版本仍然折叠）。
+* 打开内嵌浏览器后 `WebView2` 控制器要等它就绪：`_browser.currentState?.controller` 一开始是 null，这时候调 `evaluateJavascript` 会拿到 null，表现为「页面超时」。提取前先轮询等待控制器，和 Asset Store 补封面的写法一致。
 * `WebView2.ExecuteScriptAsync` 的返回值是 JSON 再编码一层，字符串会双重包裹；页面读取器也可能返回数组（我的资产每一页一项）。
 * 封面 URL 可能是协议相对的（`//cdn…/x.png`），补 scheme 再用。店铺从没给过封面的，从 `.unitypackage` 里抽一张当本地路径交出去——它本来就在盘上，不需要再套一层缓存。封面是可丢弃的：缓存文件写坏/被锁就当没有，目录满了只损失下一次抓取。
+* 封面名称→URL 那份缓存**写和读必须一起核对**：`JsonSerializer.Serialize(dict.ToArray())` 落盘是 `[{"Key":…,"Value":…}]`，而读取端按 `Dictionary` 解，必然抛 `JsonException` 并被「文件坏了就当没有」的 catch 吞掉——写得越勤，读回来越是空的，症状就是每次重启都要重新搜一遍封面。直接序列化字典本体才是对象。
+* 店铺搜索匹配不上的本地包名（缓存目录里的文件夹名比商店标题长，比如 `Starter Assets - ThirdPerson Updates in new CharacterController package`）永远搜不到，于是每次打开页面都要重跑一轮抓取。`AppModel.coverAttempts` 记住本会话试过的名字，页面来回切换不再重复；跨重启的负缓存故意没做——搜不到只是白跑一轮，做成永久标记会让「商店哪天又能搜到」变成需要手动清理的状态。
 
 ### GitHub 与配置同步
 
@@ -182,6 +203,9 @@ gh release create v<版本> dist/Akashic.zip --title "Akashic for VRChat v<版�
 * 清单文件名只写名字。信封里除 `payload` 之外都是明文，把 files 整个克隆过去等于把明文（Cookie 在内）和该藏它的密文并排寄到 GitHub。
 * 首次推送时包里那份 `settings.json` 还是「上传前」的样子，推完要把 gist id 与时间戳补回去，否则刚还原的机器不知道自己的备份在哪。这类记账失败绝不能把一次成功的还原报成失败。
 * 存的 id 指向一个已被删掉、或属于别的账号的 gist 时，新建一个比抛一个用户无法处理的 404 好。
+* 随包同步的清单缓存集中在 `ConfigSyncService.CacheFiles`：Booth 已购、Asset Store 资产与封面、VRChat 内容、资源分类与匹配、unitypackage 安装台账。**新增一份列表缓存时要同时加进这张表**，否则它只会待在本机，跨设备看起来像「没同步」。`settings.json` 整份进出（工程列表、路径、模板、快捷栏、主题、透明度都在里面）。
+* 拉取后会就地重载主题/透明度与快捷栏（`ThemeService.Reload` / `RailLayoutService.Reload`），前端随后刷新 state 与列表缓存，所以配色、透明度和侧栏位置不用重启就能生效；工程列表仍要重启侧车才重读。
+* 自动上传由侧车的 `AutoSync` 收敛：启动（已登录 GitHub 时）、三站登录态导入、Booth / Asset Store / VRChat 清单保存、手动匹配结束、离开设置页（前端打 `/sync/touch`）都只调用 `Queue(reason)`，10 秒防抖后合并成一次推送；正在推送时再来请求会等这次结束后补一次。同步开关关掉或 gh 未登录时 `PushAsync` 直接返回失败，不会弹错。手动「上传到 GitHub」仍立即执行、不走防抖。
 
 ### VRChat 数据接口
 
@@ -192,6 +216,8 @@ gh release create v<版本> dist/Akashic.zip --title "Akashic for VRChat v<版�
 * 封面上传返回的是 File 记录，它的 id 才是 `imageUrl` 要的东西。
 * 死会话回 401，客户端已折成 null；缺行是一个答案不是失败，界面显示「内容已不存在」。
 * 蓝图扫描读 `*.unity` / `*.prefab` / `*.asset`（描述符在场景和预制体里都走），**绝不进 `Packages`**——SDK 自带的测试场景里装着别人的 id。单文件上限 128 MB、单工程最多 16 个 id，超出的那是资产集散地，多出来的只会给匹配列表添噪。两个工程持有同一内容说明有一个是副本，先注册的赢，不猜。
+* id→本地工程 的关联表是纯磁盘扫描，和登录态、云端可用性无关，所以 `vrchat_page._loadCached` 里它排在 `vrchatSelf` **之前**。原来排在后面，探针一超时整页关联就消失——列表照常渲染，只是每条的「本地：xxx」全没了，看起来像关联丢了而不是网络坏了。`AppModel` 因此留着上一次成功取到的表：刷新失败不该把已有的关联抹成空。
+* 冷启动第一次取关联表要把 25 个工程的 Assets 全扫一遍，实测 16 秒；之后 `matchCloud` 已经把这些文件的指纹喂进扫描缓存，同一进程里再取只要 3–4 秒。侧车进程一重启这层缓存就没了，别指望它跨启动。
 
 ### 版本控制
 
@@ -219,6 +245,24 @@ gh release create v<版本> dist/Akashic.zip --title "Akashic for VRChat v<版�
 * 重新排序时，被筛掉、没进视图的行不会到达回调，所以未知的 URL 要保留，不能当成「用户删了它」。
 * 归属标签只加不减：从 Booth / Asset Store 重新添加一个文件夹会打标签，但绝不清除已有标签；放在 Booth 缓存目录里的文件即使早于「按文件记来源」就被导入，也按目录推断成 Booth 来的。
 * Git 装的外部包在 `Packages/` 下嵌一份，本地文件夹只是引用。`Assets/<repo>` 覆盖 git 托管 UPM 包常见的布局；`git@host:owner/repo.git`、`/tree/<ref>`（GitHub、Gitee）与 `/-/tree/<ref>`（GitLab）这几种形状都要认；自建 GitLab 沿用 gitlab.com 的 URL 形状，所以走同一个 kind。
+
+### 资源目录与 Booth 匹配
+
+* 资源页的行由 `ResourceCatalogService` 合并四路来源：库扫描（含 zip）、Booth 已购缓存、Asset Store 账户与封面缓存、`cache/resource-meta.json`。元数据按**规范化名称**（去版本号、去符号、转小写）做键，不按路径——文件挪个位置不该丢掉已经配好的封面和分类。
+* zip 只读中央目录，不预解压：一次扫描就能列出内层 `.unitypackage`，同包多个包在界面上折叠成一行。`<zip>-extracted` 里的散包在列表里折回压缩包，只有点「解包」才会真的落盘并登记入库；`ExtractArchiveAsync` 逐条校验路径没逃出目标目录。
+* 版本号从文件名里剥：`Name_v1.2`、`Name [1.0.4]`、`Name_Ver1.06_`、`Name_1.1fix1` 都要认；`v`/`ver`/`version` 前缀可省略，剥完再 trim 一次分隔符，否则 `MiniSimplisticPens_1.1_` 这类会整串留下。
+* Booth 搜索接口是 `https://booth.pm/ja/search/<query>`（查询词放路径里，`?q=` 会 404）。结果卡片自带 `data-product-id` / `data-product-brand` / `data-product-category`、标题锚点与 `data-original` 封面；商品页只有 `og:title` / `og:image` 可靠，**分类别从 item 页取**——那个页面到处是侧栏与推荐的 browse 链接，第一条往往不是本商品的分类。
+* 匹配顺序：名称里的商品 id（`items/123` 或裸的 5 位以上数字）优先按 id 取商品页；否则按名称搜索打分。前缀命中要求长度比 ≥ 0.7，否则「Magica Cloth 2」会被「Magica Cloth 2 Helper」抢走；后缀命中（`【工具】EreMorph`）与精确命中直接给高分。标题先剥掉 `【】「」()` 与 ` / `、` | `、` - ` 之后的分句再比对，否则带副标题的正品会被判远。
+* 本地包名与商品标题常常语言不同（`LuraVideoPlayer_SDK3_2019` → 「ワールド用音楽再生プレイヤーセット【SDK2／SDK3】」），词面永远对不上，所以**搜索只返回一个商品时直接采信它**，不再要求分数。这条不会误伤 Asset Store 的包：那些名字在 Booth 上要么搜不到，要么返回 7–35 张卡片（`TowelCloud2`、`VRM` 这类泛词甚至 60 张）。
+* **R-18 商品的搜索要带年龄确认**：Booth 的「はい」按钮做的事就是写 `adult=t` 这个 Cookie（有效期 1 天），搜索 URL 还要带 `?adult=include`。只带其中一个都会返回 0 张卡片——页面标题里明明写着「2 件あります」，列表却被年龄确认挡住。搜索请求单独拼这个 Cookie，不写进持久化的会话。
+* 包名里的系列缩写可能只出现在商品标题的 `#标签` 里（`DMCustom_PCS` 对应 Penetration Contact System 的 `#PCS`）。命中多个结果时，若**只有一个**结果的 `#标签` 包含包名分词，就采信它；不要退回普通分词匹配，否则「Magica Cloth 2」会被同名的「Magica Cloth 2 Helper」抢走。
+* 匹配是**手动触发**的长任务：本地包多时每条要一次网络请求，所以放在后台跑、状态端点轮询进度；每命中一条立刻落盘，任务中途被打断也不会丢已有结果。命中的分类会回写 Booth 已购缓存，Booth 页和资源页的分类筛选才能离线用。
+* 匹配默认**增量**：失败也写 `attemptedAt`，下一次只处理从没试过的包（界面上标「已尝试」）；要重试历史失败项走 `force`（资源页匹配按钮旁的圆形箭头）。不加这条的话，40 个永远搜不到的 Asset Store 包每次都要把网络请求挨个发一遍。
+* 「恢复自动分类」是删掉这条元数据，而不是写一份空值——删掉后下一次取行会重新走「Booth 已购缓存 → Asset Store → 标题关键词」的自动推断。手动填的分类/标签/封面只算自定义信息，不会把包标成已匹配。
+* 列表一类的重复读取在 `AppModel` 里缓存：注册表包、库文件、每个工程的导入台账、资源行各一份，页面打开直接用缓存渲染；「刷新」按钮才带 `force`，其中注册表刷新还会让侧车清掉内存缓存（`/api/packages?refresh=true`）。项目详情页的缩略图也从资源行的 `coverUrl` 里取，不再单独发一次请求。
+* 没有匹配到 Booth / Asset Store 的包留在「用户软件包」的「未匹配」筛选里；用户可以自己填源链接、封面、分类与标签，这些只算自定义信息，**不算匹配**，不会把它挪出未匹配列表。
+* 分类走 Booth 自己的标签优先（`3D衣装`→服饰、`3D環境・ワールド`→场景…），没有标签时按标题关键词猜；关键词表里「道具/工具」排在「场景」前面，否则「ワールド用ギミック」会被归进场景。
+* 项目详情页的分类筛选读 `GET /api/resources/categories`（只返回元数据里的名称→分类，不触发库扫描），前端把行名按同一套规则规范化后查表。VPM 注册表包没有资源分类，显示「—」，筛「未分类」时归到那一侧。
 
 ### 备份与还原
 

@@ -38,11 +38,12 @@ public static class AccountEndpoints
             Results.Json(Snapshot(booth, library)));
 
         group.MapPost("/booth/library", async Task<IResult> (BoothLibrarySave request, IBoothService booth,
-            IUnityPackageLibraryService library, CancellationToken ct) =>
+            IUnityPackageLibraryService library, AutoSync auto, CancellationToken ct) =>
         {
             booth.ReconcileLocalArchives(request.Items);
             booth.FoldOldVersions(request.Items, new Dictionary<string, int>());
             await booth.SaveLibraryCacheAsync(request.Items, ct);
+            auto.Queue("Booth 清单");
             return Results.Json(Snapshot(booth, library));
         });
 
@@ -93,9 +94,10 @@ public static class AccountEndpoints
             Results.Json(store.LoadAccountCache()));
 
         group.MapPost("/assetstore/account-cache", async Task<IResult> (AssetStoreSave request,
-            IAssetStoreService store, CancellationToken ct) =>
+            IAssetStoreService store, AutoSync auto, CancellationToken ct) =>
         {
             await store.SaveAccountCacheAsync(request.Items, ct);
+            auto.Queue("Asset Store 清单");
             return Results.Json(store.LoadAccountCache());
         });
 
@@ -225,9 +227,10 @@ public static class AccountEndpoints
             Results.Json(vrchat.LoadContentCache()));
 
         group.MapPost("/vrchat/content-cache", async Task<IResult> (VRChatCacheSave request,
-            IVRChatSyncService vrchat, CancellationToken ct) =>
+            IVRChatSyncService vrchat, AutoSync auto, CancellationToken ct) =>
         {
             await vrchat.SaveContentCacheAsync(request.Items, ct);
+            auto.Queue("VRChat 清单");
             return Results.Json(vrchat.LoadContentCache());
         });
 

@@ -11,6 +11,14 @@ import 'theme.dart';
 Border glassEdgeBorderFallback() =>
     Border.all(color: Colors.white.withValues(alpha: 0.45));
 
+String formatBytes(num bytes) {
+  final value = bytes.toDouble();
+  if (value >= 1073741824) return '${(value / 1073741824).toStringAsFixed(1)} GB';
+  if (value >= 1048576) return '${(value / 1048576).toStringAsFixed(1)} MB';
+  if (value >= 1024) return '${(value / 1024).toStringAsFixed(1)} KB';
+  return '${value.toInt()} B';
+}
+
 class NeuPageBody extends StatelessWidget {
   const NeuPageBody({
     super.key,

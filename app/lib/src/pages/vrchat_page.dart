@@ -82,13 +82,18 @@ class _VRChatSyncPageState extends State<VRChatSyncPage> {
       _savedAt = _stamp(cache['savedAt']);
       _signedIn = model.state?.vrchat.signedIn ?? false;
 
-      if (mounted) setState(() => _status = _describe());
+      _local = await model.vrchatLocalMap();
+
+      if (!mounted) return;
+      setState(() => _status = _describe());
 
       if (!_signedIn) return;
 
-      _self = await host.vrchatSelf();
-
-      if (_rows.isNotEmpty) _local = await model.vrchatLocalMap();
+      try {
+        _self = await host.vrchatSelf();
+      } on Exception {
+        _self = null;
+      }
 
       if (!mounted) return;
       setState(() => _status = _describe());

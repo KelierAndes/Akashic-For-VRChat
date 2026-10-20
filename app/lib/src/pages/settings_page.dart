@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../host/host_client.dart';
 import '../shell/app_scope.dart';
 import '../state/app_model.dart';
 import '../ui/app_colors.dart';
@@ -20,6 +23,21 @@ class _SettingsPageState extends State<SettingsPage> {
   final GlobalKey _syncKey = GlobalKey();
 
   static int _revealed = 0;
+
+  HostClient? _host;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _host = AppScope.of(context).host;
+  }
+
+  @override
+  void dispose() {
+    final host = _host;
+    if (host != null) unawaited(host.syncTouch('离开设置页').catchError((_) => <String, dynamic>{}));
+    super.dispose();
+  }
 
   @override
   void initState() {

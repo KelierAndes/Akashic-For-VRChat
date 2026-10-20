@@ -1,12 +1,12 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import '../host/host_models.dart';
 import '../shell/app_scope.dart';
 import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
+import 'resource_tabs.dart';
 
 class ResourcesPage extends StatefulWidget {
   const ResourcesPage({super.key, this.initialTab = 0});
@@ -36,9 +36,9 @@ class _ResourcesPageState extends State<ResourcesPage> {
       ],
       content: switch (_tab) {
         0 => const _RepositoriesTab(),
-        1 => const _UserPackagesTab(),
+        1 => const UserPackagesTab(),
         2 => const _ExternalTab(),
-        3 => const _BoothShelfTab(),
+        3 => const BoothShelfTab(),
         _ => const _AssetStoreShelfTab(),
       },
     );
@@ -272,208 +272,6 @@ class _IconPoke extends StatelessWidget {
 }
 
 
-class _UserPackagesTab extends StatefulWidget {
-  const _UserPackagesTab();
-
-  @override
-  State<_UserPackagesTab> createState() => _UserPackagesTabState();
-}
-
-class _UserPackagesTabState extends State<_UserPackagesTab> {
-  List<dynamic> _files = [];
-  List<dynamic> _folders = [];
-  String _originFilter = '全部来源';
-
-  static const _origins = ['全部来源', '本地', 'Asset Store'];
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  Future<void> _load() async {
-    final host = AppScope.of(context).host;
-    if (host == null) return;
-
-    _files = await host.libraryFiles();
-    _folders = await host.libraryFolders();
-    if (mounted) setState(() {});
-  }
-
-  List<dynamic> get _shown => _files
-      .where((f) {
-        final origin = '${f['origin']}';
-        if (_originFilter == '全部来源') return origin != 'Booth';
-        return origin == originCodes[_originFilter];
-      })
-      .toList();
-
-  String _size(int bytes) => bytes >= 1048576
-      ? '${(bytes / 1048576).toStringAsFixed(1)} MB'
-      : bytes >= 1024
-          ? '${(bytes / 1024).toStringAsFixed(1)} KB'
-          : '$bytes B';
-
-  @override
-  Widget build(BuildContext context) {
-    final t = NeuTheme.of(context);
-    final shown = _shown;
-
-    return Column(
-      children: [
-        Row(
-          children: [
-            NeuDropdown(
-              value: _originFilter,
-              items: _origins,
-              icon: Icons.filter_alt_rounded,
-              onChanged: (value) => setState(() => _originFilter = value),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-                child: Text(
-                    '共 ${shown.length} 个包 · ${_folders.length} 个库目录',
-                    style: TextStyle(fontSize: 12, color: t.inkTertiary))),
-            NeuActionButton(
-              label: '库目录',
-              icon: Icons.create_new_folder_rounded,
-              onTap: () async {
-                final host = AppScope.of(context).host;
-                final picked = await FilePicker.getDirectoryPath(
-                    dialogTitle: '添加 .unitypackage 库目录');
-                if (host == null || picked == null) return;
-                await host.addLibraryFolder(picked);
-                await _load();
-              },
-            ),
-            const SizedBox(width: 10),
-            NeuActionButton(
-              label: '添加包文件',
-              icon: Icons.add_rounded,
-              emphasised: true,
-              onTap: () async {
-                final host = AppScope.of(context).host;
-                final picked = await FilePicker.pickFiles(
-                  dialogTitle: '选择 .unitypackage',
-                  type: FileType.custom,
-                  allowedExtensions: const ['unitypackage'],
-                );
-                if (host == null || picked.isEmpty) return;
-                final path = picked.single.path;
-                if (path == null) return;
-                await host.addPackageFile(path);
-                await _load();
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 14),
-        if (_folders.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: NeuCard(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('扫描目录',
-                      style: TextStyle(
-                          fontSize: 12, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  for (final folder in _folders)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                              child: Text('$folder',
-                                  style: TextStyle(
-                                      fontSize: 12, color: t.inkSecondary),
-                                  overflow: TextOverflow.ellipsis)),
-                          _IconPoke(
-                              icon: Icons.close_rounded,
-                              tooltip: '移除库目录',
-                              enabled: true,
-                              onTap: () async {
-                                final host = AppScope.of(context).host;
-                                if (host == null) return;
-                                await host.removeLibraryFolder('$folder');
-                                await _load();
-                              }),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        Expanded(
-          child: shown.isEmpty
-              ? const NeuEmptyState(
-                  height: 200,
-                  text: '库里还没有 .unitypackage。\n添加一个扫描目录，或直接选择单个文件。')
-              : ListView.separated(
-                  padding: EdgeInsets.zero,
-                  itemCount: shown.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final file = shown[index];
-                    return NeuCard(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('${file['displayName']}',
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 2),
-                                Text('${file['filePath']}',
-                                    style: TextStyle(
-                                        fontSize: 11, color: t.inkTertiary),
-                                    overflow: TextOverflow.ellipsis),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          NeuPill('${file['version']}'.isEmpty
-                              ? '未标注版本'
-                              : '${file['version']}'),
-                          const SizedBox(width: 8),
-                          NeuPill(originLabel('${file['origin']}')),
-                          const SizedBox(width: 8),
-                          NeuPill(_size((file['size'] as num).toInt())),
-                          const SizedBox(width: 8),
-                          _IconPoke(
-                              icon: Icons.delete_outline_rounded,
-                              tooltip: '从列表移除（不删除文件）',
-                              enabled: true,
-                              onTap: () async {
-                                final host = AppScope.of(context).host;
-                                if (host == null) return;
-                                await host.removePackageFile(
-                                    '${file['filePath']}');
-                                await _load();
-                              }),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-
 class _ExternalTab extends StatefulWidget {
   const _ExternalTab();
 
@@ -613,119 +411,6 @@ class _ExternalTabState extends State<_ExternalTab> {
 }
 
 
-class _BoothShelfTab extends StatefulWidget {
-  const _BoothShelfTab();
-
-  @override
-  State<_BoothShelfTab> createState() => _BoothShelfTabState();
-}
-
-class _BoothShelfTabState extends State<_BoothShelfTab> {
-  List<dynamic> _imported = [];
-  String _status = '';
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
-  }
-
-  Future<void> _load() async {
-    final host = AppScope.of(context).host;
-    if (host == null) return;
-
-    _imported = (await host.libraryFiles())
-        .where((f) => '${f['origin']}' == 'Booth')
-        .toList();
-    if (mounted) {
-      setState(() => _status = '已入库 ${_imported.length} 个 Booth 软件包');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = NeuTheme.of(context);
-
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-                child: Text(_status,
-                    style: TextStyle(fontSize: 12, color: t.inkTertiary))),
-            NeuActionButton(
-                label: '去 Booth 已购',
-                icon: Icons.shopping_bag_rounded,
-                onTap: () => AppScope.of(context).jumpTo('booth')),
-            const SizedBox(width: 10),
-            NeuActionButton(
-                label: '刷新',
-                icon: Icons.refresh_rounded,
-                onTap: _load),
-          ],
-        ),
-        const SizedBox(height: 14),
-        Expanded(
-          child: _imported.isEmpty
-              ? const NeuEmptyState(
-                  height: 200,
-                  text: '还没有入库的 Booth 软件包。\n到「Booth 已购」页下载并入库后，会列在这里。')
-              : ListView.separated(
-                  padding: EdgeInsets.zero,
-                  itemCount: _imported.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final file = _imported[index];
-                    return NeuCard(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('${file['displayName']}',
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis),
-                                const SizedBox(height: 2),
-                                Text('${file['filePath']}',
-                                    style: TextStyle(
-                                        fontSize: 11, color: t.inkTertiary),
-                                    overflow: TextOverflow.ellipsis),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          NeuPill('${file['version']}'.isEmpty
-                              ? '未标注版本'
-                              : '${file['version']}'),
-                          const SizedBox(width: 8),
-                          _IconPoke(
-                              icon: Icons.delete_outline_rounded,
-                              tooltip: '从列表移除（不删除文件）',
-                              enabled: true,
-                              onTap: () async {
-                                final host = AppScope.of(context).host;
-                                if (host == null) return;
-                                await host.removePackageFile(
-                                    '${file['filePath']}');
-                                await _load();
-                              }),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-
 class _AssetStoreShelfTab extends StatefulWidget {
   const _AssetStoreShelfTab();
 
@@ -796,6 +481,8 @@ class _AssetStoreShelfTabState extends State<_AssetStoreShelfTab> {
                           horizontal: 16, vertical: 13),
                       child: Row(
                         children: [
+                          NeuCover('${asset['imageUrl']}'),
+                          const SizedBox(width: 13),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,

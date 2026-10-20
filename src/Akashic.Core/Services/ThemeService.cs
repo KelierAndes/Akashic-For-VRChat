@@ -11,6 +11,8 @@ public interface IThemeService
 
     double SheetOpacity { get; }
 
+    void Reload();
+
     Task SetVisualAsync(double opacity, CancellationToken ct = default);
 }
 
@@ -27,6 +29,13 @@ public class ThemeService : IThemeService
     public bool IsDarkTheme { get; private set; } = true;
 
     public double SheetOpacity { get; private set; } = 0.7;
+
+    public void Reload()
+    {
+        var settings = LoadSettings();
+        IsDarkTheme = settings.UseDarkTheme;
+        SheetOpacity = ClampOpacity(settings.SheetOpacity);
+    }
 
     public ThemeService(string? settingsPath = null)
     {

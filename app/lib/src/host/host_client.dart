@@ -271,8 +271,9 @@ class HostClient {
       _send('POST', 'api/shell/open', {'target': url, 'kind': 'url'});
 
 
-  Future<List<dynamic>> packages() async =>
-      await _send('GET', 'api/packages') as List<dynamic>;
+  Future<List<dynamic>> packages({bool refresh = false}) async =>
+      await _send('GET', refresh ? 'api/packages?refresh=true' : 'api/packages')
+          as List<dynamic>;
 
   Future<List<dynamic>> searchPackages(String query) async =>
       await _send('GET', 'api/packages/search?query=${Uri.encodeQueryComponent(query)}')
@@ -493,6 +494,30 @@ class HostClient {
   Future<Map<String, dynamic>> vrchatLocalMap() async =>
       await _send('POST', 'api/vrchat/local-map') as Map<String, dynamic>;
 
+  Future<List<dynamic>> resources() async =>
+      (await _send('GET', 'api/resources') as List).cast<dynamic>();
+
+  Future<Map<String, dynamic>> startResourceMatch({bool force = false}) async =>
+      await _send('POST', 'api/resources/match', {'force': force})
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> resourceMatchStatus() async =>
+      await _send('GET', 'api/resources/match/status') as Map<String, dynamic>;
+
+  Future<List<dynamic>> saveResourceMeta(Map<String, dynamic> update) async =>
+      (await _send('POST', 'api/resources/meta', update) as List).cast<dynamic>();
+
+  Future<List<dynamic>> resetResourceMeta(String key) async =>
+      (await _send('POST', 'api/resources/meta/reset', {'key': key}) as List)
+          .cast<dynamic>();
+
+  Future<List<String>> extractArchive(String path,
+      [List<String>? entries]) async {
+    final result = await _send('POST', 'api/library/zip/extract',
+        {'archivePath': path, 'entries': entries});
+    return (((result as Map)['paths'] as List?) ?? const []).cast<String>();
+  }
+
 
   Future<Map<String, dynamic>> backups() async =>
       await _send('GET', 'api/backups') as Map<String, dynamic>;
@@ -569,6 +594,26 @@ class HostClient {
   Future<Map<String, dynamic>> syncPull() async =>
       await _send('POST', 'api/sync/pull', {},
           const Duration(minutes: 5)) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> syncTouch(String reason) async =>
+      await _send('POST', 'api/sync/touch', {'reason': reason})
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> updateCheck({bool force = false}) async =>
+      await _send('GET', force ? 'api/update/check?force=true' : 'api/update/check',
+          null, const Duration(seconds: 90)) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> updateState() async =>
+      await _send('GET', 'api/update/state') as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> updateDownload() async =>
+      await _send('POST', 'api/update/download', {},
+          const Duration(minutes: 15)) as Map<String, dynamic>;
+
+  Future<bool> updateApply(int pid) async {
+    final result = await _send('POST', 'api/update/apply', {'pid': pid});
+    return (result as Map)['started'] == true;
+  }
 
   Future<Map<String, dynamic>> githubLogin() async =>
       await _send('POST', 'api/github/login', {},
