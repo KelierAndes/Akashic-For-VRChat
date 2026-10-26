@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Akashic.Core.Models;
 using Akashic.Core.Services;
+using Akashic.Core.Services.Preview;
 
 namespace Akashic.Host.Api;
 
@@ -20,6 +21,31 @@ public static class SettingsEndpoints
         {
             await projects.SetBackupDirectoryAsync(request.Directory);
             return new { backupDirectory = projects.GetBackupDirectory() };
+        });
+
+        group.MapPost("/settings/preview-cache-dir", async (DirectoryRequest request,
+            IProjectService projects) =>
+        {
+            var applied = await projects.SetPreviewCacheDirectoryAsync(request.Directory);
+            return new { directory = applied, size = PreviewCachePaths.MeasureBytes(applied) };
+        });
+
+        group.MapPost("/settings/preview-cache-clear", async Task<IResult> (IProjectService projects,
+            ILoggerFactory loggerFactory) =>
+        {
+            var root = projects.GetPreviewCacheDirectory();
+            var freed = PreviewCachePaths.MeasureBytes(root);
+            try
+            {
+                PreviewCachePaths.Clear(root);
+            }
+            catch (Exception ex)
+            {
+                loggerFactory.CreateLogger("settings").LogError(ex, "清空预览缓存失败 {root}", root);
+                return Results.Problem("缓存目录正被占用，先关闭预览窗口再试。", statusCode: 409);
+            }
+
+            return Results.Json(new { directory = root, freed });
         });
 
         group.MapPost("/settings/backup-excludes-packages", async (ExcludePackages request,

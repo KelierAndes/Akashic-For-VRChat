@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -54,20 +55,40 @@ public sealed class ConfigSyncService : IConfigSyncService
 
     private readonly GitHubCli _gitHub;
     private readonly ISessionVault _vault;
+    private readonly AkashicDatabase _db;
+    private readonly IAssetStoreService? _assetStore;
+    private readonly IResourceCatalogService? _resources;
     private readonly string _settingsPath;
     private readonly string _dataDir;
 
-    public ConfigSyncService(ISessionVault vault, GitHubCli gitHub, string? settingsPath = null)
+    public ConfigSyncService(ISessionVault vault, GitHubCli gitHub, string? settingsPath = null,
+        AkashicDatabase? database = null, IAssetStoreService? assetStore = null,
+        IResourceCatalogService? resources = null)
     {
         _vault = vault;
         _gitHub = gitHub;
         _settingsPath = settingsPath ?? Path.Combine(DataRoot, "settings.json");
         _dataDir = Path.GetDirectoryName(_settingsPath) ?? DataRoot;
+        _db = database ?? new AkashicDatabase(_dataDir);
+        _assetStore = assetStore;
+        _resources = resources;
     }
 
     private static string DataRoot => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Akashic");
 
+
+    private List<string> ActiveCacheLabels()
+    {
+        var labels = new List<string>();
+        if (_db.Count("booth_items") > 0) labels.Add("Booth 已购清单");
+        if (_db.Count("assetstore_items") > 0) labels.Add("Asset Store 资产清单");
+        if (_db.Count("assetstore_covers") > 0) labels.Add("Asset Store 封面链接");
+        if (_db.Count("vrchat_items") > 0) labels.Add("VRChat 内容清单");
+        if (_db.Count("resource_meta") > 0) labels.Add("资源分类与匹配");
+        if (_db.Count("install_records") > 0) labels.Add("unitypackage 安装台账");
+        return labels;
+    }
 
     public async Task<SyncSnapshot> StatusAsync(CancellationToken ct = default)
     {
@@ -76,7 +97,7 @@ public sealed class ConfigSyncService : IConfigSyncService
         var settings = LoadSettings();
 
         var included = new List<string> { "设置（工程列表、路径、模板、快捷栏、主题与透明度）" };
-        included.AddRange(CacheFiles.Where(file => File.Exists(Resolve(file.Path))).Select(file => file.Label));
+        included.AddRange(ActiveCacheLabels());
         included.AddRange(Sessions
             .Where(site => _vault.Load(site.Site)?.Cookies.Count > 0)
             .Select(site => site.Label));
@@ -145,6 +166,7 @@ public sealed class ConfigSyncService : IConfigSyncService
             return VcsRunResult.Fail(action, string.Empty, "读不到 GitHub 数字 id",
                 "同步密钥是从账号 id 派生的，没有它无法加密。重新登录一次即可。");
 
+        _db.ExportSnapshots();
         var bundle = BuildBundle();
         var plain = JsonSerializer.SerializeToUtf8Bytes(bundle, TextOptions);
 
@@ -453,6 +475,10 @@ public sealed class ConfigSyncService : IConfigSyncService
                 written.Add(site.Label);
             }
         }
+
+        _db.ImportSnapshots();
+        _assetStore?.ReloadCaches();
+        _resources?.ReloadMeta();
 
         var output = $"已还原 {written.Count} 项：{string.Join(" · ", written)}";
         if (skipped.Count > 0) output += $"\n\n跳过 {skipped.Count} 项：{string.Join(" · ", skipped)}";

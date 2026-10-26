@@ -11,4 +11,16 @@
     <ProjectReference Include="..\Akashic.Core\Akashic.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="preview\**\*" Exclude="preview\**\*.cs" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="tools\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+    <PackageReference Include="StbImageWriteSharp" Version="1.16.7" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+  </ItemGroup>
+
 </Project>

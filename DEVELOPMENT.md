@@ -249,7 +249,13 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 ### 资源目录与 Booth 匹配
 
 * 资源页的行由 `ResourceCatalogService` 合并四路来源：库扫描（含 zip）、Booth 已购缓存、Asset Store 账户与封面缓存、`cache/resource-meta.json`。元数据按**规范化名称**（去版本号、去符号、转小写）做键，不按路径——文件挪个位置不该丢掉已经配好的封面和分类。
-* zip 只读中央目录，不预解压：一次扫描就能列出内层 `.unitypackage`，同包多个包在界面上折叠成一行。`<zip>-extracted` 里的散包在列表里折回压缩包，只有点「解包」才会真的落盘并登记入库；`ExtractArchiveAsync` 逐条校验路径没逃出目标目录。
+* **目录递归展平到 `.unitypackage` 一层**（`UnityPackageLibraryService.Catalog`）：扫描根下的每个顶层条目要么是散包本身，要么是一个容器（文件夹 / `.zip` / `.7z`）。容器只作分组行，真正入库的是它里面每个 `.unitypackage` **叶子**，所以一个商品 zip、一个散装的 `X-extracted` 文件夹、里面散落的多个包，最终都是同一批独立行。`AddFolderLeaves` 递归目录并钻进 `.zip`；`AddArchiveLeaves` 拆包列出 `.unitypackage`，再按 `!` 拼接的 `entrySpec` 递归嵌套 zip（`MaxArchiveDepth = 3`、`MaxNestedArchiveBytes = 256 MB`，超了就不再往下钻）。
+* 容器与叶子的 `Key` 不同（容器是 zip 或文件夹路径，叶子是 `容器路径!/内层路径` 或磁盘真实路径），但**元数据键各自按名字算**：`GetRowsAsync` 逐行取 `MetaKey`，不再让子行继承容器行的键。旧版就是这行继承把 `SeiranKiss-M` 三个包绑成一个匹配结果——第一个命中 Booth 商品后，另外两个直接显示同一个来源。
+* **匹配顺序是「整包优先、逐包兜底」**：`RunMatchAsync` 先只拿容器（`CanMatch` = 有子包的文件夹/压缩包）按**容器名**去匹配 Booth，整包命中就写容器自己的元数据；跑完重新取一次行，再展开**未命中容器的子包**（以及散包）逐个匹配。命中容器的子包不再单独试——`InheritFromContainer` 会把 `Matched`/来源/封面/分类/标签填到空字段上，并标 `Attempted`，所以增量跑不会重复请求。一个商品 zip 里放多个包时，这是唯一能命中「商品级」标题的做法：子包名常常是 `Assets` 里的零碎文件名，整包名才是 Booth 上的商品名。
+* 容器自己没命中、子包命中了，界面上容器不显示 Booth 徽标，而是显示「包内 N 项已匹配」——否则一个 zip 里 1/9 命中会被误读成整包已匹配。
+* 同一个包既在 zip 里又在解出来的文件夹里（`X.zip` + `X-extracted/`）会扫出两条，`AddLeaf` 用 `Identity(名称, 大小)` 去掉重复的那条。注意物理文件的 `stamp.Size` 是 0，必须走 `PhysicalSize(filePath)`，否则去重失效（SeiranKiss 一度 93 条里含 4 条重复）。叶子的「多大」取 `ZipArchiveEntry.Length`（解压后大小），不是外层 zip 的长度。
+* `ProductKey` 把 `X.zip` 与 `X-extracted` 折成同一个键，所以一个商品在列表里只有一行分组。`InJunk` 跳过 `__MACOSX`、`.DS_Store` 一类噪声目录。
+* zip 只读中央目录，不预解压：一次扫描就能列出内层 `.unitypackage`。只有点「解包」才会真的落盘并登记入库；`ExtractArchiveAsync` 逐条校验路径没逃出目标目录。
 * 版本号从文件名里剥：`Name_v1.2`、`Name [1.0.4]`、`Name_Ver1.06_`、`Name_1.1fix1` 都要认；`v`/`ver`/`version` 前缀可省略，剥完再 trim 一次分隔符，否则 `MiniSimplisticPens_1.1_` 这类会整串留下。
 * Booth 搜索接口是 `https://booth.pm/ja/search/<query>`（查询词放路径里，`?q=` 会 404）。结果卡片自带 `data-product-id` / `data-product-brand` / `data-product-category`、标题锚点与 `data-original` 封面；商品页只有 `og:title` / `og:image` 可靠，**分类别从 item 页取**——那个页面到处是侧栏与推荐的 browse 链接，第一条往往不是本商品的分类。
 * 匹配顺序：名称里的商品 id（`items/123` 或裸的 5 位以上数字）优先按 id 取商品页；否则按名称搜索打分。前缀命中要求长度比 ≥ 0.7，否则「Magica Cloth 2」会被「Magica Cloth 2 Helper」抢走；后缀命中（`【工具】EreMorph`）与精确命中直接给高分。标题先剥掉 `【】「」()` 与 ` / `、` | `、` - ` 之后的分句再比对，否则带副标题的正品会被判远。
@@ -263,6 +269,99 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * 没有匹配到 Booth / Asset Store 的包留在「用户软件包」的「未匹配」筛选里；用户可以自己填源链接、封面、分类与标签，这些只算自定义信息，**不算匹配**，不会把它挪出未匹配列表。
 * 分类走 Booth 自己的标签优先（`3D衣装`→服饰、`3D環境・ワールド`→场景…），没有标签时按标题关键词猜；关键词表里「道具/工具」排在「场景」前面，否则「ワールド用ギミック」会被归进场景。
 * 项目详情页的分类筛选读 `GET /api/resources/categories`（只返回元数据里的名称→分类，不触发库扫描），前端把行名按同一套规则规范化后查表。VPM 注册表包没有资源分类，显示「—」，筛「未分类」时归到那一侧。
+
+### 数据层（SQLite）
+
+* 列表数据的唯一读取源是 `%LOCALAPPDATA%\Akashic\akashic.db`（Microsoft.Data.Sqlite，WAL）。工程、已安装包、VPM 清单、资源行、资源元数据、Booth、Asset Store、VRChat、库文件扫描结果、安装台账都在里面；`settings.json` 仍然只管配置，`cache/*.json` 只在配置同步时由数据库导出。
+* 表里的 `payload` 列保留完整模型 JSON，便于新旧字段兼容；索引列（名称、来源、分类、mtime）只用于排序和筛选。资源筛选可以走 `GET /api/resources?origin=&category=&q=`，由 SQL 完成。
+* 第一次启动会把旧版 JSON 缓存一次性导入，并在 `meta` 表记 `legacy.imported`。同步拉取后调用 `ImportSnapshots()` 覆盖对应表；同步上传前调用 `ExportSnapshots()` 生成旧格式 JSON，保证 2.1.0 及更早版本仍能还原。
+* 工程列表用文件签名（`ProjectVersion.txt`、`manifest.json`、`vpm-manifest.json` 的 mtime+长度与目录 mtime）判断是否要重扫；未变化的工程直接读数据库里的记录。库里没有的工程路径会同时从 `settings.json` 和数据库清掉。
+* 库扫描结果按「文件大小 + mtime」缓存 `UnityPackageFileInfo` 与 zip 子项；第二次打开资源页不再打开每个 zip。缩略图也记录命中与未命中，避免每次重开都去拆同一个包找 `preview.png`。
+* 实测（本机 75 个资源、62 个包文件、14 个压缩包）：资源页热查询约 70 ms，工程列表约 40 ms；冷启动首次仍要扫描并解缩略图，约 4–7 秒。
+
+### Prefab 预览
+
+* 预览管线：`PackageContentCache` 把 `.unitypackage` 的 tar.gz 里需要的资产（prefab/mat/shader/fbx/贴图/脚本/package.json）按 `pathname` 落盘到 `%LOCALAPPDATA%\Akashic\preview\packages\<hash>\`；`UnityMetaIndex` 扫 `.meta` 建 GUID→路径索引并解析 FBX 的 `internalIDToNameTable`；`PrefabParser` 用块头正则 + YamlDotNet 还原 GameObject/Transform/组件/嵌套 prefab；`GlbBuilder` 用 Assimp 找 FBX 子网格、SharpGLTF 输出带贴图的 GLB。
+* 场景 JSON 里带层级、局部变换、网格引用、材质槽位与组件字段；Flutter 左侧树、右侧组件面板直接消费它。三列布局在 `app/lib/src/pages/preview_page.dart`。
+* **材质降级缓存**：每个 `.mat` 解析出的 fallback 描述（主贴图/颜色、阴影色、法线、MatCap、自发光、描边、透明/双面、纹理 ST、关键字、管线）以「路径 + 大小 + mtime」为键存进 SQLite 表 `preview_materials`（`material-vN` 前缀），同一材质只解析一次；GLB 与 scene.json 仍按 `build-vN` 缓存。实测 Nijiiro 第二次构建 36 ms。
+* 能拿到 `.shader` 时，额外扫描 `Properties { ... }` 块：按 `[MainTexture]` / `[MainColor]` / `[Normal]` 标记与 `2D/Color/Range` 类型补全主贴图、主色、法线与裁剪，不认识的槽位名也能映射；非 lilToon 的卡通 Shader 归为 `toon` 走通用卡通替身，Unlit/UI/Sprite 走基础材质，其余保持 PBR。
+* 透明语义按材质模式分开处理：**opaque 必须忽略贴图 alpha**（否则脸/衣服贴图里的透明区会挖洞），mask 才按 `_Cutoff` 丢弃，blend 才输出贴图 alpha 并关闭深度写入；预制乘 alpha 只在 blend 下生效。Shader 文本里的 `clip`/`AlphaTest` 与 `Blend SrcAlpha` 只对非 Standard、非 lilToon 的自定义 Shader 作为补充线索，避免把不透明 Shader 的 `Blend One Zero` 误判成透明。
+* 同一个节点有多个子网格时，按 Assimp 材质的 **名称** 先匹配 prefab 材质，匹配不上再按索引；GLTF 每个 primitive 会生成一个子 Mesh，视窗按「节点材质数组 + primitive 序号」回查，避免同名/空名材质全部套到第一个。
+* MatCap 依赖环境光照/视角，外部渲染容易产生错误高光，**默认不应用**（仍解析并显示在组件面板里）；需要判断烘焙效果时用顶部的「平光预览」按钮，临时关闭光照看基础贴图与颜色。
+* 全局光照烘焙（Lightmap）本身不重建，动态光照下的明暗会与 Unity 内不同；平光模式是给这类资产核对贴图/材质的兜底。
+* 打开预览先进入「选择要预览的内容」列表：**包内每一个文件都在列**（prefab / 模型 / 贴图 / 材质 / 着色器 / 动画 / 状态机 / 脚本 / 音频 / 视频 / 文本 / 场景），带完整相对目录、类型徽标与大小，可按名称或目录筛选；只有 prefab 与模型给「预览」（进 3D 视窗），其余给「查看」。标题副文案「N 个文件 · X 个可建模 · Y 张贴图 · Z 个材质」就是按这个分类统计的。`PackageContentCache` 的白名单已经换成**黑名单**（`.dll .so .dylib .exe .pdb` 与嵌套压缩包不解），所以列的是真·全部资产，而不是「能被建模的那几个」。
+* 列表**按类型分组**：类型顺序固定（`_kindOrder`：prefab → 模型 → 材质 → 贴图 → 着色器 → 动画 → 状态机 → 脚本 → 音频 → 视频 → 文本 → 场景，未列出的类型排在最后），每组一个小标题带图标与数量；上方一排可点的类型标签（「全部 N」「贴图 3」…）做筛选，选中时只列该类型、不再显示分组标题。计数来自**全部资产**而不是当前筛选结果，否则点一个标签后其他标签的数字会跟着变。
+* 容器（zip / 文件夹）行的预览入口取**第一个子包**：`_preview` 遇到带 `children` 的行会换成 `children.first`，容器本身不是可预览的资源（它的 `Key` 交给 `PreviewService` 只会解析成「压缩包里没有 …」）。之前那条「预览容器里的第一个包」的提示语是真的、实现是假的。
+* 贴图与材质走右侧分栏（列表 flex 5 / 查看器 flex 6）：贴图由 `GET /preview/<token>/file` 出图，材质由 `GET /preview/<token>/material` 出一个 **HLSL 渲染的球**（`HlslSceneData.BuildMaterialPreview` 造一个 2× 缩放的内置 10204 球体，只挂这一个材质，`RenderOptions { View = "iso", Mode = "textured" }`）。这两条路由的 token 在路径里，所以能当普通图片 URL 用。
+* **`.tga/.psd/.hdr/.exr/.tif/.dds` 要转 PNG 才能显示**：`TexturePreviewService.Resolve` 对 png/jpg/gif/bmp/webp 直接透传，其余用 StbImageSharp 解码后写进 `cache/preview/textures/tex-v1`。StbImageSharp 与 StbImageWriteSharp 都导出 `ColorComponents`，**必须全限定**，否则 CS0104 二义。
+* **给 `Uri.replace` 传带 `?` 的 path 会把问号编成 `%3F`**，整条查询掉进路径里 → 路由不匹配 → 404，而 Flutter 的 `Image.network` 只会给一句「无法加载」。`HostClient._previewUrl` 因此把 path 与 query 分开传；路径里带空格的资产（`Kiss Like ver.8`）此前就是这样静默失败的。
+* 查看器**不用 `Image.network`**，改走 `HostClient.fetchPreviewImage`：材质球要编译着色器，动辄十秒，`Image.network` 期间只能给一块黑；而且它拿不到响应体，侧车返回的真实原因（`Problem` JSON 的 `detail`）会被吞成一句笼统的「渲染不出来」。自己发请求才能显示「正在用 HLSL 渲染材质球…」并把 `detail` 原样贴出来。
+* **Unity 5 时代的 `.mat` 用重复的 `data:` 键表达列表**（`m_TexEnvs`/`m_Floats`/`m_Colors` 下每个条目再写一次 `data:`），YamlDotNet 在装配 `YamlMappingNode` 时对重复键抛 `YamlException`，于是整个 block 被丢掉、`ParseMaterial` 返回 null——表现为「这个 .mat 解析不出材质」，SUIMONO 49 个材质里 35 个中招。`ReadBlocks` 现在先按原样解析，失败再把 `data:` + 缩进的 `first:` 合并成 `- first:`（序列项的列正好等于原子项的列，深层缩进不用动）重解析一次。改完 SUIMONO 从 4/49 到 **39/49**；全库 89 个包、抽 229 个材质跑一遍球渲染是 **225 成功 / 4 二进制 / 0 其他失败**，同一轮 prefab 回归是 `buildFail 0`、可渲染 52、无网格 22、无 prefab 15、428 次绘制 / 215 个回退材质。
+* **另有一类 `.mat` 是二进制序列化的**（文件头不是 `%YAML`，而是带 `5.0.0f4` 与类型树的裸字节），SUIMONO 剩下 10 个就是。这类不做逆向，`MaterialAsync` 先读前 5 个字节判头，直接给「这个 .mat 是二进制序列化的，读不出里面的属性。」——报错文案要说真原因，别一律推给「着色器无法编译」。
+* 视窗由侧车在 `/preview/<host-token>/` 同源提供 `viewer.html` 与本地打包的 Three.js（`src/Akashic.Host/preview/`），WebView2 只加载这一页；`LoopbackGuard` 对 `/preview` 校验路径里的 token，不接受跨域来源。
+* 未知 Shader 按「语义槽位嗅探」降级：`_BaseMap`/`_MainTex`/… 依次找主贴图，`_BaseColor`/`_Color` 找颜色，`Cull Off` → 双面，`Blend`/`_Cutoff` → 透明或裁剪；名字命中 toon/lilToon/Poiyomi 等或带 ramp 槽位的用 `MeshToonMaterial`，unlit 用 `MeshBasicMaterial`，其余按 PBR 渲染。
+* **lilToon 定向解析**：包里通常不含 lilToon 的 `.shader`，所以不能依赖 Shader 文件，改按材质字段识别与读取：
+  * 识别：出现 `_TransparentMode`、`_LightMinLimit`、`_ShadowColor`/`_1st_ShadeColor` 或 Shader 名含 lilToon。
+  * 主色/主贴图：`_Color`/`_BaseColor`，贴图优先 `_BaseMap`、`_MainTex`、`_BaseColorMap`。
+  * 阴影：旧版 `_1st_ShadeColor`/`_2nd_ShadeColor`，新版 `_ShadowColor`/`_Shadow2ndColor`/`_Shadow3rdColor`；`_ShadowStrength`、`_LightMinLimit`、`_LightMaxLimit`、`_AsUnlit`。阴影色 alpha 为 0 表示未启用，回退到上一阶，避免把暗部渲染成纯黑。
+  * 渲染状态：`_TransparentMode`（0 不透明 / 1 裁剪 / ≥2 透明）、`_Cutoff`、`_Cull`（0 双面）。
+  * 扩展贴图：`_EmissionMap`/`_EmissionColor`、`_MatCapTex`/`_MatCapColor`、`_BumpMap`/`_BumpScale`、`_OutlineColor`/`_OutlineWidth`。
+  * 视窗用自写的 lilToon 近似 Shader：主贴图 × 主色，按 `NdotL` 与阴影强度分三阶混合 `_ShadowColor`/`_Shadow2ndColor`，叠加自发光；`_UseOutline` 时加反向外扩的背面描边。MatCap 纹理由侧车复制到 `builds/<id>/textures/` 并保留元数据，但默认不参与着色（环境光照依赖太强）。
+  * 非 lilToon 的旧材质要按 Unity 渲染状态解析：`_Mode`（0 不透明 / 1 裁剪 / 2 淡出 / 3 透明）、`_SrcBlend`/`_DstBlend`/`_ZWrite`、`_ALPHABLEND_ON` / `_ALPHAPREMULTIPLY_ON` / `_SURFACE_TYPE_TRANSPARENT` 关键字。MiniSimplisticPens 的玻璃就是 `_Mode 3` + `_DstBlend 10` + `_ZWrite 0`，只按 lilToon 字段会误判成不透明。预制乘 alpha 要同步设置材质的 `premultipliedAlpha`。
+  * 一个 prefab 节点可能引用多个 FBX 子网格（Assimp `node.MeshIndices`），要全部输出成多个 primitive，并按 `mesh.MaterialIndex` 取对应材质；只取第一个会丢零件并让所有面用错材质。GLTF 里的材质再按名称映射回场景 JSON。
+  * 支持 **模型 prefab**（`m_SourcePrefab` 直接指向 `.fbx`）和 Unity 内置网格（`unity_builtin_extra` 的 10202 立方体、10207 Quad、10206 Plane、10204 Sphere、10203 Cylinder 等）；UnyStylus 同时用到这两种，漏掉就会「无法解析」或 0 网格。
+  * prefab 可能有多个根节点（模型 prefab、UI Canvas 分开挂），PrefabInstance 合并时不能只取 `baseRoots[0]`，否则模型分支会整段丢失；多根时建一个容器节点装全部。
+  * 取景用整个场景的包围球，不要按「最大网格 / 去掉离群网格」自动裁剪：有的资产自带 75 倍放大的笔身或玻璃展示盒，自动裁剪会把相机放进模型内部；宁可初始视角远一点，让用户自己缩放。
+* 常见的坑：
+  * `.unitypackage` 的 tar 成员可能带 `./` 前缀，`guid/pathname` 的切分前必须先剥掉，否则整个包会解析成 0 个资产（`inari-udon` 就是这种包）。
+  * 解 tar 必须用 SharpZipLib：.NET 自带的 `System.Formats.Tar.TarReader` 会在 UnyStylus 这类非标准头/大数值字段上报 `Unable to parse number`，SharpCompress 则报 `Unexpected EOF reading tar file`；SharpZipLib 的 `TarInputStream` 能完整读出 656 个条目。读 `pathname`/`asset.meta`/`asset` 时必须严格按 `entry.Size` 读取，不能 `ReadToEnd`，否则会吞掉后面的条目。**这条对两个入口都成立**：预览用的 `PackageContentCache` 早就换了 SharpZipLib，但安装用的 `UnityPackageExtractor.ParseAsync` 漏改，导致「预览正常、装到工程报 500」——加新 tar 入口时先确认用的是哪个。
+  * `TarReader` 的 `entry.DataStream` 在进入下一条后会被释放，包着读的 `StreamReader` 必须 `leaveOpen: true`，否则抛 `SubReadStream` 已释放。
+  * `SceneBuilder` 没有 `CreateNode`，节点用 `new NodeBuilder(name)` 建；`MeshBuilder.UsePrimitive` 的第二个参数是每个图元的顶点数，三角形传 3，传 0 会直接抛异常。
+  * `PreviewPage` 是 `Navigator.push` 出来的路由，拿不到 `MaterialApp.home` 里的 `AppScope`/`NeuTheme`；必须把 `HostClient` 与主题 tokens 显式传进去并再包一层 `NeuTheme`。
+  * 预览缓存带 `extract-vN`/`build-vN`/`material-vN`/`shim-vN`/`hlsl-vN`/`tex-vN` 版本号，改提取或 GLB 逻辑时要同步递增，否则旧缓存会一直命中。
+
+* **HLSL 精确渲染（可选）**：预览页顶部「HLSL 精确」切换到侧车的 D3D11 离屏渲染器，一次返回 2×2 拼成一张 JPEG 的固定四视图（左上正视、右上左视、左下顶视、右下正等测），覆盖在 Three.js 视窗上。此模式下相机不再由用户控制：OrbitControls 被禁用，「平光预览」「重置视角」置灰，每个视口用整个场景的 AABB 投影八个角点自动居中。**四个视口必须共用同一个正交高度**（取各自适配值里的最大者）——扁长物体（发夹、笔）若各视口独立适配，左视/顶视会被放大到铺满画面，四格比例自相矛盾，整体看着就和 Unity 差很远。模式条上另有「贴图 / 白膜 / 网格」三个按钮，切换只重发一次请求。渲染失败时自动退回实时 Three.js 并显示原因。
+* **底色可切黑/白**（页面右上角 `#bgToggle`，实时与 HLSL 共用一个 `backgroundLight` 状态）：实时视图换 `scene.background` 与网格配色，并给 `<body>` 加 `.light` 让 HUD、视图标签、模式按钮换成浅色主题；切 HLSL 时把 `lightBackground` 一起发进 `/api/preview/render`，渲染器用近白清屏色（0.93/0.94/0.96），并改取 `debug-clay-light` / `debug-wireframe-light` 两个调试着色器变体——白膜在浅底上必须压暗（`lerp(0.20…, 0.62…)`），否则白球贴白底完全看不出轮廓。light 变体是独立缓存键，旧的深色二进制不受影响，不用递增 `hlsl-vN`。
+* **HLSL 四视图可以就地缩放**：滚轮改 `transform: scale()`、拖拽平移、双击复位，右下角显示百分比；**不重新渲染**——放大的是已经拿到的那张 JPEG。缩放超过 100% 时隐藏四角视图标签，否则标签位置和画面会脱节；换模式或换图时 `resetHlslZoom()` 复位。
+* 侧车渲染失败时页面会自己 `akashicSetHlsl(false)` 退回实时，但 Flutter 的 `_hlsl` 是独立状态，会一直卡在「返回实时」。`_toggleHlsl` 打开后 1.5 秒查一次 `window.akashicHlslState()`，页面说没开就跟着复位。
+* 绘制次数由子网格数量决定，不是 Bug：一个 341 节点的完整形象单视图就有 290+ 次绘制（Pass 数其实只有 1–2）。别为了压低数字去裁剪 Pass——lilToon 的两遍透明（`FORWARD_BACK` + `FORWARD`）和描边 Pass 少画一个就直接错。
+* Shader 查找：先按内容包内的 `.meta` GUID 解析；找不到时查 `%LOCALAPPDATA%\Akashic\settings.json` 里已登记工程的 `Packages` 与 `Library/PackageCache`，只扫描包根、`Shader`、`Shaders`、`Assets`、`Runtime` 目录里的 `*.shader.meta`。因此素材包只带 `.mat`、lilToon 来自工程包的常见情况也能拿到真实 Shader；Nijiiro 的解析时间从 11.5 s 降到 95 ms。
+* `ShaderLabExtractor` 按花括号/字符串/注释感知扫描 `Properties`、`SubShader`、`Pass`，识别 `CGINCLUDE`/`HLSLINCLUDE` 与 `HLSLPROGRAM`/`CGPROGRAM`，解析 `UsePass "Shader/Pass"`（lilToon 的 `lts*.shader` 全是 UsePass 外壳），并保留 Pass 的 `Cull/ZWrite/ZTest/Blend/BlendOp/ColorMask/Offset/AlphaToMask` 表达式与 Shader 属性默认值。
+* 每个 Pass 生成「UnityShim.hlsl + 文件级 include 块 + SubShader include 块 + Pass 程序」的单一 HLSL 文件；`UnityShim.hlsl` 与 Unity 内置 include 空桩作为 Core 内嵌资源释放到 `preview/hlsl/shim-vN`。Shim 提供精度类型、`appdata_*`、`UnityObjectToClipPos`/`TransformObjectToHClip`、纹理/采样器宏、`_Time`/光照/阴影兜底，以及 `ExternalEnginePerFrame : register(b0)`；材质属性由编译器自动归入 `$Globals`（反射拿到 b1 与每个变量的字节偏移）。
+* 编译由随包的 `src/Akashic.Host/tools/fxc/fxc.exe` + `d3dcompiler_47.dll` 完成（`/Gec` 兼容 `sampler2D` + `tex2D`），带 `DIRECTIONAL` 与材质 `m_ValidKeywords`/`m_ShaderKeywords` 定义；`.cso` 与反射缓存在 `preview/hlsl/hlsl-vN/shaders/`，键含 Shader 路径/mtime、关键字、是否包含描边 Pass 与 shim 版本。`Vortice.D3DCompiler.Reflect` 读回常量缓冲、资源槽与输入签名。
+* HLSL 渲染器不走 Three.js 的 `model.glb`，而是用 Assimp 直接读包内原始 `.fbx`（`Triangulate|GenerateNormals|JoinIdenticalVertices|RemoveRedundantMaterials|ValidateDataStructure`），贴图按 Assimp 材质槽的相对路径从 FBX 同目录解析，所以 Unity 里被脚本改过的导入设置不会干扰精确模式；模型 prefab 与 Unity 内置网格由 `BuiltInGeometry` 现生成。顶点固定 128 字节交错（POSITION/NORMAL/TANGENT/TEXCOORD0..3/COLOR，UV 的 V 翻转），按 VS 输入签名建 InputLayout。引擎矩阵以 `Matrix4x4.Transpose` 上传，配合 HLSL 的 `mul(M, v)` 行向量约定；相机是右手系 LookAt + D3D `[0,1]` 深度正交投影，`FrontCounterClockwise = true`。每帧按材质上传 `$Globals`、绑定贴图与采样器，按材质浮点解析 Cull/ZWrite/ZTest/Blend（D3D11 不允许把 `SrcColor` 类因子用于 alpha，需换成 Alpha 版本），透明材质排在最后。
+* 白膜/网格是两条独立的调试 Shader（`GetDebugAsync`，键 `debug-clay`/`debug-wireframe`，靠 `AKASHIC_CLAY`/`AKASHIC_WIREFRAME` 宏区分）：白膜跳过描边 Pass、强制 `Cull Back + ZWrite + 不混合`，网格用 `FillMode.Wireframe` 且必须 `Cull None` 才看得到背面线框。
+* 两个必须记住的坑：
+  * Shader 若没有声明任何 `$Globals` 变量（白膜就是），反射拿不到 PS 常量缓冲；`BindPoint` 此时必须返回 `uint.MaxValue` 并在绑定处跳过，否则材质 CB 会占住 slot 0、把引擎自己的 `ExternalEnginePerFrame : register(b0)` 顶掉，光照向量变成 NaN、画面全黑。
+  * 随包 FBX 的法线朝向和 Unity 导入后的不一定一致（Nijiiro 的头发法线整体朝内），白膜用 `abs(dot(normal, light))` 而不是 `saturate(dot(...))`，否则换个资产就黑一半。
+* **三个空间、三种约定，先把它们分开**：Assimp 读出来的 FBX 网格是**右手系**；预制件 YAML 里的 Transform 是 **Unity 左手系世界**；glTF/Three.js 又是**右手系**。所以「镜像几次」要按目标空间算，不能两边照抄。
+  * HLSL 侧（`HlslSceneData.Geometry`）：顶点翻 `position.X`/`normal.X`/`tangent.X`（`tangent.w` 同时取反）并反转三角形绕序 → 网格进 Unity 空间；再套预制件变换；相机基向量用 `x = cross(z, up)`、`y = cross(x, z)`（`z = eye - target`）配 `FrontCounterClockwise = false`，即左手系读法。三处齐全才对，缺任何一处要么 gizmo 对物体反、要么整幅水平翻。
+  * GLB 侧（`GlbBuilder.WorldMatrix`）：**顶点保持 Assimp 原样**，改成对世界矩阵做共轭 `Mirror * W * Mirror`（`Mirror = CreateScale(-1,1,1)`）。等价于「镜像进 Unity 空间 → 套预制件变换 → 镜像回右手系」，行列式 (+1) 所以绕序不用动。
+  * 实时窗的相机因此要画在 Unity 等价的**镜像机位**上（iso 视线方向 (−0.72, 0.46, 0.85)，X 取负），gizmo 的 X 轴标在 GLB 的 −X 上——因为 glTF +X = Unity −X。
+* **为什么共轭这一步同时修掉了「部件飞开」**：Assimp 会把 FBX 物体自身的位移**烘进顶点**、节点 `Transform` 留成单位阵。实测 AudioHairClip：FBX 里 `HairClip2` 节点 `localT=(0,0,0)`，但它的网格 AABB 中心已经在 (0.017, −0.001, 0)，而预制件 `m_LocalPosition` 是 (0.02, −0.00099975, 0)——同一个数。旧写法 `W * D`（未镜像顶点 + 预制件变换）等于把这个偏移**算了两遍**，HairClip2 的世界 X 区间跑到 [0.015, 0.059]，和 [−0.025, 0.02] 的主体首尾相接、看着像两块拼错。共轭后镜像把这层烘焙翻到反号，与预制件值互相抵消：HairClip2 X [−0.025, 0.019]、HairClip1 [−0.025, 0.02]、Display [−0.019, 0.019] 三者重合，Z 上 HairClip2 落在 −0.002（屏幕背面）——与 HLSL 逐位一致。
+* **判断手性不要靠猜，用包内自带的不对称特征**：`Display` 的 `m_Materials` 顺序是 Volume/Mic/Viseme，Assimp 的子网格顺序与之一致；Unity 里麦克风图标在 +X 端，而 Assimp 数据里对应子网格在 −X ⇒ 直接证明 Assimp X 相对 Unity 镜像。比对照截图可靠，也不需要开着 Unity。
+* **坐标轴 gizmo 是自检手段，但要看清它测的是什么**：它和模型画在同一空间里，单独看无法判断「数据镜像」——数据镜像会带着它一起翻。判据必须两条并用：(1) 上面那种包内特征顺序；(2) Unity 对应视图里坐标球的方向。实时窗口右上角与 HLSL 每格左下角各有一副，模式条「坐标轴」开关控制。
+* **层级矩阵链的组合顺序**：`WorldMatrix` 里 `chain` 是 root→target，而 System.Numerics 是行向量约定（`v * M`），必须先乘自身再乘父级，即 `for (i = last; i >= 0; i--) matrix *= LocalMatrix(chain[i])`。写成 `foreach (node in chain)` 得到的是 `L_root * … * L_target`（列向量顺序），根节点一有旋转，子节点的 local position 就会落到错误的轴上——AudioHairClip 的 `HairClip2` 位移 (0.02, −0.001, 0) 在根节点 RotX=90° 下本应变成世界的 (0.02, 0, −0.001)，错序后变成 (0.02, −0.001, 0)，屏幕上看着就是往反方向偏。**`GlbBuilder` 和 `HlslSceneBuilder` 是两份同名实现，改一处必须同步另一处**，改完要递增 `build-vN` 否则旧 GLB 一直命中缓存。
+* **子网格识别不能靠「画全部」兜底**：`m_Mesh` 引用的是 FBX 内部的 **fileID**，而 fileID→名字 的映射存在工程的 `Library` 里、**不在 `.fbx.meta`**（`internalIDToNameTable` 通常是 `[]`）。所以 `ResolveSubAsset` 经常返回空，`PreviewMesh.SubMesh` 为空是常态。此时若兜底成「返回 FBX 全部网格」，一个多节点 prefab（AudioHairClip 的 `HairClip1`/`HairClip2`/`Display`）的每个节点都会把全部网格各画一遍 → 部件重影、看着像位置错乱（每格 12 次绘制而不是正确的 5 次）。正确做法：先按 `SubMesh`、再按**节点自身名字**匹配（归一化：只留字母数字、小写、去掉结尾 `mesh`，于是 Unity 的 `Hair Clip 1` 能对上 FBX 的 `HairClip1Mesh`）；只有「整个 FBX 就一个网格」或「这个 prefab 只有一个带网格节点」时才允许画全部。两条判据缺一不可——一刀切禁兜底会让 6 个包变成空白（可渲染数 35→29），补上节点数判据后回到 34。
+* **矩阵约定要按库的实际行为来，别凭直觉补转置**：System.Numerics 是行向量（`v * M`），glTF 线上格式是列主序。但 **SharpGLTF 的 `NodeBuilder.LocalMatrix` 已经自己做这个转换**——再手动 `Matrix4x4.Transpose` 会把平移从第四列挪到第四行，序列化后平移直接变成 `(0,0,0)`，子物体全部叠回原点。HLSL 侧则**必须**转置（`BuildEngine` 每处都转），因为那里是手写常量缓冲。判断依据永远是读出来的 GLB 矩阵，不是规范条文。
+* Unity 场景视图 Front 的相机其实在 **+Z** 侧朝 −Z 看（由「X 指左 + Y 指上」反推），不是常见的 −Z；Iso/Persp 是 X 左下、Z 右下。别按 OpenGL 习惯假设 Front 在 −Z。
+* **验证这类问题的正确工具**：`C:\temp` 下一个只引用 `AssimpNet` 的小 console 把 FBX 的节点树 + 每个子网格的 local/world AABB 打出来，再配一个解析 `model.glb` JSON chunk 的 node 脚本做同样的事。两边都是数字，一眼就能看出「偏了两倍」还是「镜像反号」，比反复截图猜快得多——截图只能证明「看着像」，证明不了 0.02 这种量级的差异。
+* **`int`/`bool` uniform 必须按整数写进 `$Globals`**：`BuildGlobals` 原先不分类型一律 `BitConverter.TryWriteBytes(float)`，于是着色器里声明成 `int` 的属性读到的是浮点位模式（1.0 → 1065353216）。AudioHairClip 的两个贴花就是这么消失的：`Viseme.shader` 里 `_Viseme` 是 `int`，巨大值让 `step(1..15, viseme)` 全为真，链式 lerp 最后落到 `_Color15 = (0,0,0,0)`，`col.a = min(col.a, 0)` → 绿色端盖整个透明掉；`ToggleMask.shader` 的 `int _Toggle` 同理，`mask *= 1-_Toggle` 变成巨大负数，麦克风图标也废了。修法：反射时取 `variable.VariableType.Description.Type`（**`ShaderVariableDescription` 本身没有 `Type` 字段，必须绕 `VariableType`**），存进 `ShaderUniform.Type`，打包时命中 `Int`/`Bool` 就写 `(int)MathF.Round(value)`。只有非零整数属性会改变结果，而那些本来就是坏的，所以是纯修复。反射 JSON 变了要递增 `hlsl-vN`。
+* **`.mat` 里存的属性不等于着色器声明的属性**：Unity 只认 Properties 块里声明的，`m_Colors`/`m_Floats` 里那些残留项（从 Standard 模板继承来的 `_Color=白`、`_Cutoff`、`_Metallic`…）一律忽略。我们全量读进 `PreviewMaterial.Colors`，`BaseColor` 又默认白色不透明，于是 GLB 把这些自定义材质当成不透明白色面片——AudioHairClip 的 `Display_Volume`/`Display_Mic`/`Display_Viseme` 三个共面 quad 糊成一块白膜盖住屏幕。判据：`ApplyShaderProperties` 读到了 `.shader` 源码、Properties 里既没有主色（`_Color`/`_BaseColor`/`_MainColor`/`[MainColor]`）也没有可用的主贴图 → 这个材质的可见输出是**算出来的**，标 `PreviewMaterial.Procedural`。
+* **Procedural 材质在实时视图画成半透明占位**（用户选定）：`GlbBuilder` 对 `Procedural && 无主贴图 && AlphaMode == "blend"` 输出 0.25 alpha 的 BLEND 材质，只做占位、不猜颜色。**必须限定在 blend**：opaque 的自定义程序化材质（实测 Yodare `teller.shader` 的 `TellerA`）画穿比画白更糟，保持实心。精确渲染（HLSL）不受影响，它跑的是真着色器。改 `PreviewMaterial` 的字段要递增 `material-vN`（SQLite 里旧行没有新字段），改 GLB 生成要递增 `build-vN`。
+* 材质编译失败或 URP 着色器降级为内置 `FallbackLit.hlsl`（主贴图/颜色/自发光/法线/裁剪），并计入 `X-Akashic-Fallbacks` 供视窗提示；lilToon 的透明/裁剪/描边由材质选中的 `lts*` 变体与 `_TransparentMode`、`_UseOutline`/`_OutlineWidth`、`_SrcBlend` 等真实状态决定。Shader 常量里的 `UNITY_FOG_LERP_COLOR` 必须写成 `lerp(fogColor, col, fogCoord)`，否则 fogFactor=1 时整模型会变黑。
+* 包内自带着色器的三类降级，理由要分开写清楚，否则排查时看不出差别：
+  * `.shadergraph` 是 Shader Graph 产物，没有 ShaderLab 源码可解析。
+  * `#pragma surface` 的 Surface Shader，Pass 由 Unity 生成，拿不到可复用的 HLSL。
+  * 真的没有 Pass。
+  * 缺 Unity 内建函数时补进 `UnityShim.hlsl` 并递增 `ShaderEnvironment.Version`。注意 **`EncodeFloatRG` 的返回类型各包不一致**：Yodare 的 `teller.shader` 写的是 `float4(EncodeFloatRG(pos.z), 3/255.0, 4/255.0)`，说明它要的是 `float2`（fxc 会拒绝 `float4(float, float)`，报 X3014）。用构造参数个数反推签名，别照抄 Unity 的 `float` 版本。
+* 「这个内容里没有可渲染的网格」绝大多数是真没有：SUIMONO 的 `fx_*.prefab` 只有 ParticleSystem（`!u!198/199`），nadenadeEx 的 prefab 只有 MonoBehaviour（`!u!114`）。判定方法是数 prefab 里有没有 `!u!33`/`!u!137`，别当成解析漏网格去改提取器。
+* Unity YAML 里的 `1e+30` 一类哨兵值（Atlas 的地形缩放、ABT 的碰撞体）解析成 float 会溢出成 `+∞`，写 `scene.json` 时 `JsonSerializer` 直接抛异常、整个构建 500。`PrefabParser.ParseFloat` 必须用 `float.IsFinite` 拒掉非有限值。同理 Unity 材质可以是 HDR 颜色，glTF 的 `baseColorFactor` 只接受 [0,1]，`GlbBuilder` 写入前要夹。
+* 预览缓存根目录在 `PreviewCachePaths`：默认 `<侧车目录>/cache/preview`（跟着软件走，不再吃 C 盘），设置页可改；目录不可写时回退 `%LOCALAPPDATA%\Akashic\preview`。四处用到缓存的地方（`PackageContentCache`、`PreviewService`、`HlslPreviewService`、`MapPreviewRoutes`）一律取 `PreviewCachePaths.Root`，不要再各自拼路径。
+* **版本号必须回收，不能只递增**：`VersionedUnder(root, section, version)` 在创建 `<section>/<version>` 的同时删掉同族的旧版本目录。**按「族」判断，不按整名**——族是版本号里最后一个 `-v` 之前的部分，所以 `hlsl` 容器下的 `hlsl-v2` 与 `shim-v5` 互不误伤；如果按整名比较，`shim-vN` 会在每次升 `hlsl-vN` 时被连带删掉，内置 include 桩全部要重编。这条是踩过才知道的。
+* **预览缓存有总量上限**（`QuotaBytes = 8 GB`）：每次解包后调 `EnforceQuota()`，按 `<section>/<version>/<leaf>` 粒度、以目录写入时间从旧到新删除，直到落到配额以内；参与回收的只有 `packages/builds/archives/textures` 四段，`hlsl` 的编译缓存不在其中（重编一次要几十秒，比省几百 MB 贵）。配额只在**超过**上限时才动手，所以正常用不到。
+* 为什么这两条是硬要求：`extract-v5` 把包内**全部**资产落盘（为了列全资产树），SUIMONO 一个包就几十 MB；旧版本目录不清会一直堆（实测 `packages/` 堆到 11 GB / 87 个目录），直接把 E: 盘写满，材质球接口返回 422「磁盘空间不足」——看着像代码坏了，其实是没地方写。
+* 侧车日志：`Program.cs` 里 `ClearProviders()` 是必须的（stdout 要留给握手 JSON），但必须紧跟着 `AddProvider(SidecarFileLoggerProvider)` 落到 `%LOCALAPPDATA%\Akashic\logs\host.log`（2 MB 滚动一份备份），否则线上问题完全没有现场。异常由 `UseExceptionHandler` 统一转成带 `detail` 的 Problem JSON——不加它，未捕获异常在 Production 下是**空 body 的 500**，界面只能显示一句笼统失败。
 
 ### 备份与还原
 

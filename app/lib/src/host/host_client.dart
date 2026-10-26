@@ -2,8 +2,16 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'host_models.dart';
+
+class PreviewImage {
+  const PreviewImage(this.bytes, this.message);
+
+  final Uint8List? bytes;
+  final String message;
+}
 
 class HostException implements Exception {
   HostException(this.message, {this.status});
@@ -36,7 +44,8 @@ class HostClient {
       );
     }
 
-    final token = base64Url.encode(List.generate(24, (_) => Random.secure().nextInt(256)))
+    final token = base64Url
+        .encode(List.generate(24, (_) => Random.secure().nextInt(256)))
         .replaceAll('=', '');
 
     final Process process;
@@ -54,8 +63,8 @@ class HostClient {
         .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
         .listen((line) {
-      if (log.length < 200) log.add(line);
-    });
+          if (log.length < 200) log.add(line);
+        });
 
     final handshake = await _readHandshake(process, log);
     if (handshake == null) {
@@ -63,14 +72,21 @@ class HostClient {
       throw HostException('侧车没有报告监听地址。\n${log.join('\n')}');
     }
 
-    return HostClient._(Uri.parse(handshake['url'] as String), token, process, log);
+    return HostClient._(
+      Uri.parse(handshake['url'] as String),
+      token,
+      process,
+      log,
+    );
   }
 
   factory HostClient.attach(String url, String token) =>
       HostClient._(Uri.parse(url), token, null, []);
 
   static Future<Map<String, dynamic>?> _readHandshake(
-      Process process, List<String> log) async {
+    Process process,
+    List<String> log,
+  ) async {
     final lines = process.stdout
         .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter());
@@ -87,9 +103,10 @@ class HostClient {
             }
           })
           .firstWhere(
-        (decoded) => decoded != null && decoded['kind'] == _handshakeKind,
-        orElse: () => null,
-      ).timeout(const Duration(seconds: 20));
+            (decoded) => decoded != null && decoded['kind'] == _handshakeKind,
+            orElse: () => null,
+          )
+          .timeout(const Duration(seconds: 20));
     } on TimeoutException {
       log.add('handshake timed out');
       return null;
@@ -119,8 +136,12 @@ class HostClient {
     _http.close(force: true);
   }
 
-  Future<dynamic> _send(String method, String path,
-      [Object? body, Duration? responseTimeout]) async {
+  Future<dynamic> _send(
+    String method,
+    String path, [
+    Object? body,
+    Duration? responseTimeout,
+  ]) async {
     final request = await _http
         .openUrl(method, _base.resolve(path))
         .timeout(const Duration(seconds: 15));
@@ -131,8 +152,9 @@ class HostClient {
       request.write(jsonEncode(body));
     }
 
-    final response = await request.close()
-        .timeout(responseTimeout ?? const Duration(seconds: 60));
+    final response = await request.close().timeout(
+      responseTimeout ?? const Duration(seconds: 60),
+    );
     final text = await response.transform(utf8.decoder).join();
 
     if (response.statusCode >= 400) {
@@ -147,8 +169,9 @@ class HostClient {
     return jsonDecode(text);
   }
 
-  Future<HostState> state() async =>
-      HostState.fromJson(await _send('GET', 'api/state') as Map<String, dynamic>);
+  Future<HostState> state() async => HostState.fromJson(
+    await _send('GET', 'api/state') as Map<String, dynamic>,
+  );
 
   Future<List<UnityProject>> projects() async =>
       (await _send('GET', 'api/projects') as List)
@@ -157,29 +180,40 @@ class HostClient {
           .toList();
 
   Future<UnityProject> addProject(String path) async => UnityProject.fromJson(
-      await _send('POST', 'api/projects/add', {'path': path}) as Map<String, dynamic>);
+    await _send('POST', 'api/projects/add', {'path': path})
+        as Map<String, dynamic>,
+  );
 
   Future<void> removeProject(String path) =>
       _send('POST', 'api/projects/remove', {'path': path});
 
-  Future<LaunchResult> launchProject(String path) async => LaunchResult.fromJson(
-      await _send('POST', 'api/projects/launch', {'path': path}) as Map<String, dynamic>);
+  Future<LaunchResult> launchProject(String path) async =>
+      LaunchResult.fromJson(
+        await _send('POST', 'api/projects/launch', {'path': path})
+            as Map<String, dynamic>,
+      );
 
   Future<String> backupProject(String path) async {
     final result = await _send('POST', 'api/projects/backup', {'path': path});
     return (result as Map)['message'] as String? ?? '备份完成';
   }
 
-  Future<DetectResult> detectProjects(String directory) async => DetectResult.fromJson(
-      await _send('POST', 'api/projects/detect', {'directory': directory})
-          as Map<String, dynamic>);
+  Future<DetectResult> detectProjects(String directory) async =>
+      DetectResult.fromJson(
+        await _send('POST', 'api/projects/detect', {'directory': directory})
+            as Map<String, dynamic>,
+      );
 
   Future<List<String>> scanBlueprints(String path, {bool force = false}) async {
-    final result = await _send('POST', 'api/blueprints/scan', {'path': path, 'force': force});
+    final result = await _send('POST', 'api/blueprints/scan', {
+      'path': path,
+      'force': force,
+    });
     return ((result as Map)['ids'] as List).cast<String>();
   }
 
-  Future<void> setDarkTheme(bool dark) => _send('POST', 'api/theme', {'dark': dark});
+  Future<void> setDarkTheme(bool dark) =>
+      _send('POST', 'api/theme', {'dark': dark});
 
   Future<Map<String, dynamic>> setVisual(double opacity) async =>
       await _send('POST', 'api/visual', {'opacity': opacity})
@@ -198,44 +232,74 @@ class HostClient {
           .toList();
 
   Future<CreationInput> creationInput() async => CreationInput.fromJson(
-      await _send('GET', 'api/project-creation') as Map<String, dynamic>);
+    await _send('GET', 'api/project-creation') as Map<String, dynamic>,
+  );
 
   Future<String> templatesDirectory() async =>
-      (await _send('GET', 'api/templates/directory') as Map<String, dynamic>)['directory']
+      (await _send('GET', 'api/templates/directory')
+              as Map<String, dynamic>)['directory']
           as String;
 
   Future<void> saveTemplate(String path, String name, String notes) => _send(
-      'POST', 'api/templates/save', {'path': path, 'name': name, 'notes': notes});
+    'POST',
+    'api/templates/save',
+    {'path': path, 'name': name, 'notes': notes},
+  );
 
   Future<void> deleteTemplate(String directory) =>
       _send('POST', 'api/templates/delete', {'directory': directory});
 
-  Future<void> createProject(String name, String? parent, String unityVersion,
-          String? templateDirectory) =>
-      _send('POST', 'api/projects/create', {
-        'name': name,
-        'parentDirectory': parent,
-        'unityVersion': unityVersion,
-        'templateDirectory': templateDirectory,
-      });
+  Future<void> createProject(
+    String name,
+    String? parent,
+    String unityVersion,
+    String? templateDirectory,
+  ) => _send('POST', 'api/projects/create', {
+    'name': name,
+    'parentDirectory': parent,
+    'unityVersion': unityVersion,
+    'templateDirectory': templateDirectory,
+  });
 
-  Future<void> setDefaultProjectPath(String directory) =>
-      _send('POST', 'api/settings/default-project-path', {'directory': directory});
+  Future<void> setDefaultProjectPath(String directory) => _send(
+    'POST',
+    'api/settings/default-project-path',
+    {'directory': directory},
+  );
 
   Future<void> setBackupPath(String directory) =>
       _send('POST', 'api/settings/backup-path', {'directory': directory});
 
-  Future<void> setBackupExcludesPackages(bool exclude) =>
-      _send('POST', 'api/settings/backup-excludes-packages', {'exclude': exclude});
+  Future<void> setBackupExcludesPackages(bool exclude) => _send(
+    'POST',
+    'api/settings/backup-excludes-packages',
+    {'exclude': exclude},
+  );
 
-  Future<void> setBoothDownloadDir(String directory) =>
-      _send('POST', 'api/settings/booth-download-dir', {'directory': directory});
+  Future<void> setBoothDownloadDir(String directory) => _send(
+    'POST',
+    'api/settings/booth-download-dir',
+    {'directory': directory},
+  );
 
-  Future<void> setAssetStoreCacheDir(String directory) =>
-      _send('POST', 'api/settings/assetstore-cache-dir', {'directory': directory});
+  Future<void> setAssetStoreCacheDir(String directory) => _send(
+    'POST',
+    'api/settings/assetstore-cache-dir',
+    {'directory': directory},
+  );
 
-  Future<void> setAssetStoreDownloadDir(String directory) =>
-      _send('POST', 'api/settings/assetstore-download-dir', {'directory': directory});
+  Future<void> setAssetStoreDownloadDir(String directory) => _send(
+    'POST',
+    'api/settings/assetstore-download-dir',
+    {'directory': directory},
+  );
+
+  Future<Map<String, dynamic>> setPreviewCacheDir(String directory) async =>
+      await _send('POST', 'api/settings/preview-cache-dir', {'directory': directory})
+          as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> clearPreviewCache() async =>
+      await _send('POST', 'api/settings/preview-cache-clear', {}) as Map<String, dynamic>;
 
   Future<void> forgetSession(String site) =>
       _send('POST', 'api/settings/forget-session', {'site': site});
@@ -270,23 +334,30 @@ class HostClient {
   Future<void> openUrl(String url) =>
       _send('POST', 'api/shell/open', {'target': url, 'kind': 'url'});
 
-
   Future<List<dynamic>> packages({bool refresh = false}) async =>
       await _send('GET', refresh ? 'api/packages?refresh=true' : 'api/packages')
           as List<dynamic>;
 
-  Future<List<dynamic>> searchPackages(String query) async =>
-      await _send('GET', 'api/packages/search?query=${Uri.encodeQueryComponent(query)}')
-          as List<dynamic>;
+  Future<List<dynamic>> searchPackages(String query) async => await _send(
+    'GET',
+    'api/packages/search?query=${Uri.encodeQueryComponent(query)}',
+  ) as List<dynamic>;
 
-  Future<Map<String, dynamic>> installPackage(String path, String package) async =>
-      await _send('POST', 'api/packages/install',
-          {'path': path, 'packageName': package}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> installPackage(
+    String path,
+    String package,
+  ) async => await _send('POST', 'api/packages/install', {
+    'path': path,
+    'packageName': package,
+  }) as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> removePackage(String path, String package) async =>
-      await _send('POST', 'api/packages/remove',
-          {'path': path, 'packageName': package}) as Map<String, dynamic>;
-
+  Future<Map<String, dynamic>> removePackage(
+    String path,
+    String package,
+  ) async => await _send('POST', 'api/packages/remove', {
+    'path': path,
+    'packageName': package,
+  }) as Map<String, dynamic>;
 
   Future<List<dynamic>> libraryFiles() async =>
       await _send('GET', 'api/library/files') as List<dynamic>;
@@ -298,55 +369,77 @@ class HostClient {
       await _send('GET', 'api/library/added') as List<dynamic>;
 
   Future<List<dynamic>> addLibraryFolder(String path) async =>
-      await _send('POST', 'api/library/folders/add', {'path': path}) as List<dynamic>;
+      await _send('POST', 'api/library/folders/add', {'path': path})
+          as List<dynamic>;
 
   Future<List<dynamic>> removeLibraryFolder(String path) async =>
-      await _send('POST', 'api/library/folders/remove', {'path': path}) as List<dynamic>;
-
-  Future<List<dynamic>> addPackageFile(String path, {String origin = 'Local'}) async =>
-      await _send('POST', 'api/library/files/add', {'path': path, 'origin': origin})
+      await _send('POST', 'api/library/folders/remove', {'path': path})
           as List<dynamic>;
+
+  Future<List<dynamic>> addPackageFile(
+    String path, {
+    String origin = 'Local',
+  }) async => await _send('POST', 'api/library/files/add', {
+    'path': path,
+    'origin': origin,
+  }) as List<dynamic>;
 
   Future<List<dynamic>> removePackageFile(String path) async =>
-      await _send('POST', 'api/library/files/remove', {'path': path}) as List<dynamic>;
-
-  Future<List<dynamic>> installRecords(String path) async =>
-      await _send('GET', 'api/library/records?path=${Uri.encodeQueryComponent(path)}')
+      await _send('POST', 'api/library/files/remove', {'path': path})
           as List<dynamic>;
 
+  Future<List<dynamic>> installRecords(String path) async => await _send(
+    'GET',
+    'api/library/records?path=${Uri.encodeQueryComponent(path)}',
+  ) as List<dynamic>;
+
   Future<Map<String, dynamic>> parsePackage(String path) async =>
-      await _send('POST', 'api/library/parse', {'path': path}) as Map<String, dynamic>;
+      await _send('POST', 'api/library/parse', {'path': path})
+          as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> installPackageFile(String projectPath, String packagePath,
-      List<String>? selected) async =>
-      await _send('POST', 'api/library/install', {
-        'path': projectPath,
-        'packagePath': packagePath,
-        'selectedPaths': selected,
-      }) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> installPackageFile(
+    String projectPath,
+    String packagePath,
+    List<String>? selected,
+  ) async => await _send('POST', 'api/library/install', {
+    'path': projectPath,
+    'packagePath': packagePath,
+    'selectedPaths': selected,
+  }) as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> uninstallPackageFile(String projectPath, String packageId) async =>
-      await _send('POST', 'api/library/uninstall',
-          {'path': projectPath, 'packageId': packageId}) as Map<String, dynamic>;
-
+  Future<Map<String, dynamic>> uninstallPackageFile(
+    String projectPath,
+    String packageId,
+  ) async => await _send('POST', 'api/library/uninstall', {
+    'path': projectPath,
+    'packageId': packageId,
+  }) as Map<String, dynamic>;
 
   Future<List<dynamic>> externalPackages() async =>
       await _send('GET', 'api/external') as List<dynamic>;
 
   Future<Map<String, dynamic>> addExternalFolder(String path) async =>
-      await _send('POST', 'api/external/add-folder', {'path': path}) as Map<String, dynamic>;
+      await _send('POST', 'api/external/add-folder', {'path': path})
+          as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> addExternalRepository(String url, String? reference) async =>
-      await _send('POST', 'api/external/add-repository',
-          {'url': url, 'reference': reference}) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> addExternalRepository(
+    String url,
+    String? reference,
+  ) async => await _send('POST', 'api/external/add-repository', {
+    'url': url,
+    'reference': reference,
+  }) as Map<String, dynamic>;
 
   Future<void> removeExternal(String id) =>
       _send('POST', 'api/external/remove', {'id': id});
 
-  Future<Map<String, dynamic>> installExternal(String projectPath, String id) async =>
-      await _send('POST', 'api/external/install',
-          {'path': projectPath, 'id': id}) as Map<String, dynamic>;
-
+  Future<Map<String, dynamic>> installExternal(
+    String projectPath,
+    String id,
+  ) async => await _send('POST', 'api/external/install', {
+    'path': projectPath,
+    'id': id,
+  }) as Map<String, dynamic>;
 
   List<dynamic> _urlsOf(Object? result) =>
       ((result as Map)['urls'] as List?) ?? const [];
@@ -361,13 +454,15 @@ class HostClient {
       _urlsOf(await _send('POST', 'api/repositories/order', {'urls': urls}));
 
   Future<Map<String, dynamic>> importVccRepositories() async =>
-      await _send('POST', 'api/repositories/import-vcc') as Map<String, dynamic>;
+      await _send('POST', 'api/repositories/import-vcc')
+          as Map<String, dynamic>;
 
   Future<String> resolveRepositoryName(String url) async {
-    final result = await _send('POST', 'api/repositories/resolve', {'url': url});
+    final result = await _send('POST', 'api/repositories/resolve', {
+      'url': url,
+    });
     return (result as Map)['name'] as String? ?? '';
   }
-
 
   Future<Map<String, dynamic>> boothScripts() async =>
       await _send('GET', 'api/booth/scripts') as Map<String, dynamic>;
@@ -385,23 +480,28 @@ class HostClient {
       await _send('GET', 'api/booth/library') as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> boothSaveLibrary(List<dynamic> items) async =>
-      await _send('POST', 'api/booth/library', {'items': items}) as Map<String, dynamic>;
+      await _send('POST', 'api/booth/library', {'items': items})
+          as Map<String, dynamic>;
 
   Future<String> boothDownload(String number) async {
-    final result = await _send('POST', 'api/booth/download', {'number': number});
+    final result = await _send('POST', 'api/booth/download', {
+      'number': number,
+    });
     return (result as Map)['path'] as String;
   }
 
   Future<Map<String, dynamic>> boothInspect(String number) async =>
-      await _send('POST', 'api/booth/inspect', {'number': number}) as Map<String, dynamic>;
-
+      await _send('POST', 'api/booth/inspect', {'number': number})
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> assetStoreScripts() async =>
       await _send('GET', 'api/assetstore/scripts') as Map<String, dynamic>;
 
   Future<String> assetStoreSearchUrl(String term) async {
-    final result =
-        await _send('GET', 'api/assetstore/search-url?term=${Uri.encodeQueryComponent(term)}');
+    final result = await _send(
+      'GET',
+      'api/assetstore/search-url?term=${Uri.encodeQueryComponent(term)}',
+    );
     return (result as Map)['url'] as String;
   }
 
@@ -412,7 +512,8 @@ class HostClient {
       await _send('GET', 'api/assetstore/cache') as List<dynamic>;
 
   Future<Map<String, dynamic>> assetStoreAccountCache() async =>
-      await _send('GET', 'api/assetstore/account-cache') as Map<String, dynamic>;
+      await _send('GET', 'api/assetstore/account-cache')
+          as Map<String, dynamic>;
 
   Future<dynamic> assetStoreMerge(List<dynamic> items) =>
       _send('POST', 'api/assetstore/merge', {'items': items});
@@ -423,7 +524,9 @@ class HostClient {
   Future<String?> assetStoreCover(String name) async {
     try {
       final result = await _send(
-          'GET', 'api/assetstore/cover?name=${Uri.encodeQueryComponent(name)}');
+        'GET',
+        'api/assetstore/cover?name=${Uri.encodeQueryComponent(name)}',
+      );
       return (result as Map)['url'] as String?;
     } on HostException {
       return null;
@@ -431,8 +534,10 @@ class HostClient {
   }
 
   Future<String> assetStoreDownload(String name, String? productId) async {
-    final result = await _send('POST', 'api/assetstore/download',
-        {'name': name, 'productId': productId});
+    final result = await _send('POST', 'api/assetstore/download', {
+      'name': name,
+      'productId': productId,
+    });
     return (result as Map)['path'] as String;
   }
 
@@ -441,14 +546,14 @@ class HostClient {
 
   Future<String?> assetStoreThumbnail(String path) async {
     try {
-      final result = await _send(
-          'POST', 'api/assetstore/thumbnail', {'path': path});
+      final result = await _send('POST', 'api/assetstore/thumbnail', {
+        'path': path,
+      });
       return (result as Map)['path'] as String?;
     } on HostException {
       return null;
     }
   }
-
 
   Future<Map<String, dynamic>?> vrchatSelf() async {
     try {
@@ -478,9 +583,13 @@ class HostClient {
   Future<dynamic> vrchatUnpublish(String id) =>
       _send('POST', 'api/vrchat/content/unpublish', {'id': id});
 
-  Future<Map<String, dynamic>?> vrchatSelectAvatar(String id, bool fallback) async =>
-      await _send('POST', 'api/vrchat/avatar/select',
-          {'id': id, 'fallback': fallback}) as Map<String, dynamic>?;
+  Future<Map<String, dynamic>?> vrchatSelectAvatar(
+    String id,
+    bool fallback,
+  ) async => await _send('POST', 'api/vrchat/avatar/select', {
+    'id': id,
+    'fallback': fallback,
+  }) as Map<String, dynamic>?;
 
   Future<List<dynamic>> vrchatStyles() async =>
       await _send('GET', 'api/vrchat/styles') as List<dynamic>;
@@ -494,6 +603,76 @@ class HostClient {
   Future<Map<String, dynamic>> vrchatLocalMap() async =>
       await _send('POST', 'api/vrchat/local-map') as Map<String, dynamic>;
 
+  Uri get origin => _base;
+
+  String absolute(String path) => _base.resolve(path).toString();
+
+  Future<List<dynamic>> previewList(String resourceKey, {String? entry}) async {
+    final query = StringBuffer('api/preview/list?resourceKey=')
+      ..write(Uri.encodeQueryComponent(resourceKey));
+    if (entry != null && entry.isNotEmpty) {
+      query.write('&entry=${Uri.encodeQueryComponent(entry)}');
+    }
+    return await _send('GET', query.toString()) as List<dynamic>;
+  }
+
+  Future<Map<String, dynamic>> previewBuild(
+    String resourceKey,
+    String prefabPath, {
+    String? entry,
+  }) async => await _send('POST', 'api/preview/build', {
+    'resourceKey': resourceKey,
+    'prefabPath': prefabPath,
+    if (entry != null && entry.isNotEmpty) 'entry': entry,
+  }, const Duration(minutes: 3)) as Map<String, dynamic>;
+
+  String previewFileUrl(String resourceKey, String path, {String? entry}) =>
+      _previewUrl('file', resourceKey, path, entry);
+
+  String previewMaterialUrl(String resourceKey, String path,
+          {String? entry, int size = 512}) =>
+      '${_previewUrl('material', resourceKey, path, entry)}&size=$size';
+
+  String _previewUrl(String route, String resourceKey, String path, String? entry) {
+    final query = StringBuffer()
+      ..write('k=${Uri.encodeQueryComponent(resourceKey)}')
+      ..write('&p=${Uri.encodeQueryComponent(path)}');
+    if (entry != null && entry.isNotEmpty) {
+      query.write('&entry=${Uri.encodeQueryComponent(entry)}');
+    }
+    return _base
+        .replace(path: '/preview/$_token/$route', query: query.toString())
+        .toString();
+  }
+
+  Future<PreviewImage> fetchPreviewImage(String url) async {
+    try {
+      final request = await _http.openUrl('GET', Uri.parse(url));
+      final response = await request.close().timeout(const Duration(minutes: 3));
+      final chunks = await response
+          .fold<List<int>>(<int>[], (all, part) => all..addAll(part))
+          .timeout(const Duration(minutes: 3));
+      final bytes = Uint8List.fromList(chunks);
+
+      if (response.statusCode != 200) {
+        var message = '侧车返回 ${response.statusCode}';
+        try {
+          final body = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+          message = '${body['detail'] ?? body['title'] ?? message}';
+        } catch (_) {}
+        return PreviewImage(null, message);
+      }
+
+      return PreviewImage(bytes, '');
+    } on SocketException {
+      return PreviewImage(null, '侧车没有响应，预览服务可能已经退出。');
+    } on TimeoutException {
+      return PreviewImage(null, '渲染超时了，这个材质的着色器可能太重。');
+    } catch (error) {
+      return PreviewImage(null, '$error');
+    }
+  }
+
   Future<List<dynamic>> resources() async =>
       (await _send('GET', 'api/resources') as List).cast<dynamic>();
 
@@ -505,56 +684,74 @@ class HostClient {
       await _send('GET', 'api/resources/match/status') as Map<String, dynamic>;
 
   Future<List<dynamic>> saveResourceMeta(Map<String, dynamic> update) async =>
-      (await _send('POST', 'api/resources/meta', update) as List).cast<dynamic>();
+      (await _send('POST', 'api/resources/meta', update) as List)
+          .cast<dynamic>();
 
   Future<List<dynamic>> resetResourceMeta(String key) async =>
       (await _send('POST', 'api/resources/meta/reset', {'key': key}) as List)
           .cast<dynamic>();
 
-  Future<List<String>> extractArchive(String path,
-      [List<String>? entries]) async {
-    final result = await _send('POST', 'api/library/zip/extract',
-        {'archivePath': path, 'entries': entries});
+  Future<List<String>> extractArchive(
+    String path, [
+    List<String>? entries,
+  ]) async {
+    final result = await _send('POST', 'api/library/zip/extract', {
+      'archivePath': path,
+      'entries': entries,
+    });
     return (((result as Map)['paths'] as List?) ?? const []).cast<String>();
   }
-
 
   Future<Map<String, dynamic>> backups() async =>
       await _send('GET', 'api/backups') as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> backupCounts() async {
     final result = await _send('GET', 'api/backups/counts');
-    return (((result as Map)['counts'] as Map?) ?? const {}).cast<String, dynamic>();
+    return (((result as Map)['counts'] as Map?) ?? const {})
+        .cast<String, dynamic>();
   }
 
   Future<String> restoreBackup(
-      String filePath, String targetPath, bool overwrite) async {
-    final result = await _send(
-      'POST',
-      'api/backups/restore',
-      {'filePath': filePath, 'targetPath': targetPath, 'overwrite': overwrite},
-      const Duration(minutes: 30),
-    );
+    String filePath,
+    String targetPath,
+    bool overwrite,
+  ) async {
+    final result = await _send('POST', 'api/backups/restore', {
+      'filePath': filePath,
+      'targetPath': targetPath,
+      'overwrite': overwrite,
+    }, const Duration(minutes: 30));
     return (result as Map)['message'] as String? ?? '还原完成';
   }
 
   Future<Map<String, dynamic>> vcsTools({bool refresh = true}) async =>
-      await _send('GET', 'api/vcs/tools?refresh=$refresh') as Map<String, dynamic>;
+      await _send('GET', 'api/vcs/tools?refresh=$refresh')
+          as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> vcsInstall(String tool) async =>
-      await _send('POST', 'api/vcs/install', {'tool': tool},
-          const Duration(minutes: 20)) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> vcsInstall(String tool) async => await _send(
+    'POST',
+    'api/vcs/install',
+    {'tool': tool},
+    const Duration(minutes: 20),
+  ) as Map<String, dynamic>;
 
-  Future<List<dynamic>> vcsStates(List<String> paths, {bool deep = false}) async =>
-      await _send('POST', 'api/vcs/states', {'paths': paths, 'deep': deep},
-          const Duration(minutes: 5)) as List<dynamic>;
+  Future<List<dynamic>> vcsStates(
+    List<String> paths, {
+    bool deep = false,
+  }) async => await _send('POST', 'api/vcs/states', {
+    'paths': paths,
+    'deep': deep,
+  }, const Duration(minutes: 5)) as List<dynamic>;
 
-  Future<Map<String, dynamic>> vcsState(String path, {bool deep = false}) async =>
-      await _send(
-          'GET',
-          'api/vcs/state?path=${Uri.encodeQueryComponent(path)}&deep=$deep',
-          null,
-          const Duration(minutes: 5)) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> vcsState(
+    String path, {
+    bool deep = false,
+  }) async => await _send(
+    'GET',
+    'api/vcs/state?path=${Uri.encodeQueryComponent(path)}&deep=$deep',
+    null,
+    const Duration(minutes: 5),
+  ) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> vcsRun(
     String action,
@@ -563,52 +760,52 @@ class HostClient {
     String? message,
     String? url,
     bool push = false,
-  }) async =>
-      await _send(
-        'POST',
-        'api/vcs/run',
-        {
-          'action': action,
-          'path': path,
-          'kind': kind,
-          'message': message,
-          'url': url,
-          'push': push,
-        },
-        const Duration(minutes: 30),
-      ) as Map<String, dynamic>;
-
+  }) async => await _send('POST', 'api/vcs/run', {
+    'action': action,
+    'path': path,
+    'kind': kind,
+    'message': message,
+    'url': url,
+    'push': push,
+  }, const Duration(minutes: 30)) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> githubStatus() async =>
-      await _send('GET', 'api/github/status', null,
-          const Duration(seconds: 90)) as Map<String, dynamic>;
+      await _send('GET', 'api/github/status', null, const Duration(seconds: 90))
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> syncStatus() async =>
-      await _send('GET', 'api/sync/status', null,
-          const Duration(seconds: 90)) as Map<String, dynamic>;
+      await _send('GET', 'api/sync/status', null, const Duration(seconds: 90))
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> syncPush() async =>
-      await _send('POST', 'api/sync/push', {},
-          const Duration(minutes: 5)) as Map<String, dynamic>;
+      await _send('POST', 'api/sync/push', {}, const Duration(minutes: 5))
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> syncPull() async =>
-      await _send('POST', 'api/sync/pull', {},
-          const Duration(minutes: 5)) as Map<String, dynamic>;
+      await _send('POST', 'api/sync/pull', {}, const Duration(minutes: 5))
+          as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> syncTouch(String reason) async =>
       await _send('POST', 'api/sync/touch', {'reason': reason})
           as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> updateCheck({bool force = false}) async =>
-      await _send('GET', force ? 'api/update/check?force=true' : 'api/update/check',
-          null, const Duration(seconds: 90)) as Map<String, dynamic>;
+      await _send(
+        'GET',
+        force ? 'api/update/check?force=true' : 'api/update/check',
+        null,
+        const Duration(seconds: 90),
+      ) as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> updateState() async =>
       await _send('GET', 'api/update/state') as Map<String, dynamic>;
 
-  Future<Map<String, dynamic>> updateDownload() async =>
-      await _send('POST', 'api/update/download', {},
-          const Duration(minutes: 15)) as Map<String, dynamic>;
+  Future<Map<String, dynamic>> updateDownload() async => await _send(
+    'POST',
+    'api/update/download',
+    {},
+    const Duration(minutes: 15),
+  ) as Map<String, dynamic>;
 
   Future<bool> updateApply(int pid) async {
     final result = await _send('POST', 'api/update/apply', {'pid': pid});
@@ -616,6 +813,6 @@ class HostClient {
   }
 
   Future<Map<String, dynamic>> githubLogin() async =>
-      await _send('POST', 'api/github/login', {},
-          const Duration(minutes: 6)) as Map<String, dynamic>;
+      await _send('POST', 'api/github/login', {}, const Duration(minutes: 6))
+          as Map<String, dynamic>;
 }

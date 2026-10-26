@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -11,6 +12,8 @@ public interface IResourceCatalogService
     Task<ResourceMatchStatus> StartMatchAsync(bool force = false);
 
     ResourceMatchStatus GetMatchStatus();
+
+    void ReloadMeta();
 
     Task<List<ResourceRow>> SaveMetaAsync(ResourceMetaUpdate update, CancellationToken ct = default);
 
@@ -31,7 +34,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
     private readonly IBoothService _booth;
     private readonly IAssetStoreService _assetStore;
     private readonly IUnityPackageIconService _icons;
-    private readonly string _metaPath;
+    private readonly AkashicDatabase _db;
 
     private readonly object _gate = new();
     private readonly object _saveGate = new();
@@ -41,7 +44,8 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
     private CancellationTokenSource? _running;
 
     public ResourceCatalogService(IUnityPackageLibraryService library, IBoothService booth,
-        IAssetStoreService assetStore, IUnityPackageIconService icons, string? settingsPath = null)
+        IAssetStoreService assetStore, IUnityPackageIconService icons, string? settingsPath = null,
+        AkashicDatabase? database = null)
     {
         _library = library;
         _booth = booth;
@@ -52,7 +56,12 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
 
-        _metaPath = Path.Combine(Path.GetDirectoryName(settings) ?? ".", "cache", "resource-meta.json");
+        _db = database ?? new AkashicDatabase(Path.GetDirectoryName(settings));
+    }
+
+    public void ReloadMeta()
+    {
+        lock (_gate) _meta = null;
     }
 
     private ResourceMetaCache Meta
@@ -61,17 +70,9 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         {
             if (_meta is not null) return _meta;
 
-            try
-            {
-                if (File.Exists(_metaPath))
-                    _meta = JsonSerializer.Deserialize<ResourceMetaCache>(
-                        File.ReadAllText(_metaPath), JsonOptions);
-            }
-            catch (JsonException)
-            {
-            }
-
-            return _meta ??= new ResourceMetaCache();
+            var entries = _db.LoadResourceMeta();
+            _meta = new ResourceMetaCache { SavedAt = DateTime.Now, Entries = entries };
+            return _meta;
         }
     }
 
@@ -82,53 +83,104 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         var accountItems = _assetStore.LoadAccountCache().Items;
         var changed = false;
 
+        var flat = new List<ResourceRow>();
+
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
 
             row.MetaKey = MetaKeyOf(row);
+            if (LinkRow(row, purchases, accountItems)) changed = true;
+            Apply(row, GetMeta(row.MetaKey));
 
-            var entry = GetMeta(row.MetaKey);
-            if (entry is null)
-            {
-                entry = LinkOffline(row, purchases, accountItems);
-                if (entry is not null)
-                {
-                    PutMeta(row.MetaKey, entry);
-                    changed = true;
-                }
-            }
-
-            Apply(row, entry);
-
-            if (row.CoverUrl.Length == 0)
-            {
-                var target = row.Kind == "archive"
-                    ? row.Children.FirstOrDefault(child => child.FilePath != row.FilePath)?.FilePath
-                    : row.Kind == "unitypackage"
-                        ? row.FilePath
-                        : null;
-
-                if (target is not null)
-                    row.CoverUrl = await LocalThumbnailAsync(target, ct);
-            }
+            flat.Add(row);
 
             foreach (var child in row.Children)
             {
-                child.MetaKey = row.MetaKey;
-                if (child.CoverUrl.Length == 0) child.CoverUrl = row.CoverUrl;
-                if (child.Category.Length == 0) child.Category = row.Category;
-                if (child.Tags.Count == 0) child.Tags = row.Tags;
+                child.MetaKey = MetaKeyOf(child);
+                if (LinkRow(child, purchases, accountItems)) changed = true;
+                Apply(child, GetMeta(child.MetaKey));
+                flat.Add(child);
             }
+
+            InheritFromContainer(row);
         }
+
+        foreach (var row in flat)
+        {
+            if (row.CoverUrl.Length > 0) continue;
+
+            var target = PackageThumbnailOf(row);
+            if (target is not null) row.CoverUrl = await LocalThumbnailAsync(target, ct);
+        }
+
+        foreach (var row in rows.Where(row => row.IsContainer))
+            InheritFromChildren(row);
 
         if (changed)
         {
             SaveMeta();
-            await SyncBoothCategoriesAsync(rows);
+            await SyncBoothCategoriesAsync(flat);
         }
 
+        _db.ReplaceResources(flat);
         return rows;
+    }
+
+    private bool LinkRow(ResourceRow row, IReadOnlyList<BoothPurchaseItem> purchases,
+        IReadOnlyList<AssetStoreAsset> accountItems)
+    {
+        if (GetMeta(row.MetaKey) is not null || row.MetaKey.Length == 0) return false;
+
+        var entry = LinkOffline(row, purchases, accountItems);
+        if (entry is null) return false;
+
+        PutMeta(row.MetaKey, entry);
+        return true;
+    }
+
+    private static string? PackageThumbnailOf(ResourceRow row)
+    {
+        if (row.Kind == "unitypackage")
+            return row.ArchiveEntry.Length == 0 && File.Exists(row.FilePath) ? row.FilePath : null;
+
+        var child = row.Children.FirstOrDefault(item => item.CoverUrl.Length == 0);
+        return child is null ? null : PackageThumbnailOf(child);
+    }
+
+    private static void InheritFromContainer(ResourceRow row)
+    {
+        if (row.Children.Count == 0) return;
+
+        foreach (var child in row.Children)
+        {
+            if (row.Matched && !child.Matched)
+            {
+                child.Matched = true;
+                child.MatchSource = row.MatchSource;
+                child.BoothId = row.BoothId;
+                child.BoothShop = row.BoothShop;
+                child.Attempted = true;
+            }
+
+            if (row.CoverUrl.Length > 0 && child.CoverUrl.Length == 0) child.CoverUrl = row.CoverUrl;
+            if (row.Category.Length > 0 && child.Category.Length == 0) child.Category = row.Category;
+            if (row.Tags.Count > 0 && child.Tags.Count == 0) child.Tags = row.Tags;
+            if (row.SourceUrl.Length > 0 && child.SourceUrl.Length == 0) child.SourceUrl = row.SourceUrl;
+        }
+    }
+
+    private static void InheritFromChildren(ResourceRow row)
+    {
+        var matched = row.Children.FirstOrDefault(child => child.Matched) ??
+                      row.Children.FirstOrDefault(child => child.CoverUrl.Length > 0);
+
+        if (matched is null) return;
+
+        if (row.CoverUrl.Length == 0) row.CoverUrl = matched.CoverUrl;
+        if (row.Category.Length == 0) row.Category = matched.Category;
+        if (row.Tags.Count == 0) row.Tags = matched.Tags;
+        if (row.SourceUrl.Length == 0) row.SourceUrl = matched.SourceUrl;
     }
 
     private async Task SyncBoothCategoriesAsync(List<ResourceRow> rows)
@@ -298,53 +350,35 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         try
         {
             var rows = await GetRowsAsync(ct);
-            var targets = rows
-                .Where(row => row.Kind != "child" && (force || (!row.Matched && !row.Attempted)))
+
+            var containers = rows
+                .Where(row => row.IsContainer && row.CanMatch)
+                .Where(row => force || (!row.Matched && !row.Attempted))
                 .ToList();
 
             lock (_gate)
             {
-                _status.Total = targets.Count;
-                _status.Message = "正在匹配…";
+                _status.Total = containers.Count;
+                _status.Message = containers.Count > 0 ? "正在匹配压缩包…" : "正在匹配…";
             }
 
-            foreach (var row in targets)
+            await MatchEach(containers, ct);
+
+            rows = await GetRowsAsync(ct);
+
+            var leaves = rows
+                .SelectMany(row => row.IsContainer ? (row.Matched ? [] : row.Children) : [row])
+                .Where(row => row.IsMatchable)
+                .Where(row => force || (!row.Matched && !row.Attempted))
+                .ToList();
+
+            lock (_gate)
             {
-                ct.ThrowIfCancellationRequested();
-
-                lock (_gate) _status.Current = row.Name;
-
-                try
-                {
-                    var candidate = await ResolveAsync(row, ct);
-
-                    if (candidate is null)
-                    {
-                        MarkAttempt(row.MetaKey);
-                        SaveMeta();
-                        lock (_gate) _status.Failed++;
-                    }
-                    else
-                    {
-                        PutMeta(row.MetaKey, FromCandidate(candidate));
-                        SaveMeta();
-
-                        lock (_gate) _status.Matched++;
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception)
-                {
-                    lock (_gate) _status.Failed++;
-                }
-
-                lock (_gate) _status.Scanned++;
-
-                await Task.Delay(200, ct);
+                _status.Total += leaves.Count;
+                _status.Message = "正在匹配包内 .unitypackage…";
             }
+
+            await MatchEach(leaves, ct);
 
             if (_status.Matched > 0) rows = await GetRowsAsync(ct);
             await SyncBoothCategoriesAsync(rows);
@@ -377,6 +411,47 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
                 _running?.Dispose();
                 _running = null;
             }
+        }
+    }
+
+    private async Task MatchEach(IReadOnlyList<ResourceRow> targets, CancellationToken ct)
+    {
+        foreach (var row in targets)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            lock (_gate) _status.Current = row.Name;
+
+            try
+            {
+                var candidate = await ResolveAsync(row, ct);
+
+                if (candidate is null)
+                {
+                    MarkAttempt(row.MetaKey);
+                    SaveMeta();
+                    lock (_gate) _status.Failed++;
+                }
+                else
+                {
+                    PutMeta(row.MetaKey, FromCandidate(candidate));
+                    SaveMeta();
+
+                    lock (_gate) _status.Matched++;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                lock (_gate) _status.Failed++;
+            }
+
+            lock (_gate) _status.Scanned++;
+
+            await Task.Delay(200, ct);
         }
     }
 
@@ -520,6 +595,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         if (normalized.Length > 0)
         {
             lock (_gate) Meta.Entries.Remove(normalized);
+            _db.DeleteResourceMeta(normalized);
             SaveMeta();
         }
 
@@ -547,22 +623,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             copy = new Dictionary<string, ResourceMetaEntry>(Meta.Entries, StringComparer.OrdinalIgnoreCase);
         }
 
-        var snapshot = new ResourceMetaCache { SavedAt = DateTime.Now, Entries = copy };
-
-        try
-        {
-            var directory = Path.GetDirectoryName(_metaPath);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-            lock (_saveGate)
-                File.WriteAllText(_metaPath, JsonSerializer.Serialize(snapshot, JsonOptions));
-        }
-        catch (IOException)
-        {
-        }
-        catch (UnauthorizedAccessException)
-        {
-        }
+        lock (_saveGate) _db.ReplaceResourceMeta(copy);
     }
 
     private static string MetaKeyOf(ResourceRow row)

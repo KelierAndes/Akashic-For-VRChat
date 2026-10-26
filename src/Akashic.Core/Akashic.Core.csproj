@@ -7,8 +7,16 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.33" />
+    <PackageReference Include="SharpZipLib" Version="1.4.2" />
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+    <PackageReference Include="AssimpNet" Version="4.1.0" />
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.7" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Services\Preview\Shader\Resources\**\*" />
   </ItemGroup>
 
 </Project>

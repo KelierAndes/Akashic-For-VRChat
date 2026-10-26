@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -18,6 +19,7 @@ public class AssetStoreService : IAssetStoreService
     private readonly HttpClient _fileClient;
     private readonly IUnityPackageLibraryService _library;
     private readonly string _settingsPath;
+    private readonly AkashicDatabase _db;
     private readonly ISessionVault _vault;
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
 
@@ -29,9 +31,8 @@ public class AssetStoreService : IAssetStoreService
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _coverCache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private readonly string _coverCachePath;
-
-    public AssetStoreService(IUnityPackageLibraryService library, ISessionVault vault, string? settingsPath = null)
+    public AssetStoreService(IUnityPackageLibraryService library, ISessionVault vault, string? settingsPath = null,
+        AkashicDatabase? database = null)
     {
         _vault = vault;
 
@@ -42,73 +43,28 @@ public class AssetStoreService : IAssetStoreService
         _settingsPath = settingsPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
+        _db = database ?? new AkashicDatabase(Path.GetDirectoryName(_settingsPath));
 
-        var dataDir = Path.GetDirectoryName(_settingsPath) ?? ".";
-        _coverCachePath = Path.Combine(dataDir, "cache", "assetstore-covers.json");
-        LoadCoverCache();
+        foreach (var (key, url) in _db.LoadAssetStoreCovers())
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(url))
+                _coverCache[key] = url;
     }
 
-    private void LoadCoverCache()
+    public void ReloadCaches()
     {
-        try
-        {
-            if (!File.Exists(_coverCachePath)) return;
-
-            var entries = JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_coverCachePath), SerializerOptions);
-            if (entries is null) return;
-
-            foreach (var (key, url) in entries)
-                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(url))
-                    _coverCache[key] = url;
-        }
-        catch (JsonException)
-        {
-        }
+        _coverCache.Clear();
+        foreach (var (key, url) in _db.LoadAssetStoreCovers())
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(url))
+                _coverCache[key] = url;
     }
 
-    private void SaveCoverCache()
+    public AssetStoreAccountCache LoadAccountCache() => _db.LoadAssetStoreAccount();
+
+    public Task SaveAccountCacheAsync(IReadOnlyList<AssetStoreAsset> items, CancellationToken ct = default)
     {
-        try
-        {
-            var directory = Path.GetDirectoryName(_coverCachePath);
-            if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-            File.WriteAllText(_coverCachePath,
-                JsonSerializer.Serialize(_coverCache, SerializerOptions));
-        }
-        catch (IOException)
-        {
-        }
+        _db.SaveAssetStoreAccount([.. items]);
+        return Task.CompletedTask;
     }
-
-    public AssetStoreAccountCache LoadAccountCache()
-    {
-        try
-        {
-            var path = AccountCachePath;
-            if (File.Exists(path))
-                return JsonSerializer.Deserialize<AssetStoreAccountCache>(File.ReadAllText(path), SerializerOptions)
-                       ?? new AssetStoreAccountCache();
-        }
-        catch (JsonException)
-        {
-        }
-
-        return new AssetStoreAccountCache();
-    }
-
-    public async Task SaveAccountCacheAsync(IReadOnlyList<AssetStoreAsset> items, CancellationToken ct = default)
-    {
-        var path = AccountCachePath;
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-        var snapshot = new AssetStoreAccountCache { SavedAt = DateTime.Now, Items = [.. items] };
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, SerializerOptions), ct);
-    }
-
-    private string AccountCachePath =>
-        Path.Combine(Path.GetDirectoryName(_settingsPath) ?? ".", "cache", "assetstore-account.json");
 
     public IReadOnlyDictionary<string, string>? SessionCookies
     {
@@ -327,8 +283,9 @@ public class AssetStoreService : IAssetStoreService
     public void CacheCoverUrl(string name, string url)
     {
         if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url)) return;
-        _coverCache[MatchKey(name)] = url;
-        SaveCoverCache();
+        var key = MatchKey(name);
+        _coverCache[key] = url;
+        _db.SaveAssetStoreCover(key, url);
     }
 
     public bool TryGetCoverUrl(string name, out string url)

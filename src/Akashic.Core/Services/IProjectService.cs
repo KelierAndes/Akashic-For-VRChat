@@ -23,6 +23,10 @@ public interface IProjectService
 
     Task SetBackupDirectoryAsync(string directory);
 
+    string GetPreviewCacheDirectory();
+
+    Task<string> SetPreviewCacheDirectoryAsync(string directory);
+
     bool BackupExcludesPackages { get; }
 
     Task SetBackupExcludesPackagesAsync(bool exclude);

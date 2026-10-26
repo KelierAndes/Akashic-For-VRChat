@@ -679,19 +679,22 @@ class NeuActionButton extends StatelessWidget {
       lightShadow: const Color(0x33FFFFFF),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       onTap: onTap,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 15, color: t.inkSecondary),
-            const SizedBox(width: 8),
+      child: Opacity(
+        opacity: onTap == null ? 0.42 : 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 15, color: t.inkSecondary),
+              const SizedBox(width: 8),
+            ],
+            Text(label,
+                style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: t.ink)),
           ],
-          Text(label,
-              style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600,
-                  color: t.ink)),
-        ],
+        ),
       ),
     );
   }

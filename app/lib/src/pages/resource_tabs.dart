@@ -8,6 +8,7 @@ import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
+import 'preview_page.dart';
 
 const resourceCategories = [
   '服饰',
@@ -31,7 +32,13 @@ class UserPackagesTab extends StatefulWidget {
 }
 
 class _UserPackagesTabState extends State<UserPackagesTab> {
-  static const filters = ['未匹配', '全部', 'Booth', 'Asset Store', ...resourceCategories];
+  static const filters = [
+    '未匹配',
+    '全部',
+    'Booth',
+    'Asset Store',
+    ...resourceCategories,
+  ];
 
   List<Map<String, dynamic>> _rows = [];
   List<dynamic> _folders = [];
@@ -74,21 +81,25 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
 
   String get _summary {
     final unmatched = _rows.where((row) => row['matched'] != true).length;
-    final booth = _rows.where((row) => '${row['matchSource']}' == 'Booth').length;
-    final store = _rows.where((row) => '${row['matchSource']}' == 'AssetStore').length;
+    final booth = _rows
+        .where((row) => '${row['matchSource']}' == 'Booth')
+        .length;
+    final store = _rows
+        .where((row) => '${row['matchSource']}' == 'AssetStore')
+        .length;
     return '共 ${_rows.length} 个包 · 未匹配 $unmatched · Booth $booth · Asset Store $store';
   }
 
   List<Map<String, dynamic>> get _shown => _rows.where((row) {
-        final source = '${row['matchSource']}';
-        return switch (_filter) {
-          '未匹配' => row['matched'] != true,
-          '全部' => true,
-          'Booth' => source == 'Booth',
-          'Asset Store' => source == 'AssetStore',
-          _ => '${row['category']}' == _filter,
-        };
-      }).toList();
+    final source = '${row['matchSource']}';
+    return switch (_filter) {
+      '未匹配' => row['matched'] != true,
+      '全部' => true,
+      'Booth' => source == 'Booth',
+      'Asset Store' => source == 'AssetStore',
+      _ => '${row['category']}' == _filter,
+    };
+  }).toList();
 
   Future<void> _startMatch({bool force = false}) async {
     final host = AppScope.of(context).host;
@@ -126,25 +137,27 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
 
   Future<void> _edit(Map<String, dynamic> row) async {
     final model = AppScope.of(context);
-    model.showModal(ResourceMetaForm(
-      row: row,
-      onReset: () async {
-        final host = model.host;
-        if (host == null) return;
-        await host.resetResourceMeta('${row['metaKey']}');
-        await _load(force: true);
-      },
-      onSubmit: (update) async {
-        final host = model.host;
-        if (host == null) return;
-        final rows = await host.saveResourceMeta(update);
-        if (!mounted) return;
-        setState(() {
-          _rows = rows.cast<Map<String, dynamic>>();
-          _status = _summary;
-        });
-      },
-    ));
+    model.showModal(
+      ResourceMetaForm(
+        row: row,
+        onReset: () async {
+          final host = model.host;
+          if (host == null) return;
+          await host.resetResourceMeta('${row['metaKey']}');
+          await _load(force: true);
+        },
+        onSubmit: (update) async {
+          final host = model.host;
+          if (host == null) return;
+          final rows = await host.saveResourceMeta(update);
+          if (!mounted) return;
+          setState(() {
+            _rows = rows.cast<Map<String, dynamic>>();
+            _status = _summary;
+          });
+        },
+      ),
+    );
   }
 
   Future<void> _extract(Map<String, dynamic> row) async {
@@ -155,10 +168,42 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     try {
       final paths = await host.extractArchive('${row['filePath']}');
       await _load(force: true);
-      if (mounted) setState(() => _status = '已解压 ${paths.length} 个 .unitypackage');
+      if (mounted) {
+        setState(() => _status = '已解压 ${paths.length} 个 .unitypackage');
+      }
     } catch (error) {
       if (mounted) setState(() => _status = '解压失败：$error');
     }
+  }
+
+  void _preview(
+    Map<String, dynamic> row, {
+    String? resourceKey,
+    String? entry,
+  }) {
+    final host = AppScope.of(context).host;
+    if (host == null) return;
+
+    var target = row;
+    final children = ((row['children'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    if (resourceKey == null && children.isNotEmpty) target = children.first;
+    if ('${target['kind']}' != 'unitypackage') return;
+
+    final tokens = NeuTheme.of(context);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NeuTheme(
+          tokens: tokens,
+          child: PreviewPage(
+            host: host,
+            resourceKey: resourceKey ?? '${target['key']}',
+            resourceName: '${target['name']}',
+            entry: entry,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _addPackage() async {
@@ -193,9 +238,11 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(_status,
-                  style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                _status,
+                style: TextStyle(fontSize: 12, color: t.inkTertiary),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             NeuActionButton(
               label: _matching ? '匹配中…' : '匹配 Booth',
@@ -216,7 +263,8 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
               onTap: () async {
                 final host = AppScope.of(context).host;
                 final picked = await FilePicker.getDirectoryPath(
-                    dialogTitle: '添加 .unitypackage 库目录');
+                  dialogTitle: '添加 .unitypackage 库目录',
+                );
                 if (host == null || picked == null) return;
                 await host.addLibraryFolder(picked);
                 await _load(force: true);
@@ -240,8 +288,10 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('扫描目录',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  const Text(
+                    '扫描目录',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 8),
                   for (final folder in _folders)
                     Padding(
@@ -249,10 +299,14 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                       child: Row(
                         children: [
                           Expanded(
-                            child: Text('$folder',
-                                style: TextStyle(
-                                    fontSize: 12, color: t.inkSecondary),
-                                overflow: TextOverflow.ellipsis),
+                            child: Text(
+                              '$folder',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: t.inkSecondary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           _IconPoke(
                             icon: Icons.close_rounded,
@@ -278,8 +332,9 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                   height: 200,
                   text: _filter == '未匹配'
                       ? '没有未匹配的资源。\n点「匹配 Booth」让本地包按名称去找对应商品，'
-                          '或切到「全部」查看已关联的资源。'
-                      : '这个筛选下没有资源。')
+                            '或切到「全部」查看已关联的资源。'
+                      : '这个筛选下没有资源。',
+                )
               : ListView.separated(
                   padding: EdgeInsets.zero,
                   itemCount: shown.length,
@@ -298,158 +353,273 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     final kids = ((row['children'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
     final isArchive = kind == 'archive';
+    final isContainer = kind == 'archive' || kind == 'folder';
     final open = _open.contains(key);
     final tags = ((row['tags'] as List?) ?? const []).cast<String>();
     final source = '${row['matchSource']}';
     final shop = '${row['boothShop']}';
     final category = '${row['category']}';
+    final matchedKids = isContainer
+        ? kids.where((child) => '${child['matchSource']}'.isNotEmpty).length
+        : 0;
 
-    return NeuCard(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              NeuCover('${row['coverUrl']}'),
-              const SizedBox(width: 13),
-              Expanded(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _preview(row),
+      child: NeuCard(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                NeuCover('${row['coverUrl']}'),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${row['name']}',
+                              style: const TextStyle(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if ('${row['version']}'.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            NeuPill('${row['version']}'),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        isContainer
+                            ? '${isArchive ? '压缩包' : '文件夹'} · 含 ${row['childCount']} 个 .unitypackage · ${row['originLabel']}'
+                            : '${shop.isNotEmpty ? '$shop · ' : ''}${row['filePath']}',
+                        style: TextStyle(fontSize: 11, color: t.inkTertiary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 7),
+                      Wrap(
+                        spacing: 7,
+                        runSpacing: 6,
+                        children: [
+                          NeuPill(category.isEmpty ? '其他' : category),
+                          if (source.isNotEmpty)
+                            NeuPill(
+                              source == 'Booth' ? 'Booth' : 'Asset Store',
+                              bg: const Color(0xFFBFE3C9),
+                              fg: const Color(0xFF237A45),
+                            ),
+                          if (source.isEmpty && matchedKids > 0)
+                            NeuPill(
+                              '包内 $matchedKids 项已匹配',
+                              bg: const Color(0xFFDCE6F6),
+                              fg: const Color(0xFF2C4A78),
+                            ),
+                          if (source.isEmpty && matchedKids == 0)
+                            const NeuPill(
+                              '未关联',
+                              bg: Color(0xFFEBD9B4),
+                              fg: Color(0xFF7A5514),
+                            ),
+                          if (source.isEmpty && row['attempted'] == true)
+                            const NeuPill('已尝试'),
+                          if (row['isManual'] == true) const NeuPill('已自定义'),
+                          for (final tag in tags) NeuPill('#$tag'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (source.isNotEmpty)
+                  _IconPoke(
+                    icon: Icons.open_in_new_rounded,
+                    tooltip: '打开来源页面',
+                    enabled: '${row['sourceUrl']}'.isNotEmpty,
+                    onTap: () {
+                      final url = '${row['sourceUrl']}';
+                      if (url.isNotEmpty) AppScope.of(context).openUrl(url);
+                    },
+                  ),
+                const SizedBox(width: 6),
+                _IconPoke(
+                  icon: Icons.view_in_ar_outlined,
+                  tooltip: isContainer ? '预览容器里的第一个包' : '预览包内容',
+                  enabled: true,
+                  onTap: () => _preview(row),
+                ),
+                const SizedBox(width: 6),
+                _IconPoke(
+                  icon: Icons.edit_outlined,
+                  tooltip: '编辑分类、标签、源链接与封面',
+                  enabled: true,
+                  onTap: () => _edit(row),
+                ),
+                if (isArchive) ...[
+                  const SizedBox(width: 6),
+                  _IconPoke(
+                    icon: Icons.unarchive_outlined,
+                    tooltip: '解压出 .unitypackage 并登记入库',
+                    enabled: true,
+                    onTap: () => _extract(row),
+                  ),
+                ],
+                if (isContainer) ...[
+                  const SizedBox(width: 6),
+                  _IconPoke(
+                    icon: open
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    tooltip: open ? '收起包内容' : '展开包内容',
+                    enabled: true,
+                    onTap: () => setState(() {
+                      if (open) {
+                        _open.remove(key);
+                      } else {
+                        _open.add(key);
+                      }
+                    }),
+                  ),
+                ],
+                if (!isContainer) ...[
+                  const SizedBox(width: 6),
+                  _IconPoke(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: '从列表移除（不删除文件）',
+                    enabled: true,
+                    onTap: () async {
+                      final host = AppScope.of(context).host;
+                      if (host == null) return;
+                      await host.removePackageFile('${row['filePath']}');
+                      await _load(force: true);
+                    },
+                  ),
+                ],
+              ],
+            ),
+            if (open)
+              Padding(
+                padding: const EdgeInsets.only(left: 77, top: 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text('${row['name']}',
-                              style: const TextStyle(
-                                  fontSize: 13.5, fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                        if ('${row['version']}'.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          NeuPill('${row['version']}'),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      isArchive
-                          ? '压缩包 · 含 ${row['childCount']} 个 .unitypackage · ${row['originLabel']}'
-                          : '${shop.isNotEmpty ? '$shop · ' : ''}${row['filePath']}',
-                      style: TextStyle(fontSize: 11, color: t.inkTertiary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 7,
-                      runSpacing: 6,
-                      children: [
-                        NeuPill(category.isEmpty ? '其他' : category),
-                        if (source.isNotEmpty)
-                          NeuPill(source == 'Booth' ? 'Booth' : 'Asset Store',
-                              bg: const Color(0xFFBFE3C9),
-                              fg: const Color(0xFF237A45)),
-                        if (source.isEmpty)
-                          const NeuPill('未关联',
-                              bg: Color(0xFFEBD9B4), fg: Color(0xFF7A5514)),
-                        if (source.isEmpty && row['attempted'] == true)
-                          const NeuPill('已尝试'),
-                        if (row['isManual'] == true) const NeuPill('已自定义'),
-                        for (final tag in tags) NeuPill('#$tag'),
-                      ],
-                    ),
+                    for (final child in kids) _childRow(child),
                   ],
                 ),
               ),
-              const SizedBox(width: 10),
-              if (source.isNotEmpty)
-                _IconPoke(
-                  icon: Icons.open_in_new_rounded,
-                  tooltip: '打开来源页面',
-                  enabled: '${row['sourceUrl']}'.isNotEmpty,
-                  onTap: () {
-                    final url = '${row['sourceUrl']}';
-                    if (url.isNotEmpty) AppScope.of(context).openUrl(url);
-                  },
-                ),
-              const SizedBox(width: 6),
-              _IconPoke(
-                icon: Icons.edit_outlined,
-                tooltip: '编辑分类、标签、源链接与封面',
-                enabled: true,
-                onTap: () => _edit(row),
-              ),
-              if (isArchive) ...[
-                const SizedBox(width: 6),
-                _IconPoke(
-                  icon: Icons.unarchive_outlined,
-                  tooltip: '解压出 .unitypackage 并登记入库',
-                  enabled: true,
-                  onTap: () => _extract(row),
-                ),
-                const SizedBox(width: 6),
-                _IconPoke(
-                  icon: open
-                      ? Icons.expand_less_rounded
-                      : Icons.expand_more_rounded,
-                  tooltip: open ? '收起包内容' : '展开包内容',
-                  enabled: true,
-                  onTap: () => setState(() {
-                    if (open) {
-                      _open.remove(key);
-                    } else {
-                      _open.add(key);
-                    }
-                  }),
-                ),
-              ],
-              if (!isArchive) ...[
-                const SizedBox(width: 6),
-                _IconPoke(
-                  icon: Icons.delete_outline_rounded,
-                  tooltip: '从列表移除（不删除文件）',
-                  enabled: true,
-                  onTap: () async {
-                    final host = AppScope.of(context).host;
-                    if (host == null) return;
-                    await host.removePackageFile('${row['filePath']}');
-                    await _load(force: true);
-                  },
-                ),
-              ],
-            ],
-          ),
-          if (open)
-            Padding(
-              padding: const EdgeInsets.only(left: 77, top: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _childRow(Map<String, dynamic> child) {
+    final t = NeuTheme.of(context);
+    final source = '${child['matchSource']}';
+    final category = '${child['category']}';
+    final relative = '${child['relativePath']}';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _preview(child),
+        child: Row(
+          children: [
+            NeuCover('${child['coverUrl']}'),
+            const SizedBox(width: 10),
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final child in kids)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Row(
-                        children: [
-                          Icon(Icons.inventory_2_outlined,
-                              size: 14, color: t.inkTertiary),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text('${child['name']}',
-                                style: TextStyle(
-                                    fontSize: 12, color: t.inkSecondary),
-                                overflow: TextOverflow.ellipsis),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '${child['name']}',
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
                           ),
-                          Text(_size((child['size'] as num?)?.toInt() ?? 0),
-                              style: TextStyle(
-                                  fontSize: 11, color: t.inkTertiary)),
-                        ],
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+                      if ('${child['version']}'.isNotEmpty) ...[
+                        const SizedBox(width: 7),
+                        NeuPill('${child['version']}'),
+                      ],
+                    ],
+                  ),
+                  if (relative.contains('/'))
+                    Text(
+                      relative,
+                      style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 5,
+                    children: [
+                      NeuPill(category.isEmpty ? '其他' : category),
+                      if (source.isNotEmpty)
+                        NeuPill(
+                          source == 'Booth' ? 'Booth' : 'Asset Store',
+                          bg: const Color(0xFFBFE3C9),
+                          fg: const Color(0xFF237A45),
+                        )
+                      else
+                        const NeuPill(
+                          '未关联',
+                          bg: Color(0xFFEBD9B4),
+                          fg: Color(0xFF7A5514),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
-        ],
+            const SizedBox(width: 8),
+            Text(
+              _size((child['size'] as num?)?.toInt() ?? 0),
+              style: TextStyle(fontSize: 11, color: t.inkTertiary),
+            ),
+            const SizedBox(width: 6),
+            if (source.isNotEmpty)
+              _IconPoke(
+                icon: Icons.open_in_new_rounded,
+                tooltip: '打开来源页面',
+                enabled: '${child['sourceUrl']}'.isNotEmpty,
+                onTap: () {
+                  final url = '${child['sourceUrl']}';
+                  if (url.isNotEmpty) AppScope.of(context).openUrl(url);
+                },
+              ),
+            _IconPoke(
+              icon: Icons.view_in_ar_outlined,
+              tooltip: '预览这个包',
+              enabled: true,
+              onTap: () => _preview(child),
+            ),
+            const SizedBox(width: 6),
+            _IconPoke(
+              icon: Icons.edit_outlined,
+              tooltip: '编辑这个包的分类、标签、源链接与封面',
+              enabled: true,
+              onTap: () => _edit(child),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -457,8 +627,8 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
   static String _size(int bytes) => bytes >= 1048576
       ? '${(bytes / 1048576).toStringAsFixed(1)} MB'
       : bytes >= 1024
-          ? '${(bytes / 1024).toStringAsFixed(1)} KB'
-          : '$bytes B';
+      ? '${(bytes / 1024).toStringAsFixed(1)} KB'
+      : '$bytes B';
 }
 
 class BoothShelfTab extends StatefulWidget {
@@ -493,18 +663,19 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
     setState(() {
       _rows = booth;
       if (!_categories.contains(_category)) _category = '全部分类';
-      _status = 'Booth 分类下 ${booth.length} 个资源 · '
+      _status =
+          'Booth 分类下 ${booth.length} 个资源 · '
           '${booth.where((row) => '${row['coverUrl']}'.isNotEmpty).length} 个有封面';
     });
   }
 
   List<String> get _categories => [
-        '全部分类',
-        ...{
-          for (final row in _rows)
-            if ('${row['category']}'.isNotEmpty) '${row['category']}'
-        },
-      ];
+    '全部分类',
+    ...{
+      for (final row in _rows)
+        if ('${row['category']}'.isNotEmpty) '${row['category']}',
+    },
+  ];
 
   List<Map<String, dynamic>> get _shown => _category == '全部分类'
       ? _rows
@@ -512,28 +683,49 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
 
   Future<void> _edit(Map<String, dynamic> row) async {
     final model = AppScope.of(context);
-    model.showModal(ResourceMetaForm(
-      row: row,
-      onReset: () async {
-        final host = model.host;
-        if (host == null) return;
-        await host.resetResourceMeta('${row['metaKey']}');
-        await _load(force: true);
-      },
-      onSubmit: (update) async {
-        final host = model.host;
-        if (host == null) return;
-        final rows = await host.saveResourceMeta(update);
-        if (!mounted) return;
-        setState(() {
-          _rows = rows
-              .cast<Map<String, dynamic>>()
-              .where((item) => '${item['matchSource']}' == 'Booth')
-              .toList();
-          _status = 'Booth 分类下 ${_rows.length} 个资源';
-        });
-      },
-    ));
+    model.showModal(
+      ResourceMetaForm(
+        row: row,
+        onReset: () async {
+          final host = model.host;
+          if (host == null) return;
+          await host.resetResourceMeta('${row['metaKey']}');
+          await _load(force: true);
+        },
+        onSubmit: (update) async {
+          final host = model.host;
+          if (host == null) return;
+          final rows = await host.saveResourceMeta(update);
+          if (!mounted) return;
+          setState(() {
+            _rows = rows
+                .cast<Map<String, dynamic>>()
+                .where((item) => '${item['matchSource']}' == 'Booth')
+                .toList();
+            _status = 'Booth 分类下 ${_rows.length} 个资源';
+          });
+        },
+      ),
+    );
+  }
+
+  void _preview(Map<String, dynamic> row) {
+    final host = AppScope.of(context).host;
+    if (host == null) return;
+
+    final tokens = NeuTheme.of(context);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NeuTheme(
+          tokens: tokens,
+          child: PreviewPage(
+            host: host,
+            resourceKey: '${row['key']}',
+            resourceName: '${row['name']}',
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -553,9 +745,11 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
             ),
             const SizedBox(width: 14),
             Expanded(
-              child: Text(_status,
-                  style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                  overflow: TextOverflow.ellipsis),
+              child: Text(
+                _status,
+                style: TextStyle(fontSize: 12, color: t.inkTertiary),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
             NeuActionButton(
               label: '去 Booth',
@@ -575,8 +769,10 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
           child: shown.isEmpty
               ? const NeuEmptyState(
                   height: 200,
-                  text: 'Booth 分类下还没有资源。\n到「用户软件包」点「匹配 Booth」，'
-                      '按名称匹配到的包会自动转到这里。')
+                  text:
+                      'Booth 分类下还没有资源。\n到「用户软件包」点「匹配 Booth」，'
+                      '按名称匹配到的包会自动转到这里。',
+                )
               : ListView.separated(
                   padding: EdgeInsets.zero,
                   itemCount: shown.length,
@@ -585,7 +781,9 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
                     final row = shown[index];
                     return NeuCard(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
+                        horizontal: 16,
+                        vertical: 13,
+                      ),
                       child: Row(
                         children: [
                           NeuCover('${row['coverUrl']}'),
@@ -594,16 +792,21 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('${row['name']}',
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                  '${row['name']}',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 const SizedBox(height: 3),
                                 Text(
                                   '${row['boothShop']} · ${row['filePath']}',
                                   style: TextStyle(
-                                      fontSize: 11, color: t.inkTertiary),
+                                    fontSize: 11,
+                                    color: t.inkTertiary,
+                                  ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -611,9 +814,11 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          NeuPill('${row['category']}'.isEmpty
-                              ? '其他'
-                              : '${row['category']}'),
+                          NeuPill(
+                            '${row['category']}'.isEmpty
+                                ? '其他'
+                                : '${row['category']}',
+                          ),
                           const SizedBox(width: 8),
                           _IconPoke(
                             icon: Icons.open_in_new_rounded,
@@ -621,8 +826,17 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
                             enabled: '${row['sourceUrl']}'.isNotEmpty,
                             onTap: () {
                               final url = '${row['sourceUrl']}';
-                              if (url.isNotEmpty) AppScope.of(context).openUrl(url);
+                              if (url.isNotEmpty) {
+                                AppScope.of(context).openUrl(url);
+                              }
                             },
+                          ),
+                          const SizedBox(width: 6),
+                          _IconPoke(
+                            icon: Icons.view_in_ar_outlined,
+                            tooltip: '预览 prefab 模型与组件',
+                            enabled: true,
+                            onTap: () => _preview(row),
                           ),
                           const SizedBox(width: 6),
                           _IconPoke(
@@ -660,13 +874,16 @@ class ResourceMetaForm extends StatefulWidget {
 
 class _ResourceMetaFormState extends State<ResourceMetaForm> {
   late final TextEditingController _tags = TextEditingController(
-      text: ((widget.row['tags'] as List?) ?? const []).join('，'));
-  late final TextEditingController _source =
-      TextEditingController(text: '${widget.row['sourceUrl']}');
+    text: ((widget.row['tags'] as List?) ?? const []).join('，'),
+  );
+  late final TextEditingController _source = TextEditingController(
+    text: '${widget.row['sourceUrl']}',
+  );
   late final TextEditingController _cover = TextEditingController(
-      text: '${widget.row['coverUrl']}'.startsWith('http')
-          ? '${widget.row['coverUrl']}'
-          : '');
+    text: '${widget.row['coverUrl']}'.startsWith('http')
+        ? '${widget.row['coverUrl']}'
+        : '',
+  );
   late int _category = _initialCategory();
 
   int _initialCategory() {
@@ -717,10 +934,13 @@ class _ResourceMetaFormState extends State<ResourceMetaForm> {
         children: [
           NeuField(
             label: '名称',
-            child: Text('${widget.row['name']}',
-                style: TextStyle(
-                    fontSize: 13,
-                    color: NeuTheme.of(context).inkSecondary)),
+            child: Text(
+              '${widget.row['name']}',
+              style: TextStyle(
+                fontSize: 13,
+                color: NeuTheme.of(context).inkSecondary,
+              ),
+            ),
           ),
           NeuField(
             label: '分类',
@@ -787,22 +1007,29 @@ class _IconPoke extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
-    return Tooltip(
-      message: tooltip,
-      child: NeuButton(
-        width: 30,
-        height: 30,
-        radius: 8,
-        depth: 4,
-        color: t.raised,
-        insetColor: t.inset,
-        border: glassBorder(alpha: 0.45),
-        onTap: enabled ? onTap : null,
-        child: Icon(icon,
+    return Semantics(
+      label: tooltip,
+      button: true,
+      enabled: enabled,
+      child: Tooltip(
+        message: tooltip,
+        child: NeuButton(
+          width: 30,
+          height: 30,
+          radius: 8,
+          depth: 4,
+          color: t.raised,
+          insetColor: t.inset,
+          border: glassBorder(alpha: 0.45),
+          onTap: enabled ? onTap : null,
+          child: Icon(
+            icon,
             size: 16,
             color: enabled
                 ? t.inkSecondary
-                : t.inkTertiary.withValues(alpha: 0.4)),
+                : t.inkTertiary.withValues(alpha: 0.4),
+          ),
+        ),
       ),
     );
   }

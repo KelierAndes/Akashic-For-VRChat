@@ -1,0 +1,2 @@
+fxc.exe and d3dcompiler_47.dll are redistributed from the Microsoft Windows SDK.
+They are used only to compile Unity ShaderLab HLSL passes for local preview.

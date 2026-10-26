@@ -95,6 +95,10 @@ public class ResourceRow
 
     public string ArchiveEntry { get; set; } = string.Empty;
 
+    public string ContainerPath { get; set; } = string.Empty;
+
+    public string RelativePath { get; set; } = string.Empty;
+
     public int ChildCount { get; set; }
 
     public bool IsManual { get; set; }
@@ -102,6 +106,12 @@ public class ResourceRow
     public bool Attempted { get; set; }
 
     public List<ResourceRow> Children { get; set; } = [];
+
+    public bool IsContainer => Kind is "archive" or "folder";
+
+    public bool IsMatchable => Kind == "unitypackage";
+
+    public bool CanMatch => IsContainer ? Children.Count > 0 : IsMatchable;
 }
 
 public class BoothMatchCandidate

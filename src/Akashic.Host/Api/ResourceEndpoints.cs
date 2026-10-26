@@ -1,3 +1,4 @@
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 using Akashic.Core.Services;
 
@@ -7,8 +8,13 @@ public static class ResourceEndpoints
 {
     public static RouteGroupBuilder MapResources(this RouteGroupBuilder group)
     {
-        group.MapGet("/resources", async (IResourceCatalogService catalog, CancellationToken ct) =>
-            await catalog.GetRowsAsync(ct));
+        group.MapGet("/resources", async (IResourceCatalogService catalog, AkashicDatabase db,
+            CancellationToken ct, string? origin = null, string? category = null, string? q = null) =>
+        {
+            var rows = await catalog.GetRowsAsync(ct);
+            if (origin is null && category is null && q is null) return rows;
+            return db.LoadResources(origin, category, q);
+        });
 
         group.MapGet("/booth/search", async (string term, IBoothService booth, CancellationToken ct) =>
             await booth.SearchAsync(term, ct));

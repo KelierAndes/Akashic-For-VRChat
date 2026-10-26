@@ -13,8 +13,10 @@ public static class LoopbackGuard
         app.Use(async (context, next) =>
         {
             var response = context.Response;
+            var isApi = context.Request.Path.StartsWithSegments("/api");
+            var isPreview = context.Request.Path.StartsWithSegments("/preview");
 
-            if (!context.Request.Path.StartsWithSegments("/api"))
+            if (!isApi && !isPreview)
             {
                 response.StatusCode = StatusCodes.Status404NotFound;
                 return;
@@ -34,9 +36,12 @@ public static class LoopbackGuard
                 return;
             }
 
-            if (!context.Request.Headers.TryGetValue(SidecarOptions.TokenHeader, out var provided)
-                || !CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(provided.ToString()), token))
+            var provided = isApi
+                ? context.Request.Headers[SidecarOptions.TokenHeader].ToString()
+                : PreviewTokenFromPath(context.Request.Path.Value);
+
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(provided), token))
             {
                 response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
@@ -46,5 +51,11 @@ public static class LoopbackGuard
         });
 
         return app;
+    }
+
+    private static string PreviewTokenFromPath(string? path)
+    {
+        var segments = (path ?? string.Empty).Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 1 ? segments[1] : string.Empty;
     }
 }

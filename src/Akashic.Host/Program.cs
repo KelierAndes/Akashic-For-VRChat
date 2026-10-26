@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Akashic.Core.Services;
+using Akashic.Core.Services.Preview;
 using Akashic.Host;
 using Akashic.Host.Api;
 using Microsoft.Extensions.Hosting;
@@ -14,6 +15,11 @@ Environment.SetEnvironmentVariable("ASPNETCORE_URLS", null);
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = args });
 builder.Logging.ClearProviders();
+var dataRoot = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Akashic");
+PreviewCachePaths.Configure(ReadPreviewCacheSetting(Path.Combine(dataRoot, "settings.json")));
+var fileLogging = new SidecarFileLoggerProvider(Path.Combine(dataRoot, "logs", "host.log"));
+builder.Logging.AddProvider(fileLogging);
 builder.WebHost.ConfigureKestrel(kestrel =>
 {
     kestrel.Listen(System.Net.IPAddress.Loopback, options.Port);
@@ -28,6 +34,7 @@ builder.Services.ConfigureHttpJsonOptions(json =>
 
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<EventHub>();
+builder.Services.AddSingleton<Akashic.Core.Data.AkashicDatabase>();
 
 builder.Services.AddSingleton<HttpClient>();
 builder.Services.AddSingleton<IProjectService, ProjectService>();
@@ -50,11 +57,29 @@ builder.Services.AddSingleton<GitHubCli>();
 builder.Services.AddSingleton<GitHubLoopbackAuth>();
 builder.Services.AddSingleton<IConfigSyncService, ConfigSyncService>();
 builder.Services.AddSingleton<IUpdateService, UpdateService>();
+builder.Services.AddSingleton<Akashic.Core.Services.Preview.PackageContentCache>();
+builder.Services.AddSingleton<Akashic.Core.Services.Preview.IPreviewService,
+    Akashic.Core.Services.Preview.PreviewService>();
+builder.Services.AddSingleton<Akashic.Host.Preview.Hlsl.HlslPreviewService>();
+builder.Services.AddSingleton<Akashic.Host.Preview.TexturePreviewService>();
 builder.Services.AddSingleton<AutoSync>();
 
 var app = builder.Build();
 
 app.UseLoopbackGuard(options);
+
+app.UseExceptionHandler(handler => handler.Run(async context =>
+{
+    var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(new
+    {
+        title = "操作失败",
+        detail = error?.Message ?? "侧车内部错误。",
+    }));
+}));
 
 var api = app.MapGroup("/api");
 api.MapBootstrap();
@@ -69,7 +94,10 @@ api.MapAccounts();
 api.MapRestore();
 api.MapGitHub();
 api.MapUpdates();
+api.MapPreview();
 api.MapEvents();
+
+app.MapPreviewRoutes(options);
 
 app.Lifetime.ApplicationStarted.Register(() =>
     app.Services.GetRequiredService<AutoSync>().Queue("启动"));
@@ -87,6 +115,24 @@ if (options.ParentPid is > 0)
 
 await app.WaitForShutdownAsync();
 await app.StopAsync();
+fileLogging.Dispose();
+
+static string? ReadPreviewCacheSetting(string settingsPath)
+{
+    try
+    {
+        if (!File.Exists(settingsPath)) return null;
+        using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
+        if (document.RootElement.TryGetProperty("previewCacheDirectory", out var value) &&
+            value.ValueKind == JsonValueKind.String)
+            return value.GetString();
+    }
+    catch (Exception)
+    {
+    }
+
+    return null;
+}
 
 static string Handshake(string url, SidecarOptions options)
 {

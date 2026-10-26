@@ -1,17 +1,21 @@
 using System.Net.Http.Json;
 using System.Text.Json;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
 
 public class VpmRegistryService : IVpmRegistryService
 {
+    private static readonly TimeSpan RegistryTtl = TimeSpan.FromMinutes(30);
+
     private readonly HttpClient _httpClient;
     private readonly string _settingsPath;
     private readonly string _vccSettingsPath;
     private readonly string _cacheDir;
     private readonly List<string> _registryUrls;
     private readonly Dictionary<string, List<VpmPackage>> _packageCache = [];
+    private readonly AkashicDatabase _db;
 
     private List<VccRepository>? _vccRepos;
     private Dictionary<string, VccRepository>? _packageOwnerIndex;
@@ -22,7 +26,8 @@ public class VpmRegistryService : IVpmRegistryService
         PropertyNameCaseInsensitive = true
     };
 
-    public VpmRegistryService(HttpClient? httpClient = null, string? settingsPath = null)
+    public VpmRegistryService(HttpClient? httpClient = null, string? settingsPath = null,
+        AkashicDatabase? database = null)
     {
         _httpClient = httpClient ?? new HttpClient();
         if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
@@ -33,6 +38,7 @@ public class VpmRegistryService : IVpmRegistryService
         _settingsPath = settingsPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
+        _db = database ?? new AkashicDatabase(Path.GetDirectoryName(_settingsPath));
 
         var settings = LoadSettings();
         _vccSettingsPath = settings.VccSettingsPath;
@@ -56,7 +62,7 @@ public class VpmRegistryService : IVpmRegistryService
         {
             try
             {
-                foreach (var package in await ResolveRegistryPackagesAsync(url, ct))
+                foreach (var package in await ResolveRegistryPackagesAsync(url, ct, refresh))
                     packageMap.TryAdd(package.Name, package);
             }
             catch (Exception ex)
@@ -69,17 +75,48 @@ public class VpmRegistryService : IVpmRegistryService
     }
 
     public async Task<List<VpmPackage>> GetPackagesFromRegistryAsync(string registryUrl, CancellationToken ct = default)
-        => await ResolveRegistryPackagesAsync(registryUrl, ct);
+        => await ResolveRegistryPackagesAsync(registryUrl, ct, forceRefresh: true);
 
-    private async Task<List<VpmPackage>> ResolveRegistryPackagesAsync(string registryUrl, CancellationToken ct)
+    private async Task<List<VpmPackage>> ResolveRegistryPackagesAsync(string registryUrl, CancellationToken ct,
+        bool forceRefresh = false)
     {
-        if (_packageCache.TryGetValue(registryUrl, out var cached))
+        if (!forceRefresh && _packageCache.TryGetValue(registryUrl, out var cached))
             return cached;
 
-        var packages = await TryReadVccCacheAsync(registryUrl, ct) ?? await FetchRegistryPackagesAsync(registryUrl, ct);
+        var fetchedAt = _db.GetVpmFetchedAt(registryUrl);
+        if (!forceRefresh && fetchedAt is not null && DateTime.Now - fetchedAt < RegistryTtl)
+        {
+            var stored = _db.LoadVpmPackages(registryUrl);
+            if (stored.Count > 0)
+            {
+                _packageCache[registryUrl] = stored;
+                return stored;
+            }
+        }
 
-        _packageCache[registryUrl] = packages;
-        return packages;
+        List<VpmPackage>? fallback = null;
+
+        try
+        {
+            var packages = await TryReadVccCacheAsync(registryUrl, ct)
+                           ?? await FetchRegistryPackagesAsync(registryUrl, ct);
+            var sourceName = packages.FirstOrDefault(p => !string.IsNullOrWhiteSpace(p.SourceRegistry))?.SourceRegistry
+                             ?? FindVccRepository(registryUrl)?.Name;
+            _db.ReplaceVpmPackages(registryUrl, sourceName, packages);
+            _packageCache[registryUrl] = packages;
+            return packages;
+        }
+        catch
+        {
+            fallback = _db.LoadVpmPackages(registryUrl);
+            if (fallback.Count > 0)
+            {
+                _packageCache[registryUrl] = fallback;
+                return fallback;
+            }
+
+            throw;
+        }
     }
 
     private async Task<List<VpmPackage>?> TryReadVccCacheAsync(string registryUrl, CancellationToken ct)

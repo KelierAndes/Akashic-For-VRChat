@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -22,15 +23,17 @@ public class VRChatSyncService : IVRChatSyncService
     };
 
     private readonly HttpClient _client;
+    private readonly AkashicDatabase _db;
     private readonly ISessionVault _vault;
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
 
     private List<StoredCookie> _entries = [];
     private bool _vaultChecked;
 
-    public VRChatSyncService(ISessionVault vault)
+    public VRChatSyncService(ISessionVault vault, AkashicDatabase? database = null)
     {
         _vault = vault;
+        _db = database ?? new AkashicDatabase();
 
         _client = new HttpClient(new HttpClientHandler { UseCookies = false, AllowAutoRedirect = false });
         _client.DefaultRequestHeaders.TryAddWithoutValidation("accept", "application/json");
@@ -260,36 +263,12 @@ public class VRChatSyncService : IVRChatSyncService
         return $"{ApiBase}/file/{id}/1/file";
     }
 
-    private static string ContentCachePath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Akashic", "cache", "vrchat-content.json");
+    public VRChatContentCache LoadContentCache() => _db.LoadVrchatContent();
 
-    public VRChatContentCache LoadContentCache()
+    public Task SaveContentCacheAsync(IReadOnlyList<VRChatContentItem> items, CancellationToken ct = default)
     {
-        try
-        {
-            if (File.Exists(ContentCachePath))
-                return JsonSerializer.Deserialize<VRChatContentCache>(
-                           File.ReadAllText(ContentCachePath), SerializerOptions) ?? new VRChatContentCache();
-        }
-        catch (JsonException)
-        {
-        }
-        catch (IOException)
-        {
-        }
-
-        return new VRChatContentCache();
-    }
-
-    public async Task SaveContentCacheAsync(IReadOnlyList<VRChatContentItem> items, CancellationToken ct = default)
-    {
-        var path = ContentCachePath;
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-        var snapshot = new VRChatContentCache { SavedAt = DateTime.Now, Items = [.. items] };
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, SerializerOptions), ct);
+        _db.SaveVrchatContent([.. items]);
+        return Task.CompletedTask;
     }
 
     private static string GuessType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

@@ -1,13 +1,16 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
+using Akashic.Core.Services.Preview;
 
 namespace Akashic.Core.Services;
 
 public partial class ProjectService : IProjectService
 {
     private readonly string _settingsPath;
+    private readonly AkashicDatabase _db;
     private AppSettings _settings;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -15,30 +18,46 @@ public partial class ProjectService : IProjectService
         PropertyNameCaseInsensitive = true
     };
 
-    public ProjectService(string? settingsPath = null)
+    public ProjectService(string? settingsPath = null, AkashicDatabase? database = null)
     {
         _settingsPath = settingsPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
+        _db = database ?? new AkashicDatabase(Path.GetDirectoryName(_settingsPath));
         _settings = LoadSettings();
         TryAutoImportVccProjects();
     }
 
     public async Task<List<UnityProject>> GetProjectsAsync()
     {
+        var cached = _db.LoadProjectCache();
         var projects = new List<UnityProject>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pruned = false;
+
         foreach (var path in _settings.ProjectPaths.ToList())
         {
             if (!Directory.Exists(path))
             {
                 _settings.ProjectPaths.Remove(path);
+                _db.RemoveProject(path);
                 pruned = true;
                 continue;
             }
+
+            seen.Add(path);
+            var signature = ComputeSignature(path);
+            if (cached.TryGetValue(path, out var entry) && entry.Signature == signature)
+            {
+                projects.Add(entry.Project);
+                continue;
+            }
+
             var project = await ScanProjectAsync(path);
             if (project != null) projects.Add(project);
         }
+
+        _db.PruneProjects(seen);
         if (pruned) await SaveSettingsAsync();
         return projects;
     }
@@ -60,6 +79,7 @@ public partial class ProjectService : IProjectService
     {
         var fullPath = Path.GetFullPath(path);
         _settings.ProjectPaths.Remove(fullPath);
+        _db.RemoveProject(fullPath);
         await SaveSettingsAsync();
     }
 
@@ -78,7 +98,43 @@ public partial class ProjectService : IProjectService
         project.HasVpmManifest = File.Exists(project.VpmManifestPath);
         project.InstalledPackages = ReadInstalledPackages(project);
 
+        _db.UpsertProject(ComputeSignature(project.Path), project);
         return Task.FromResult<UnityProject?>(project);
+    }
+
+    private static string ComputeSignature(string projectPath)
+    {
+        var parts = new List<string>();
+        foreach (var file in new[]
+                 {
+                     Path.Combine(projectPath, "ProjectSettings", "ProjectVersion.txt"),
+                     Path.Combine(projectPath, "Packages", "manifest.json"),
+                     Path.Combine(projectPath, "Packages", "vpm-manifest.json")
+                 })
+        {
+            try
+            {
+                var info = new FileInfo(file);
+                parts.Add(info.Exists
+                    ? $"{info.LastWriteTimeUtc.Ticks}:{info.Length}"
+                    : "-");
+            }
+            catch (IOException)
+            {
+                parts.Add("?");
+            }
+        }
+
+        try
+        {
+            parts.Add(Directory.GetLastWriteTimeUtc(projectPath).Ticks.ToString());
+        }
+        catch (IOException)
+        {
+            parts.Add("?");
+        }
+
+        return string.Join("|", parts);
     }
 
     public async Task<UnityProject> RefreshProjectAsync(UnityProject project)
@@ -549,6 +605,22 @@ public partial class ProjectService : IProjectService
         var settings = LoadSettings();
         settings.ProjectBackupPath = full;
         await SaveOwnedFieldsAsync(settings);
+    }
+
+    public string GetPreviewCacheDirectory() => PreviewCachePaths.Root;
+
+    public async Task<string> SetPreviewCacheDirectoryAsync(string directory)
+    {
+        var full = string.IsNullOrWhiteSpace(directory)
+            ? PreviewCachePaths.DefaultDirectory()
+            : Path.GetFullPath(directory.Trim().Trim('"'));
+
+        var applied = PreviewCachePaths.Configure(full);
+
+        var settings = LoadSettings();
+        settings.PreviewCacheDirectory = applied;
+        await SaveOwnedFieldsAsync(settings);
+        return applied;
     }
 
     public bool BackupExcludesPackages => LoadSettings().BackupExcludePackages;

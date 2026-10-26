@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -8,7 +9,7 @@ namespace Akashic.Core.Services;
 public partial class UnityPackageLibraryService : IUnityPackageLibraryService
 {
     private readonly string _settingsPath;
-    private readonly string _ledgerPath;
+    private readonly AkashicDatabase _db;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -16,12 +17,14 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
         PropertyNameCaseInsensitive = true
     };
 
-    public UnityPackageLibraryService(string? settingsPath = null, string? ledgerPath = null)
+    public UnityPackageLibraryService(string? settingsPath = null, string? ledgerPath = null,
+        AkashicDatabase? database = null)
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Akashic");
 
         _settingsPath = settingsPath ?? Path.Combine(dir, "settings.json");
-        _ledgerPath = ledgerPath ?? Path.Combine(dir, "unitypackage-ledger.json");
+        _db = database ?? new AkashicDatabase(
+            ledgerPath is null ? Path.GetDirectoryName(_settingsPath) : Path.GetDirectoryName(ledgerPath));
     }
 
     [GeneratedRegex(@"^(?<name>.+?)[\s_\-]*\[\s*(?:(?:v|ver|version)\.?\s*)?(?<version>\d+(?:\.\d+){1,3}[0-9A-Za-z.\-+]*)\s*\]$", RegexOptions.IgnoreCase)]
@@ -163,148 +166,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
 
     public UnityPackageFileInfo DescribePackage(string filePath) => Describe(filePath);
 
-    public Task<List<ResourceRow>> ScanResourcesAsync(CancellationToken ct = default) =>
-        Task.Run(() => ScanResources(ct), ct);
-
-    private List<ResourceRow> ScanResources(CancellationToken ct)
-    {
-        var settings = LoadSettings();
-        var origins = new Dictionary<string, PackageOrigin>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (path, origin) in settings.UnityPackageOrigins)
-            if (!string.IsNullOrWhiteSpace(path))
-                origins[Key(path)] = origin;
-
-        var boothRoot = NormalizeRoot(settings.BoothDownloadDirectory);
-
-        var archives = new List<string>();
-        foreach (var folder in settings.UnityPackageLibraryPaths)
-            archives.AddRange(EnumerateByPattern(folder, "*.zip"));
-        foreach (var added in settings.UnityPackageFiles)
-            if (added.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) && File.Exists(added))
-                archives.Add(added);
-        if (boothRoot.Length > 0 && Directory.Exists(boothRoot))
-            archives.AddRange(Directory.EnumerateFiles(boothRoot, "*.zip", SearchOption.TopDirectoryOnly));
-
-        archives = archives.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-
-        var materialized = archives
-            .Select(archive => NormalizeRoot(Path.Combine(
-                Path.GetDirectoryName(archive) ?? ".", Path.GetFileNameWithoutExtension(archive) + "-extracted")))
-            .Where(root => root.Length > 0)
-            .ToList();
-
-        var rows = new List<ResourceRow>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var packages = new List<string>();
-        foreach (var folder in settings.UnityPackageLibraryPaths)
-            packages.AddRange(EnumeratePackages(folder));
-        packages.AddRange(settings.UnityPackageFiles.Where(File.Exists));
-
-        foreach (var path in packages.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            ct.ThrowIfCancellationRequested();
-            if (materialized.Any(root => UnderRoot(path, root))) continue;
-
-            ResourceRow row;
-            try
-            {
-                var info = Describe(path);
-                if (!seen.Add(info.PackageId)) continue;
-
-                row = new ResourceRow
-                {
-                    Key = info.FilePath,
-                    Kind = "unitypackage",
-                    Name = info.DisplayName,
-                    Version = info.Version,
-                    FilePath = info.FilePath,
-                    Size = info.Size,
-                    LastModified = info.LastModified
-                };
-            }
-            catch (IOException) { continue; }
-            catch (UnauthorizedAccessException) { continue; }
-
-            ApplyOrigin(row, origins, boothRoot);
-            rows.Add(row);
-        }
-
-        foreach (var archive in archives)
-        {
-            ct.ThrowIfCancellationRequested();
-
-            var row = DescribeArchive(archive, ct);
-            if (row is null || !seen.Add(row.Key)) continue;
-
-            ApplyOrigin(row, origins, boothRoot);
-            rows.Add(row);
-        }
-
-        return rows
-            .OrderByDescending(row => row.LastModified)
-            .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static ResourceRow? DescribeArchive(string path, CancellationToken ct)
-    {
-        var full = Path.GetFullPath(path);
-        var file = new FileInfo(full);
-        if (!file.Exists) return null;
-
-        var stem = ParseStem(Path.GetFileNameWithoutExtension(full));
-        var materializedRoot = Path.Combine(file.DirectoryName ?? ".", Path.GetFileNameWithoutExtension(full) + "-extracted");
-
-        try
-        {
-            using var archive = ZipFile.OpenRead(full);
-            var children = new List<ResourceRow>();
-
-            foreach (var entry in archive.Entries)
-            {
-                ct.ThrowIfCancellationRequested();
-                if (!entry.FullName.EndsWith(".unitypackage", StringComparison.OrdinalIgnoreCase)) continue;
-                if (entry.FullName.Contains("__MACOSX", StringComparison.OrdinalIgnoreCase)) continue;
-
-                var entryStem = ParseStem(Path.GetFileNameWithoutExtension(entry.Name));
-                var relative = entry.FullName.Replace('\\', '/').TrimStart('/');
-                var extracted = Path.Combine(materializedRoot, relative.Replace('/', Path.DirectorySeparatorChar));
-
-                children.Add(new ResourceRow
-                {
-                    Key = full + "!" + entry.FullName,
-                    Kind = "child",
-                    Name = entryStem.Name,
-                    Version = entryStem.Version,
-                    FilePath = File.Exists(extracted) ? extracted : full,
-                    ArchivePath = full,
-                    ArchiveEntry = entry.FullName,
-                    Size = entry.Length,
-                    LastModified = file.LastWriteTime
-                });
-            }
-
-            if (children.Count == 0) return null;
-
-            return new ResourceRow
-            {
-                Key = full,
-                Kind = "archive",
-                Name = stem.Name,
-                Version = stem.Version,
-                FilePath = full,
-                Size = file.Length,
-                LastModified = file.LastWriteTime,
-                ChildCount = children.Count,
-                Children = children.OrderBy(child => child.Name, StringComparer.OrdinalIgnoreCase).ToList()
-            };
-        }
-        catch (IOException) { return null; }
-        catch (InvalidDataException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
-    }
-
     public async Task<List<string>> ExtractArchiveAsync(string archivePath, IReadOnlyList<string>? entries = null,
         CancellationToken ct = default)
     {
@@ -370,12 +231,14 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
         }
     }
 
-    private static UnityPackageFileInfo Describe(string path)
+    private UnityPackageFileInfo Describe(string path)
     {
         var file = new FileInfo(path);
-        var parsed = ParseStem(Path.GetFileNameWithoutExtension(path));
+        var cached = _db.GetPackageFile(file.FullName, file.Length, file.LastWriteTime);
+        if (cached is not null) return cached;
 
-        return new UnityPackageFileInfo
+        var parsed = ParseStem(Path.GetFileNameWithoutExtension(path));
+        var info = new UnityPackageFileInfo
         {
             FilePath = file.FullName,
             DisplayName = parsed.Name,
@@ -383,6 +246,9 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
             Size = file.Length,
             LastModified = file.LastWriteTime
         };
+
+        _db.PutPackageFile(info);
+        return info;
     }
 
     private static (string Name, string Version) ParseStem(string stem)
@@ -432,14 +298,14 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
 
     public Task<List<UnityPackageInstallRecord>> GetRecordsAsync(string projectPath, CancellationToken ct = default)
     {
-        var ledger = LoadLedger();
+        var ledger = _db.LoadInstallLedger();
         var records = ledger.TryGetValue(NormalizeKey(projectPath), out var list) ? list : [];
         return Task.FromResult(records);
     }
 
-    public async Task SaveRecordAsync(string projectPath, UnityPackageInstallRecord record, CancellationToken ct = default)
+    public Task SaveRecordAsync(string projectPath, UnityPackageInstallRecord record, CancellationToken ct = default)
     {
-        var ledger = LoadLedger();
+        var ledger = _db.LoadInstallLedger();
         var key = NormalizeKey(projectPath);
 
         if (!ledger.TryGetValue(key, out var records))
@@ -448,20 +314,22 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
         records.RemoveAll(r => string.Equals(r.PackageId, record.PackageId, StringComparison.OrdinalIgnoreCase));
         records.Add(record);
 
-        await SaveLedgerAsync(ledger, ct);
+        _db.SaveInstallRecords(key, records);
+        return Task.CompletedTask;
     }
 
-    public async Task RemoveRecordAsync(string projectPath, string packageId, CancellationToken ct = default)
+    public Task RemoveRecordAsync(string projectPath, string packageId, CancellationToken ct = default)
     {
-        var ledger = LoadLedger();
+        var ledger = _db.LoadInstallLedger();
         var key = NormalizeKey(projectPath);
 
         if (ledger.TryGetValue(key, out var records))
         {
             records.RemoveAll(r => string.Equals(r.PackageId, packageId, StringComparison.OrdinalIgnoreCase));
-            if (records.Count == 0) ledger.Remove(key);
-            await SaveLedgerAsync(ledger, ct);
+            _db.SaveInstallRecords(key, records);
         }
+
+        return Task.CompletedTask;
     }
 
     private static string NormalizeKey(string projectPath) =>
@@ -537,28 +405,6 @@ public partial class UnityPackageLibraryService : IUnityPackageLibraryService
         await File.WriteAllTextAsync(_settingsPath, json, ct);
     }
 
-    private Dictionary<string, List<UnityPackageInstallRecord>> LoadLedger()
-    {
-        try
-        {
-            if (File.Exists(_ledgerPath))
-            {
-                var json = File.ReadAllText(_ledgerPath);
-                return JsonSerializer.Deserialize<Dictionary<string, List<UnityPackageInstallRecord>>>(json, JsonOptions) ?? [];
-            }
-        }
-        catch {  }
-
-        return [];
-    }
-
-    private async Task SaveLedgerAsync(Dictionary<string, List<UnityPackageInstallRecord>> ledger, CancellationToken ct)
-    {
-        EnsureDirectory(_ledgerPath);
-
-        var json = JsonSerializer.Serialize(ledger, JsonOptions);
-        await File.WriteAllTextAsync(_ledgerPath, json, ct);
-    }
 
     private static void EnsureDirectory(string filePath)
     {

@@ -7,11 +7,7 @@ import 'neumorphic.dart';
 import 'theme.dart';
 
 class NeuModalScaffold extends StatelessWidget {
-  const NeuModalScaffold({
-    super.key,
-    required this.title,
-    required this.child,
-  });
+  const NeuModalScaffold({super.key, required this.title, required this.child});
 
   final String title;
   final Widget child;
@@ -25,7 +21,11 @@ class NeuModalScaffold extends StatelessWidget {
       radius: 14,
       depth: 9,
       color: t.raisedHi.withValues(alpha: opacity),
-      edge: GlassEdgeStyle(top: t.edgeTop * opacity, bottom: t.edgeBottom * opacity, width: 1.4),
+      edge: GlassEdgeStyle(
+        top: t.edgeTop * opacity,
+        bottom: t.edgeBottom * opacity,
+        width: 1.4,
+      ),
       darkShadow: const Color(0x40000000),
       lightShadow: const Color(0x40FFFFFF),
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
@@ -33,9 +33,14 @@ class NeuModalScaffold extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(title,
-              style: TextStyle(
-                  fontSize: 20, fontWeight: FontWeight.w600, color: t.ink)),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w600,
+              color: t.ink,
+            ),
+          ),
           const SizedBox(height: 16),
           Flexible(
             child: SingleChildScrollView(
@@ -53,7 +58,12 @@ class NeuModalScaffold extends StatelessWidget {
 }
 
 class NeuField extends StatelessWidget {
-  const NeuField({super.key, required this.label, required this.child, this.hint});
+  const NeuField({
+    super.key,
+    required this.label,
+    required this.child,
+    this.hint,
+  });
 
   final String label;
   final Widget child;
@@ -67,18 +77,23 @@ class NeuField extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label,
-              style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: t.inkSecondary)),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: t.inkSecondary,
+            ),
+          ),
           const SizedBox(height: 6),
           child,
           if (hint != null)
             Padding(
               padding: const EdgeInsets.only(top: 5),
-              child: Text(hint!,
-                  style: TextStyle(fontSize: 11, color: t.inkTertiary)),
+              child: Text(
+                hint!,
+                style: TextStyle(fontSize: 11, color: t.inkTertiary),
+              ),
             ),
         ],
       ),
@@ -92,11 +107,13 @@ class NeuTextInput extends StatelessWidget {
     required this.controller,
     this.hint = '',
     this.maxLines = 1,
+    this.onChanged,
   });
 
   final TextEditingController controller;
   final String hint;
   final int maxLines;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +130,7 @@ class NeuTextInput extends StatelessWidget {
       child: TextField(
         controller: controller,
         maxLines: maxLines,
+        onChanged: onChanged,
         style: TextStyle(fontSize: 13, color: t.ink),
         decoration: InputDecoration(
           isDense: true,
@@ -173,17 +191,20 @@ class _NeuChoiceFieldState extends State<NeuChoiceField> {
                   const SizedBox(width: 9),
                 ],
                 Expanded(
-                  child: Text(shown[safeIndex],
-                      style: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w500),
-                      overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    shown[safeIndex],
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 Icon(
-                    _open
-                        ? Icons.expand_less_rounded
-                        : Icons.expand_more_rounded,
-                    size: 18,
-                    color: t.inkSecondary),
+                  _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                  size: 18,
+                  color: t.inkSecondary,
+                ),
               ],
             ),
           ),
@@ -197,7 +218,10 @@ class _NeuChoiceFieldState extends State<NeuChoiceField> {
               depth: 6,
               color: t.raisedHi,
               edge: GlassEdgeStyle(
-                  top: t.edgeTop, bottom: t.edgeBottom, width: 1.3),
+                top: t.edgeTop,
+                bottom: t.edgeBottom,
+                width: 1.3,
+              ),
               darkShadow: const Color(0x33000000),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -211,28 +235,35 @@ class _NeuChoiceFieldState extends State<NeuChoiceField> {
                       },
                       child: Padding(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 11),
+                          horizontal: 16,
+                          vertical: 11,
+                        ),
                         child: Row(
                           children: [
                             SizedBox(
                               width: 18,
                               child: i == safeIndex
-                                  ? Icon(Icons.check_rounded,
-                                      size: 15, color: t.ink)
+                                  ? Icon(
+                                      Icons.check_rounded,
+                                      size: 15,
+                                      color: t.ink,
+                                    )
                                   : null,
                             ),
                             const SizedBox(width: 6),
                             Expanded(
-                              child: Text(shown[i],
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: i == safeIndex
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                    color: i == safeIndex
-                                        ? t.ink
-                                        : t.inkSecondary,
-                                  )),
+                              child: Text(
+                                shown[i],
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: i == safeIndex
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  color: i == safeIndex
+                                      ? t.ink
+                                      : t.inkSecondary,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -270,8 +301,9 @@ class NeuPromptForm extends StatefulWidget {
 }
 
 class _NeuPromptFormState extends State<NeuPromptForm> {
-  late final TextEditingController _text =
-      TextEditingController(text: widget.initial);
+  late final TextEditingController _text = TextEditingController(
+    text: widget.initial,
+  );
 
   @override
   void dispose() {
@@ -368,17 +400,23 @@ class UpdatePromptForm extends StatelessWidget {
             ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 260),
               child: SingleChildScrollView(
-                child: Text(body,
-                    style: TextStyle(
-                        fontSize: 12.5, height: 1.6, color: t.inkSecondary)),
+                child: Text(
+                  body,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    height: 1.6,
+                    color: t.inkSecondary,
+                  ),
+                ),
               ),
             ),
           const SizedBox(height: 14),
           Text(
-              sizeText.isEmpty
-                  ? '更新会先下载并校验签名，确认后重启安装。'
-                  : '更新包 $sizeText · 下载后校验签名，确认后重启安装。',
-              style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            sizeText.isEmpty
+                ? '更新会先下载并校验签名，确认后重启安装。'
+                : '更新包 $sizeText · 下载后校验签名，确认后重启安装。',
+            style: TextStyle(fontSize: 12, color: t.inkTertiary),
+          ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -425,9 +463,11 @@ class NeuResultForm extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(log['projectPath'] as String? ?? '',
-                    style: TextStyle(fontSize: 12, color: t.inkSecondary),
-                    overflow: TextOverflow.ellipsis),
+                child: Text(
+                  log['projectPath'] as String? ?? '',
+                  style: TextStyle(fontSize: 12, color: t.inkSecondary),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
@@ -438,11 +478,12 @@ class NeuResultForm extends StatelessWidget {
               child: SelectableText(
                 output.isEmpty ? '（没有输出）' : output,
                 style: TextStyle(
-                    fontSize: 12,
-                    height: 1.5,
-                    fontFamily: 'Consolas',
-                    fontFamilyFallback: const ['monospace'],
-                    color: t.inkSecondary),
+                  fontSize: 12,
+                  height: 1.5,
+                  fontFamily: 'Consolas',
+                  fontFamilyFallback: const ['monospace'],
+                  color: t.inkSecondary,
+                ),
               ),
             ),
           ),

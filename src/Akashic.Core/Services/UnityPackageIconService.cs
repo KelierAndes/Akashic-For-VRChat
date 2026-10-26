@@ -2,6 +2,7 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using Akashic.Core.Data;
 
 namespace Akashic.Core.Services;
 
@@ -13,12 +14,14 @@ public class UnityPackageIconService : IUnityPackageIconService
     private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg"];
 
     private readonly string _cacheDir;
+    private readonly AkashicDatabase _db;
 
-    public UnityPackageIconService(string? cacheDirectory = null)
+    public UnityPackageIconService(string? cacheDirectory = null, AkashicDatabase? database = null)
     {
         _cacheDir = cacheDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "Thumbnails");
+        _db = database ?? new AkashicDatabase();
     }
 
     public Task<string?> GetThumbnailAsync(string unityPackagePath, CancellationToken ct = default) =>
@@ -32,14 +35,30 @@ public class UnityPackageIconService : IUnityPackageIconService
 
             var info = new FileInfo(packagePath);
             var cached = CachedPath(packagePath, info);
-            if (File.Exists(cached)) return cached;
+
+            if (_db.TryGetThumbnailRecord(packagePath, info.Length, info.LastWriteTime, out var known))
+            {
+                if (known is null) return null;
+                if (File.Exists(known)) return known;
+            }
+
+            if (File.Exists(cached))
+            {
+                _db.PutThumbnailRecord(packagePath, info.Length, info.LastWriteTime, cached);
+                return cached;
+            }
 
             var image = ExtractImage(packagePath, ct);
-            if (image is null) return null;
+            if (image is null)
+            {
+                _db.PutThumbnailRecord(packagePath, info.Length, info.LastWriteTime, null);
+                return null;
+            }
 
             Directory.CreateDirectory(_cacheDir);
             var target = cached + image.Value.Extension;
             File.WriteAllBytes(target, image.Value.Bytes);
+            _db.PutThumbnailRecord(packagePath, info.Length, info.LastWriteTime, target);
             return target;
         }
         catch (OperationCanceledException)

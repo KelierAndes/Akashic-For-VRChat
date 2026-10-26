@@ -19,7 +19,16 @@ if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 
 Get-ChildItem $src -Force | Where-Object { $_.Name -notlike '*.WebView2' } | ForEach-Object {
-    Copy-Item $_.FullName -Destination $dst -Recurse -Force
+    if ($_.Name -eq 'host') {
+        $hostDst = Join-Path $dst 'host'
+        New-Item -ItemType Directory -Force -Path $hostDst | Out-Null
+        Get-ChildItem $_.FullName -Force | Where-Object { $_.Name -ne 'cache' } | ForEach-Object {
+            Copy-Item $_.FullName -Destination $hostDst -Recurse -Force
+        }
+    }
+    else {
+        Copy-Item $_.FullName -Destination $dst -Recurse -Force
+    }
 }
 
 if (Test-Path $zip) { Remove-Item $zip -Force }

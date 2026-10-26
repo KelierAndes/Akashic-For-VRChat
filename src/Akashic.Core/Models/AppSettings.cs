@@ -41,9 +41,11 @@ public class AppSettings
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "Akashic", "Cache");
 
+    [JsonPropertyName("previewCacheDirectory")]
+    public string PreviewCacheDirectory { get; set; } = string.Empty;
+
     [JsonPropertyName("unityPackageLibraryPaths")]
     public List<string> UnityPackageLibraryPaths { get; set; } = [];
-
     [JsonPropertyName("unityPackageFiles")]
     public List<string> UnityPackageFiles { get; set; } = [];
 

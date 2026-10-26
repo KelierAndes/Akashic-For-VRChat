@@ -10,6 +10,8 @@ public interface IAssetStoreService
 
     void ImportSession(IReadOnlyList<StoredCookie> cookies);
 
+    void ReloadCaches();
+
     bool HasSession { get; }
 
     string MyAssetsUrl { get; }

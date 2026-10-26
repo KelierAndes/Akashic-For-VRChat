@@ -37,7 +37,7 @@ try {
         $built = Get-ChildItem -Path $hostOut -Recurse -Filter 'Akashic.Host.exe' |
             Select-Object -First 1
         if (-not $built) { throw ("Akashic.Host.exe not found under " + $hostOut) }
-        Copy-Item -Path (Join-Path $built.DirectoryName '*') -Destination $staged -Force
+        Copy-Item -Path (Join-Path $built.DirectoryName '*') -Destination $staged -Recurse -Force
         Write-Host ("staged sidecar into " + $staged)
     }
 }

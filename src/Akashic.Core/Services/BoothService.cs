@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Akashic.Core.Data;
 using Akashic.Core.Models;
 
 namespace Akashic.Core.Services;
@@ -29,6 +30,7 @@ public class BoothService : IBoothService
     private readonly HttpClient _boothClient;
     private readonly HttpClient _fileClient;
     private readonly string _settingsPath;
+    private readonly AkashicDatabase _db;
     private readonly ISessionVault _vault;
     private Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
 
@@ -39,7 +41,7 @@ public class BoothService : IBoothService
 
     private const string AdultCookie = "adult=t";
 
-    public BoothService(ISessionVault vault, string? settingsPath = null)
+    public BoothService(ISessionVault vault, string? settingsPath = null, AkashicDatabase? database = null)
     {
         _vault = vault;
 
@@ -53,6 +55,7 @@ public class BoothService : IBoothService
         _settingsPath = settingsPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "Akashic", "settings.json");
+        _db = database ?? new AkashicDatabase(Path.GetDirectoryName(_settingsPath));
     }
 
     public IReadOnlyDictionary<string, string>? SessionCookies
@@ -205,34 +208,13 @@ public class BoothService : IBoothService
         return BoothHtml.ParseItem(html, itemId);
     }
 
-    public BoothLibraryCache LoadLibraryCache()
+    public BoothLibraryCache LoadLibraryCache() => _db.LoadBoothCache();
+
+    public Task SaveLibraryCacheAsync(IReadOnlyList<BoothPurchaseItem> items, CancellationToken ct = default)
     {
-        try
-        {
-            var path = LibraryCachePath;
-            if (File.Exists(path))
-                return JsonSerializer.Deserialize<BoothLibraryCache>(File.ReadAllText(path), SerializerOptions)
-                       ?? new BoothLibraryCache();
-        }
-        catch (JsonException)
-        {
-        }
-
-        return new BoothLibraryCache();
+        _db.SaveBoothCache([.. items]);
+        return Task.CompletedTask;
     }
-
-    public async Task SaveLibraryCacheAsync(IReadOnlyList<BoothPurchaseItem> items, CancellationToken ct = default)
-    {
-        var path = LibraryCachePath;
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory)) Directory.CreateDirectory(directory);
-
-        var snapshot = new BoothLibraryCache { SavedAt = DateTime.Now, Items = [.. items] };
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(snapshot, SerializerOptions), ct);
-    }
-
-    private string LibraryCachePath =>
-        Path.Combine(Path.GetDirectoryName(_settingsPath) ?? ".", "cache", "booth-library.json");
 
     public BoothLibraryPage ParseLibraryPage(string extractorResultJson)
     {

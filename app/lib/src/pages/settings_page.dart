@@ -26,6 +26,42 @@ class _SettingsPageState extends State<SettingsPage> {
 
   HostClient? _host;
 
+  String _previewCacheDir = '';
+  int _previewCacheBytes = 0;
+  bool _clearingCache = false;
+
+  Future<void> _loadPreviewCache() async {
+    final host = _host;
+    if (host == null) return;
+    try {
+      final result = await host.setPreviewCacheDir('');
+      if (!mounted) return;
+      setState(() {
+        _previewCacheDir = result['directory'] as String? ?? '';
+        _previewCacheBytes = (result['size'] as num?)?.toInt() ?? 0;
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _clearPreviewCache() async {
+    final host = _host;
+    if (host == null || _clearingCache) return;
+    setState(() => _clearingCache = true);
+    try {
+      final result = await host.clearPreviewCache();
+      await _loadPreviewCache();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('已释放 ${formatBytes((result['freed'] as num?)?.toInt() ?? 0)} 缓存'),
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('清空失败：$error')));
+    }
+    if (mounted) setState(() => _clearingCache = false);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -46,6 +82,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final model = AppScope.of(context);
       await model.loadVcsTools();
       await model.loadSync();
+      await _loadPreviewCache();
     });
   }
 
@@ -133,6 +170,34 @@ class _SettingsPageState extends State<SettingsPage> {
                   (c) => c.setAssetStoreDownloadDir(picked));
             }
           },
+        ),
+        const SizedBox(height: 12),
+        _PathRow(
+          label: '预览缓存目录',
+          hint: '解包、GLB 与编译后的着色器都写在这里，默认跟随软件目录',
+          value: _previewCacheDir,
+          onPick: () async {
+            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择预览缓存目录');
+            if (picked != null) {
+              await _host?.setPreviewCacheDir(picked);
+              await _loadPreviewCache();
+            }
+          },
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Text('当前占用 ${formatBytes(_previewCacheBytes)}',
+                style: TextStyle(
+                    fontSize: 11.5,
+                    color: NeuTheme.of(context).inkSecondary)),
+            const Spacer(),
+            NeuActionButton(
+              label: _clearingCache ? '清空中…' : '清空预览缓存',
+              icon: Icons.cleaning_services_outlined,
+              onTap: _clearingCache ? null : _clearPreviewCache,
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         NeuSwitchTile(
