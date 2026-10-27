@@ -15,18 +15,63 @@ class BoothPage extends StatefulWidget {
 
   static const mediaFilters = ['可用软件包', '全部商品', '演示·图集'];
   static const mediaKeywords = [
-    'デモ動画', 'デモムービー', 'サンプル動画', '紹介動画', '宣伝動画', '予告動画',
-    '演示动画', '演示视频', '视频演示', 'sample video', 'demo video',
-    'demo movie', 'preview movie', 'trailer',
-    'サンプル画像', 'sample画像', '画像集', 'sample image', 'sample picture',
-    'イラスト', '插画', '画集', '图集', 'artbook', 'art book', 'fanbook',
-    'ファンブック', '設定資料集', '写真集', 'フォト集', 'photo book', 'photobook',
-    'illustration', 'コミック', '漫画', 'comic', '小説', '小说', 'novel',
-    'サンプル', 'お試し', '体験版', '試聴', 'デモ', '素材集', '壁紙',
+    'デモ動画',
+    'デモムービー',
+    'サンプル動画',
+    '紹介動画',
+    '宣伝動画',
+    '予告動画',
+    '演示动画',
+    '演示视频',
+    '视频演示',
+    'sample video',
+    'demo video',
+    'demo movie',
+    'preview movie',
+    'trailer',
+    'サンプル画像',
+    'sample画像',
+    '画像集',
+    'sample image',
+    'sample picture',
+    'イラスト',
+    '插画',
+    '画集',
+    '图集',
+    'artbook',
+    'art book',
+    'fanbook',
+    'ファンブック',
+    '設定資料集',
+    '写真集',
+    'フォト集',
+    'photo book',
+    'photobook',
+    'illustration',
+    'コミック',
+    '漫画',
+    'comic',
+    '小説',
+    '小说',
+    'novel',
+    'サンプル',
+    'お試し',
+    '体験版',
+    '試聴',
+    'デモ',
+    '素材集',
+    '壁紙',
   ];
 
   static const mediaTokens = {
-    'sample', 'samples', 'demo', 'preview', 'trailer', 'teaser', 'promo', 'pv',
+    'sample',
+    'samples',
+    'demo',
+    'preview',
+    'trailer',
+    'teaser',
+    'promo',
+    'pv',
   };
 
   static bool looksLikeMedia(Map<String, dynamic> row) {
@@ -50,6 +95,8 @@ class BoothPageState extends State<BoothPage> {
   final Map<String, int> _hidden = {};
   int _hiddenTotal = 0;
   final Set<String> _selected = {};
+  final Map<String, Map<String, dynamic>> _contents = {};
+  final Set<String> _open = {};
   Map<String, dynamic>? _scripts;
   String _view = BoothPage.views.first;
   String _media = BoothPage.mediaFilters.first;
@@ -92,46 +139,46 @@ class BoothPageState extends State<BoothPage> {
         .cast<Map<String, dynamic>>();
     _downloaded
       ..clear()
-      ..addAll(((snapshot['downloaded'] as List?) ?? const [])
-          .cast<String>());
+      ..addAll(((snapshot['downloaded'] as List?) ?? const []).cast<String>());
     _shelved
       ..clear()
       ..addAll(((snapshot['shelved'] as List?) ?? const []).cast<String>());
     _hidden.clear();
     (snapshot['hiddenVersions'] as Map?)?.forEach(
-        (key, value) => _hidden['$key'] = (value as num).toInt());
+      (key, value) => _hidden['$key'] = (value as num).toInt(),
+    );
     _hiddenTotal = (snapshot['hiddenTotal'] as num?)?.toInt() ?? 0;
   }
 
   String get _summary => _rows.isEmpty
       ? (_signedIn ? '已登录 · 还没有读取清单' : '未登录')
       : '${_rows.length} 项 · ${_downloaded.length} 项已下载'
-          '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}'
-          ' · $_directory';
+            '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}'
+            ' · $_directory';
 
   List<String> get _categories => [
-        '全部分类',
-        '未分类',
-        ...{
-          for (final row in _rows)
-            if ('${row['category']}'.isNotEmpty) '${row['category']}'
-        },
-      ];
+    '全部分类',
+    '未分类',
+    ...{
+      for (final row in _rows)
+        if ('${row['category']}'.isNotEmpty) '${row['category']}',
+    },
+  ];
 
   List<Map<String, dynamic>> get _shown => _rows.where((row) {
-        final media = BoothPage.looksLikeMedia(row);
-        if (_media == BoothPage.mediaFilters[0] && media) return false;
-        if (_media == BoothPage.mediaFilters[2] && !media) return false;
-        final category = '${row['category']}';
-        if (_category == '未分类' && category.isNotEmpty) return false;
-        if (_category != '全部分类' && _category != '未分类' && category != _category) {
-          return false;
-        }
-        final has = _downloaded.contains('${row['number']}');
-        if (_view == BoothPage.views[1]) return !has;
-        if (_view == BoothPage.views[2]) return has;
-        return true;
-      }).toList();
+    final media = BoothPage.looksLikeMedia(row);
+    if (_media == BoothPage.mediaFilters[0] && media) return false;
+    if (_media == BoothPage.mediaFilters[2] && !media) return false;
+    final category = '${row['category']}';
+    if (_category == '未分类' && category.isNotEmpty) return false;
+    if (_category != '全部分类' && _category != '未分类' && category != _category) {
+      return false;
+    }
+    final has = _downloaded.contains('${row['number']}');
+    if (_view == BoothPage.views[1]) return !has;
+    if (_view == BoothPage.views[2]) return has;
+    return true;
+  }).toList();
 
   Future<void> _nextFrame() async {
     final completer = Completer<void>();
@@ -168,8 +215,10 @@ class BoothPageState extends State<BoothPage> {
     final host = model.host;
     if (host == null) return;
 
-    final cookies = await BrowserSession.harvest(
-        ['https://booth.pm', 'https://accounts.booth.pm']);
+    final cookies = await BrowserSession.harvest([
+      'https://booth.pm',
+      'https://accounts.booth.pm',
+    ]);
     if (cookies.isEmpty) {
       setState(() => _status = '浏览器里还没有 Cookie，请先在页面中登录。');
       return;
@@ -188,9 +237,11 @@ class BoothPageState extends State<BoothPage> {
     final host = AppScope.of(context).host;
     if (host == null) return null;
 
-    for (var wait = 0;
-        wait < 60 && _browser.currentState?.controller == null;
-        wait++) {
+    for (
+      var wait = 0;
+      wait < 60 && _browser.currentState?.controller == null;
+      wait++
+    ) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
 
@@ -208,7 +259,8 @@ class BoothPageState extends State<BoothPage> {
       if (raw != null) {
         sawRaw = true;
         last = await host.boothParse(kind, '$raw');
-        final items = ((last['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        final items = ((last['items'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>();
         if (items.isNotEmpty || last['loginRequired'] == true) return last;
       }
       await Future<void>.delayed(const Duration(milliseconds: 350));
@@ -235,18 +287,21 @@ class BoothPageState extends State<BoothPage> {
     final first = await _extractWith(kind, script);
     if (first == null || first['loginRequired'] == true) return first;
 
-    onItems(((first['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
+    onItems(
+      ((first['items'] as List?) ?? const []).cast<Map<String, dynamic>>(),
+    );
     final lastPage = (first['lastPage'] as num?)?.toInt() ?? 1;
     if (mounted) setState(() => _status = '$label 第 1 / $lastPage 页');
 
     for (var next = 2; next <= lastPage; next++) {
-      await _browser.currentState
-          ?.navigate(await host.boothUrl(kind, next));
+      await _browser.currentState?.navigate(await host.boothUrl(kind, next));
       final more = await _extractWith(kind, script);
       if (more == null) break;
       if (more['loginRequired'] == true) return more;
 
-      onItems(((more['items'] as List?) ?? const []).cast<Map<String, dynamic>>());
+      onItems(
+        ((more['items'] as List?) ?? const []).cast<Map<String, dynamic>>(),
+      );
       if (!mounted) return more;
       setState(() => _status = '$label 第 $next / $lastPage 页');
     }
@@ -254,14 +309,18 @@ class BoothPageState extends State<BoothPage> {
     return first;
   }
 
-  Future<List<Map<String, dynamic>>> _readFreeDownloads(String itemUrl,
-      String itemScript) async {
+  Future<List<Map<String, dynamic>>> _readFreeDownloads(
+    String itemUrl,
+    String itemScript,
+  ) async {
     final host = AppScope.of(context).host;
     if (host == null) return const [];
 
-    for (var wait = 0;
-        wait < 60 && _browser.currentState?.controller == null;
-        wait++) {
+    for (
+      var wait = 0;
+      wait < 60 && _browser.currentState?.controller == null;
+      wait++
+    ) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
 
@@ -274,8 +333,8 @@ class BoothPageState extends State<BoothPage> {
       final raw = await controller.evaluateJavascript(source: itemScript);
       if (raw != null) {
         final page = await host.boothParse('item', '$raw');
-        final items =
-            ((page['items'] as List?) ?? const []).cast<Map<String, dynamic>>();
+        final items = ((page['items'] as List?) ?? const [])
+            .cast<Map<String, dynamic>>();
         if (items.isNotEmpty) return items;
       }
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -380,11 +439,14 @@ class BoothPageState extends State<BoothPage> {
       if (!mounted || !_busy) break;
 
       final card = cards[i];
-      setState(() => _status =
-          '正在读取免费商品 ${i + 1} / ${cards.length}：${card['title']}');
+      setState(
+        () => _status = '正在读取免费商品 ${i + 1} / ${cards.length}：${card['title']}',
+      );
 
-      final downloads =
-          await _readFreeDownloads('${card['itemUrl']}', itemScript);
+      final downloads = await _readFreeDownloads(
+        '${card['itemUrl']}',
+        itemScript,
+      );
       if (downloads.isEmpty) {
         withoutDownload++;
         continue;
@@ -392,7 +454,9 @@ class BoothPageState extends State<BoothPage> {
 
       for (final item in downloads) {
         item['isFree'] = true;
-        if ('${card['imageUrl']}'.isNotEmpty) item['imageUrl'] = card['imageUrl'];
+        if ('${card['imageUrl']}'.isNotEmpty) {
+          item['imageUrl'] = card['imageUrl'];
+        }
         if ('${item['title']}'.isEmpty) item['title'] = card['title'];
         if ('${item['shop']}'.isEmpty) item['shop'] = card['shop'];
         if ('${item['shopUrl']}'.isEmpty) item['shopUrl'] = card['shopUrl'];
@@ -404,9 +468,11 @@ class BoothPageState extends State<BoothPage> {
     final freeCount = collected.length - paidCount - giftCount;
 
     _rows = collected
-      ..sort((a, b) => '${a['title']}'
-          .toLowerCase()
-          .compareTo('${b['title']}'.toLowerCase()));
+      ..sort(
+        (a, b) => '${a['title']}'.toLowerCase().compareTo(
+          '${b['title']}'.toLowerCase(),
+        ),
+      );
     _applySnapshot(await host.boothSaveLibrary(_rows));
 
     if (!mounted) return;
@@ -415,8 +481,8 @@ class BoothPageState extends State<BoothPage> {
       _status = collected.isEmpty
           ? '已购列表是空的，确认一下登录的是购买过的账号。'
           : '已读取 ${collected.length} 个商品（已购 $paidCount · 礼物 $giftCount · 免费 $freeCount）'
-              '${withoutDownload > 0 ? ' · $withoutDownload 个免费商品无下载文件' : ''}'
-              '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}';
+                '${withoutDownload > 0 ? ' · $withoutDownload 个免费商品无下载文件' : ''}'
+                '${_hiddenTotal > 0 ? ' · 同一商品的 $_hiddenTotal 个旧版本已折叠' : ''}';
     });
   }
 
@@ -474,6 +540,153 @@ class BoothPageState extends State<BoothPage> {
   bool _onShelf(Map<String, dynamic> row) =>
       _shelved.contains('${row['number']}');
 
+  static const _dependencyTokens = [
+    'liltoon',
+    'modularavatar',
+    'vrchatsdk',
+    'comvrchat',
+    'vrcfury',
+    'poiyomi',
+    'animatorascode',
+    'avataroptimizer',
+    'textanimator',
+  ];
+
+  static bool _isDependency(String name) {
+    final lower = name
+        .toLowerCase()
+        .replaceAll(RegExp(r'\d+(?:\.\d+){1,3}[0-9a-z.+\-]*'), '')
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    return _dependencyTokens.any(
+      (token) => lower == token || lower.startsWith(token),
+    );
+  }
+
+  Future<void> _toggleContents(Map<String, dynamic> row) async {
+    final number = '${row['number']}';
+    if (_open.contains(number)) {
+      setState(() => _open.remove(number));
+      return;
+    }
+
+    setState(() => _open.add(number));
+    if (_contents.containsKey(number)) return;
+
+    final host = AppScope.of(context).host;
+    if (host == null) return;
+
+    try {
+      final contents = await host.boothInspect(number);
+      if (!mounted) return;
+      setState(() => _contents[number] = contents);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _status = '读取压缩包内容失败：$error');
+    }
+  }
+
+  Widget _contentList(Map<String, dynamic> row) {
+    final number = '${row['number']}';
+    if (!_open.contains(number)) return const SizedBox.shrink();
+
+    final contents = _contents[number];
+    if (contents == null) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 74, top: 6),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '正在读取压缩包内容…',
+              style: TextStyle(
+                fontSize: 11,
+                color: NeuTheme.of(context).inkTertiary,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final packages = ((contents['unityPackageFiles'] as List?) ?? const [])
+        .cast<String>();
+    final upm = ((contents['upmPackages'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+
+    if (packages.isEmpty && upm.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 74, top: 6),
+        child: Text(
+          '这个压缩包里没有可导入的包。',
+          style: TextStyle(
+            fontSize: 11,
+            color: NeuTheme.of(context).inkTertiary,
+          ),
+        ),
+      );
+    }
+
+    final t = NeuTheme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(74, 8, 8, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final path in packages)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.inventory_2_outlined,
+                    size: 13,
+                    color: t.inkTertiary,
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      path.split(RegExp(r'[\\/]')).last,
+                      style: TextStyle(fontSize: 11.5, color: t.inkSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (_isDependency(path.split(RegExp(r'[\\/]')).last))
+                    const NeuPill('依赖'),
+                ],
+              ),
+            ),
+          for (final item in upm)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.inventory_2_outlined,
+                    size: 13,
+                    color: t.inkTertiary,
+                  ),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      '${item['displayName']} · ${item['version']}',
+                      style: TextStyle(fontSize: 11.5, color: t.inkSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const NeuPill('UPM'),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
@@ -487,11 +700,13 @@ class BoothPageState extends State<BoothPage> {
         runSpacing: 8,
         alignment: WrapAlignment.end,
         children: [
-          NeuPill(_signedIn ? '已登录' : '未登录',
-              bg: _signedIn
-                  ? const Color(0xFFBFE3C9)
-                  : Colors.black.withValues(alpha: 0.06),
-              fg: _signedIn ? const Color(0xFF237A45) : null),
+          NeuPill(
+            _signedIn ? '已登录' : '未登录',
+            bg: _signedIn
+                ? const Color(0xFFBFE3C9)
+                : Colors.black.withValues(alpha: 0.06),
+            fg: _signedIn ? const Color(0xFF237A45) : null,
+          ),
           NeuActionButton(
             label: '登录',
             icon: Icons.login_rounded,
@@ -523,8 +738,7 @@ class BoothPageState extends State<BoothPage> {
       fixed: [
         Row(
           children: [
-            Text('显示',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            Text('显示', style: TextStyle(fontSize: 12, color: t.inkTertiary)),
             const SizedBox(width: 8),
             NeuDropdown(
               value: _view,
@@ -533,8 +747,7 @@ class BoothPageState extends State<BoothPage> {
               onChanged: (value) => setState(() => _view = value),
             ),
             const SizedBox(width: 14),
-            Text('类型',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            Text('类型', style: TextStyle(fontSize: 12, color: t.inkTertiary)),
             const SizedBox(width: 8),
             Tooltip(
               message: '可用软件包会剔除演示动画、图集、漫画等无法装入 Unity 的内容',
@@ -549,8 +762,7 @@ class BoothPageState extends State<BoothPage> {
               ),
             ),
             const SizedBox(width: 14),
-            Text('分类',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            Text('分类', style: TextStyle(fontSize: 12, color: t.inkTertiary)),
             const SizedBox(width: 8),
             NeuDropdown(
               value: _category,
@@ -575,11 +787,13 @@ class BoothPageState extends State<BoothPage> {
         Row(
           children: [
             NeuCheckbox(
-              value: shown.isNotEmpty &&
+              value:
+                  shown.isNotEmpty &&
                   shown.every((r) => _selected.contains('${r['number']}')),
               onTap: () => setState(() {
-                final all =
-                    shown.every((r) => _selected.contains('${r['number']}'));
+                final all = shown.every(
+                  (r) => _selected.contains('${r['number']}'),
+                );
                 _selected.clear();
                 if (!all) {
                   _selected.addAll([for (final r in shown) '${r['number']}']);
@@ -587,8 +801,10 @@ class BoothPageState extends State<BoothPage> {
               }),
             ),
             const SizedBox(width: 9),
-            Text('显示 ${shown.length} / ${_rows.length} 项',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            Text(
+              '显示 ${shown.length} / ${_rows.length} 项',
+              style: TextStyle(fontSize: 12, color: t.inkTertiary),
+            ),
           ],
         ),
       ],
@@ -618,8 +834,10 @@ class BoothPageState extends State<BoothPage> {
             child: shown.isEmpty
                 ? const NeuEmptyState(
                     expand: true,
-                    text: '清单还是空的。\n先「登录」保存登录态，再点「读取清单」，'
-                        '页面会逐页抓取已购、礼物与免费商品。')
+                    text:
+                        '清单还是空的。\n先「登录」保存登录态，再点「读取清单」，'
+                        '页面会逐页抓取已购、礼物与免费商品。',
+                  )
                 : ListView.separated(
                     padding: EdgeInsets.zero,
                     itemCount: shown.length,
@@ -628,95 +846,132 @@ class BoothPageState extends State<BoothPage> {
                       final row = shown[index];
                       final number = '${row['number']}';
                       final has = _downloaded.contains(number);
-                      final title =
-                          '${row['title']}'.isEmpty ? '商品 $number' : '${row['title']}';
+                      final title = '${row['title']}'.isEmpty
+                          ? '商品 $number'
+                          : '${row['title']}';
                       final checked = _selected.contains(number);
 
-                      return NeuCard(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 11),
-                        child: Row(
-                          children: [
-                            NeuCheckbox(
-                              value: checked,
-                              onTap: () => setState(() => checked
-                                  ? _selected.remove(number)
-                                  : _selected.add(number)),
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          NeuCard(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 11,
                             ),
-                            const SizedBox(width: 12),
-                            NeuCover('${row['imageUrl']}'),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(title,
-                                      style: const TextStyle(
+                            child: Row(
+                              children: [
+                                NeuCheckbox(
+                                  value: checked,
+                                  onTap: () => setState(
+                                    () => checked
+                                        ? _selected.remove(number)
+                                        : _selected.add(number),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                NeuCover('${row['imageUrl']}'),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        title,
+                                        style: const TextStyle(
                                           fontSize: 13.5,
-                                          fontWeight: FontWeight.w600),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                      '${row['shop']} · ${'${row['formLabel']}'.isEmpty ? '默认版本' : row['formLabel']}',
-                                      style: TextStyle(
-                                          fontSize: 11, color: t.inkTertiary),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis),
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        '${row['shop']} · ${'${row['formLabel']}'.isEmpty ? '默认版本' : row['formLabel']}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: t.inkTertiary,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                if (row['isFree'] == true)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 8),
+                                    child: NeuPill('免费领取'),
+                                  ),
+                                if (BoothPage.looksLikeMedia(row))
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 8),
+                                    child: NeuPill(
+                                      '演示·图集',
+                                      bg: Color(0xFFEBD9B4),
+                                      fg: Color(0xFF7A5514),
+                                    ),
+                                  ),
+                                if ('${row['category']}'.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: NeuPill('${row['category']}'),
+                                  ),
+                                if (_hidden[number] != null)
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8),
+                                    child: NeuPill(
+                                      '已折叠 ${_hidden[number]} 个旧版本',
+                                    ),
+                                  ),
+                                if (_onShelf(row))
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 8),
+                                    child: NeuPill(
+                                      '已入库',
+                                      bg: Color(0xFFBFE3C9),
+                                      fg: Color(0xFF237A45),
+                                    ),
+                                  ),
+                                NeuPill(
+                                  has ? '已下载' : '未下载',
+                                  bg: has
+                                      ? const Color(0xFFBFE3C9)
+                                      : Colors.black.withValues(alpha: 0.06),
+                                  fg: has ? const Color(0xFF237A45) : null,
+                                ),
+                                const SizedBox(width: 8),
+                                _Poke(
+                                  icon: Icons.open_in_new_rounded,
+                                  tooltip: '在浏览器打开商品页',
+                                  onTap: () =>
+                                      _showBrowser('${row['itemUrl']}'),
+                                ),
+                                if (has || _onShelf(row)) ...[
+                                  const SizedBox(width: 6),
+                                  _Poke(
+                                    icon: _open.contains(number)
+                                        ? Icons.expand_less_rounded
+                                        : Icons.expand_more_rounded,
+                                    tooltip: _open.contains(number)
+                                        ? '收起压缩包内容'
+                                        : '展开压缩包内的包',
+                                    onTap: () => _toggleContents(row),
+                                  ),
                                 ],
-                              ),
+                                const SizedBox(width: 6),
+                                NeuActionButton(
+                                  label: has ? '重新下载' : '下载并入库',
+                                  icon: Icons.file_download_outlined,
+                                  onTap: _busy ? null : () => _download(row),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 10),
-                            if (row['isFree'] == true)
-                              const Padding(
-                                padding: EdgeInsets.only(right: 8),
-                                child: NeuPill('免费领取'),
-                              ),
-                            if (BoothPage.looksLikeMedia(row))
-                              const Padding(
-                                padding: EdgeInsets.only(right: 8),
-                                child: NeuPill('演示·图集',
-                                    bg: Color(0xFFEBD9B4),
-                                    fg: Color(0xFF7A5514)),
-                              ),
-                            if ('${row['category']}'.isNotEmpty)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: NeuPill('${row['category']}'),
-                              ),
-                            if (_hidden[number] != null)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: NeuPill(
-                                    '已折叠 ${_hidden[number]} 个旧版本'),
-                              ),
-                            if (_onShelf(row))
-                              const Padding(
-                                padding: EdgeInsets.only(right: 8),
-                                child: NeuPill('已入库',
-                                    bg: Color(0xFFBFE3C9),
-                                    fg: Color(0xFF237A45)),
-                              ),
-                            NeuPill(
-                              has ? '已下载' : '未下载',
-                              bg: has
-                                  ? const Color(0xFFBFE3C9)
-                                  : Colors.black.withValues(alpha: 0.06),
-                              fg: has ? const Color(0xFF237A45) : null,
-                            ),
-                            const SizedBox(width: 8),
-                            _Poke(
-                                icon: Icons.open_in_new_rounded,
-                                tooltip: '在浏览器打开商品页',
-                                onTap: () => _showBrowser('${row['itemUrl']}')),
-                            const SizedBox(width: 6),
-                            NeuActionButton(
-                              label: has ? '重新下载' : '下载并入库',
-                              icon: Icons.file_download_outlined,
-                              onTap: _busy ? null : () => _download(row),
-                            ),
-                          ],
-                        ),
+                          ),
+                          _contentList(row),
+                        ],
                       );
                     },
                   ),

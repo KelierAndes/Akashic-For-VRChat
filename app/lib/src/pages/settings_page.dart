@@ -28,19 +28,53 @@ class _SettingsPageState extends State<SettingsPage> {
 
   String _previewCacheDir = '';
   int _previewCacheBytes = 0;
+  int _previewCacheQuota = defaultCacheQuotaGb * 1024 * 1024 * 1024;
   bool _clearingCache = false;
+  bool _settingQuota = false;
+  Object? _syncLogSeen;
+
+  static const List<int> cacheQuotaGb = [2, 4, 8, 16, 32];
+  static const int defaultCacheQuotaGb = 8;
 
   Future<void> _loadPreviewCache() async {
     final host = _host;
     if (host == null) return;
     try {
-      final result = await host.setPreviewCacheDir('');
+      final result = await host.getPreviewCache();
       if (!mounted) return;
       setState(() {
         _previewCacheDir = result['directory'] as String? ?? '';
         _previewCacheBytes = (result['size'] as num?)?.toInt() ?? 0;
+        _previewCacheQuota =
+            (result['quota'] as num?)?.toInt() ??
+            defaultCacheQuotaGb * 1024 * 1024 * 1024;
       });
     } catch (_) {}
+  }
+
+  Future<void> _setCacheQuota(int gb) async {
+    final host = _host;
+    if (host == null || _settingQuota) return;
+    setState(() => _settingQuota = true);
+    try {
+      final result = await host.setPreviewCacheQuota(gb * 1024 * 1024 * 1024);
+      if (!mounted) return;
+      setState(() {
+        _previewCacheBytes = (result['size'] as num?)?.toInt() ?? 0;
+        _previewCacheQuota =
+            (result['quota'] as num?)?.toInt() ?? gb * 1024 * 1024 * 1024;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('上限设置失败：$error')));
+    }
+    if (mounted) setState(() => _settingQuota = false);
+  }
+
+  int _quotaIndex() {
+    final gb = (_previewCacheQuota / (1024 * 1024 * 1024)).round();
+    return cacheQuotaGb.indexOf(gb);
   }
 
   Future<void> _clearPreviewCache() async {
@@ -51,13 +85,17 @@ class _SettingsPageState extends State<SettingsPage> {
       final result = await host.clearPreviewCache();
       await _loadPreviewCache();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('已释放 ${formatBytes((result['freed'] as num?)?.toInt() ?? 0)} 缓存'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已释放 ${formatBytes((result['freed'] as num?)?.toInt() ?? 0)} 缓存',
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('清空失败：$error')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('清空失败：$error')));
     }
     if (mounted) setState(() => _clearingCache = false);
   }
@@ -71,7 +109,9 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     final host = _host;
-    if (host != null) unawaited(host.syncTouch('离开设置页').catchError((_) => <String, dynamic>{}));
+    if (host != null) {
+      unawaited(host.syncTouch('离开设置页').catchError((_) => <String, dynamic>{}));
+    }
     super.dispose();
   }
 
@@ -97,10 +137,19 @@ class _SettingsPageState extends State<SettingsPage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         final target = _syncKey.currentContext;
         if (target == null) return;
-        Scrollable.ensureVisible(target,
-            alignment: 0.06,
-            duration: const Duration(milliseconds: 260),
-            curve: Curves.easeOut);
+        Scrollable.ensureVisible(
+          target,
+          alignment: 0.06,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOut,
+        );
+      });
+    }
+
+    if (!identical(_syncLogSeen, model.syncLog)) {
+      _syncLogSeen = model.syncLog;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_loadPreviewCache());
       });
     }
 
@@ -116,7 +165,9 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: '新建工程与「扫描目录」都以此处为起点',
           value: state?.defaultProjectPath ?? '',
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择默认工程目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择默认工程目录',
+            );
             if (picked != null) {
               await model.updateSetting((c) => c.setDefaultProjectPath(picked));
             }
@@ -128,7 +179,9 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: '工程备份压缩包的输出位置',
           value: state?.backupDirectory ?? '',
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择备份目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择备份目录',
+            );
             if (picked != null) {
               await model.updateSetting((c) => c.setBackupPath(picked));
             }
@@ -140,7 +193,9 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: '已购商品 zip 的落盘位置，资源页按此识别本地文件',
           value: state?.booth.directory ?? '',
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择 Booth 下载目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择 Booth 下载目录',
+            );
             if (picked != null) {
               await model.updateSetting((c) => c.setBoothDownloadDir(picked));
             }
@@ -152,7 +207,9 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: 'Unity 下载助手写入 .unitypackage 的位置',
           value: state?.assetStore.directory ?? '',
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择 Asset Store 缓存目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择 Asset Store 缓存目录',
+            );
             if (picked != null) {
               await model.updateSetting((c) => c.setAssetStoreCacheDir(picked));
             }
@@ -164,10 +221,13 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: '从我的资产直接下载时使用的目录',
           value: state?.assetStoreDownloadDirectory ?? '',
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择 Asset Store 下载目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择 Asset Store 下载目录',
+            );
             if (picked != null) {
               await model.updateSetting(
-                  (c) => c.setAssetStoreDownloadDir(picked));
+                (c) => c.setAssetStoreDownloadDir(picked),
+              );
             }
           },
         ),
@@ -177,27 +237,72 @@ class _SettingsPageState extends State<SettingsPage> {
           hint: '解包、GLB 与编译后的着色器都写在这里，默认跟随软件目录',
           value: _previewCacheDir,
           onPick: () async {
-            final picked = await FilePicker.getDirectoryPath(dialogTitle: '选择预览缓存目录');
+            final picked = await FilePicker.getDirectoryPath(
+              dialogTitle: '选择预览缓存目录',
+            );
             if (picked != null) {
               await _host?.setPreviewCacheDir(picked);
               await _loadPreviewCache();
             }
           },
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Text('当前占用 ${formatBytes(_previewCacheBytes)}',
-                style: TextStyle(
-                    fontSize: 11.5,
-                    color: NeuTheme.of(context).inkSecondary)),
-            const Spacer(),
-            NeuActionButton(
-              label: _clearingCache ? '清空中…' : '清空预览缓存',
-              icon: Icons.cleaning_services_outlined,
-              onTap: _clearingCache ? null : _clearPreviewCache,
-            ),
-          ],
+        const SizedBox(height: 12),
+        NeuCard(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '缓存上限',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '解包、模型与着色器编译的总量超出后，按最旧的先回收',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: t.inkTertiary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  NeuSegmented(
+                    labels: [for (final gb in cacheQuotaGb) '${gb}G'],
+                    index: _quotaIndex(),
+                    onChanged: (i) => _setCacheQuota(cacheQuotaGb[i]),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '当前占用 ${formatBytes(_previewCacheBytes)} · 上限 ${formatBytes(_previewCacheQuota)}'
+                      '${_settingQuota ? ' · 回收中…' : ''}',
+                      style: TextStyle(fontSize: 11.5, color: t.inkSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  NeuActionButton(
+                    label: _clearingCache ? '清空中…' : '清空预览缓存',
+                    icon: Icons.cleaning_services_outlined,
+                    onTap: _clearingCache ? null : _clearPreviewCache,
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 12),
         NeuSwitchTile(
@@ -241,27 +346,38 @@ class _SettingsPageState extends State<SettingsPage> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: NeuCard(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 13),
+                      horizontal: 16,
+                      vertical: 13,
+                    ),
                     child: Row(
                       children: [
-                        NeuAvatar(editor.version.isNotEmpty
-                            ? editor.version.substring(0, 1)
-                            : 'U'),
+                        NeuAvatar(
+                          editor.version.isNotEmpty
+                              ? editor.version.substring(0, 1)
+                              : 'U',
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('${editor.version} · ${editor.source}',
-                                  style: const TextStyle(
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w600),
-                                  overflow: TextOverflow.ellipsis),
+                              Text(
+                                '${editor.version} · ${editor.source}',
+                                style: const TextStyle(
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                               const SizedBox(height: 2),
-                              Text(editor.path,
-                                  style: TextStyle(
-                                      fontSize: 11.5, color: t.inkTertiary),
-                                  overflow: TextOverflow.ellipsis),
+                              Text(
+                                editor.path,
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  color: t.inkTertiary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ],
                           ),
                         ),
@@ -273,10 +389,14 @@ class _SettingsPageState extends State<SettingsPage> {
                           color: t.raised,
                           insetColor: t.inset,
                           border: glassBorder(alpha: 0.45),
-                          onTap: () =>
-                              model.updateSetting((c) => c.removeEditor(editor.path)),
-                          child: Icon(Icons.delete_outline_rounded,
-                              size: 17, color: t.inkSecondary),
+                          onTap: () => model.updateSetting(
+                            (c) => c.removeEditor(editor.path),
+                          ),
+                          child: Icon(
+                            Icons.delete_outline_rounded,
+                            size: 17,
+                            color: t.inkSecondary,
+                          ),
                         ),
                       ],
                     ),
@@ -378,13 +498,14 @@ class _SettingsPageState extends State<SettingsPage> {
             _missingOf(model.vcsTools).isEmpty
                 ? '三项依赖都齐了，「恢复/同步」页的所有功能可用。'
                 : '缺少 ${_missingOf(model.vcsTools).join('、')}：'
-                    '接入版本托管、提交与推送会受影响，点上面的「一键安装」由 winget 装好${_flag(model.vcsTools['installerFound']) ? '' : '（本机没有 winget，会给出官网地址手动下载）'}。',
+                      '接入版本托管、提交与推送会受影响，点上面的「一键安装」由 winget 装好${_flag(model.vcsTools['installerFound']) ? '' : '（本机没有 winget，会给出官网地址手动下载）'}。',
             style: TextStyle(
-                fontSize: 12,
-                height: 1.5,
-                color: _missingOf(model.vcsTools).isEmpty
-                    ? t.inkTertiary
-                    : t.warn),
+              fontSize: 12,
+              height: 1.5,
+              color: _missingOf(model.vcsTools).isEmpty
+                  ? t.inkTertiary
+                  : t.warn,
+            ),
           ),
         ],
         const SizedBox(height: 26),
@@ -427,39 +548,50 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _kv('侧车版本', model.hostVersion.isEmpty ? '未连接' : model.hostVersion),
+              _kv(
+                '侧车版本',
+                model.hostVersion.isEmpty ? '未连接' : model.hostVersion,
+              ),
               const SizedBox(height: 6),
               _kv('仓库源', '${state?.registrySources.length ?? 0} 个'),
               const SizedBox(height: 6),
               _kv('本地工程', '${state?.projectCount ?? 0} 个'),
               const SizedBox(height: 6),
-              _kv('登录凭据', '以当前 Windows 用户加密保存在 %LOCALAPPDATA%\\Akashic\\sessions'),
+              _kv(
+                '登录凭据',
+                '以当前 Windows 用户加密保存在 %LOCALAPPDATA%\\Akashic\\sessions',
+              ),
             ],
           ),
         ),
         const SizedBox(height: 18),
-        Text(model.status,
-            style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+        Text(
+          model.status,
+          style: TextStyle(fontSize: 12, color: t.inkTertiary),
+        ),
       ],
     );
   }
 
   Widget _kv(String key, String value) => Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 88,
-            child: Text(key,
-                style: const TextStyle(
-                    fontSize: 12.5, fontWeight: FontWeight.w600)),
-          ),
-          Expanded(
-            child: Text(value,
-                style: const TextStyle(fontSize: 12.5),
-                overflow: TextOverflow.ellipsis),
-          ),
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      SizedBox(
+        width: 88,
+        child: Text(
+          key,
+          style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+        ),
+      ),
+      Expanded(
+        child: Text(
+          value,
+          style: const TextStyle(fontSize: 12.5),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    ],
+  );
 }
 
 class _PathRow extends StatelessWidget {
@@ -486,15 +618,22 @@ class _PathRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600)),
+                Text(
+                  label,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 3),
-                Text(value.isEmpty ? hint : value,
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        color: value.isEmpty ? t.inkTertiary : t.inkSecondary),
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  value.isEmpty ? hint : value,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: value.isEmpty ? t.inkTertiary : t.inkSecondary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -534,15 +673,22 @@ class _SessionRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 3),
-                Text(detail,
-                    style: TextStyle(
-                        fontSize: 11.5,
-                        color: NeuTheme.of(context).inkTertiary),
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  detail,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: NeuTheme.of(context).inkTertiary,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
@@ -610,21 +756,25 @@ class _ToolRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name,
-                    style: const TextStyle(
-                        fontSize: 13.5, fontWeight: FontWeight.w600)),
+                Text(
+                  name,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
                 const SizedBox(height: 2),
-                Text(detail,
-                    style: TextStyle(fontSize: 11.5, color: t.inkTertiary),
-                    overflow: TextOverflow.ellipsis),
+                Text(
+                  detail,
+                  style: TextStyle(fontSize: 11.5, color: t.inkTertiary),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ],
             ),
           ),
           const SizedBox(width: 10),
           NeuPill(
-            installed
-                ? (version.isEmpty ? '已安装' : '已装 $version')
-                : '未检测到',
+            installed ? (version.isEmpty ? '已安装' : '已装 $version') : '未检测到',
             bg: installed
                 ? const Color(0xFFBFE3C9)
                 : Colors.black.withValues(alpha: 0.06),
@@ -670,11 +820,14 @@ class _VisualCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text('颜色模式',
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: t.ink)),
+              Text(
+                '颜色模式',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: t.ink,
+                ),
+              ),
               const SizedBox(width: 14),
               NeuSegmented(
                 labels: const ['浅色', '暗色', '跟随系统'],
@@ -692,7 +845,8 @@ class _VisualCard extends StatelessWidget {
             1.0,
             _alpha,
             (value) => model.setVisual(opacity: value),
-            hint: '数值即面板不透明度，可设范围 0.4–1：越大越实，1 为完全不透明。'
+            hint:
+                '数值即面板不透明度，可设范围 0.4–1：越大越实，1 为完全不透明。'
                 '作用于窗口底板、侧栏托盘与弹出面板；越小桌面透出越多，文字对比度也越低。',
           ),
         ],
@@ -718,30 +872,42 @@ class _VisualCard extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w600,
-                      color: t.ink)),
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  color: t.ink,
+                ),
+              ),
             ),
-            Text(valueText,
-                style: TextStyle(fontSize: 12, color: t.inkSecondary)),
+            Text(
+              valueText,
+              style: TextStyle(fontSize: 12, color: t.inkSecondary),
+            ),
           ],
         ),
         Slider(
           min: min,
           max: max,
           value: value.clamp(min, max),
-          activeColor: t.isDark ? const Color(0xFF7FCB9A) : const Color(0xFF2E7D46),
+          activeColor: t.isDark
+              ? const Color(0xFF7FCB9A)
+              : const Color(0xFF2E7D46),
           inactiveColor: Colors.black.withValues(alpha: 0.16),
           onChanged: onChanged,
         ),
         if (hint.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 8),
-            child: Text(hint,
-                style:
-                    TextStyle(fontSize: 11.5, height: 1.5, color: t.inkTertiary)),
+            child: Text(
+              hint,
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.5,
+                color: t.inkTertiary,
+              ),
+            ),
           ),
       ],
     );
@@ -780,8 +946,8 @@ class _SyncCard extends StatelessWidget {
     final account = github['found'] != true
         ? '未安装 GitHub CLI'
         : github['signedIn'] == true
-            ? '$login${github['hasGistScope'] == true ? '' : '（令牌缺 gist 权限）'}'
-            : '未登录，点下面「使用浏览器登录 GitHub」';
+        ? '$login${github['hasGistScope'] == true ? '' : '（令牌缺 gist 权限）'}'
+        : '未登录，点下面「使用浏览器登录 GitHub」';
 
     return NeuCard(
       child: Column(
@@ -791,19 +957,23 @@ class _SyncCard extends StatelessWidget {
             '设置、三站登录 Cookie 与各站清单先在本地用 AES-256-GCM 加密，再写入一个私有 gist。'
             '密钥由你的 GitHub 账号 id 与程序内置盐值派生，换机登录同一个账号就能自动还原，'
             '不需要设置或记住任何同步密码；明文与密钥都不会上传。',
-            style: TextStyle(
-                fontSize: 12, height: 1.6, color: t.inkSecondary),
+            style: TextStyle(fontSize: 12, height: 1.6, color: t.inkSecondary),
           ),
           const SizedBox(height: 12),
           _row('GitHub 账号', account),
-          _row('上次上传', uploaded.isEmpty
-              ? '还没有上传过，首次上传会自动新建一个私有 gist'
-              : '${_when(uploaded)} · ${bytes ~/ 1024} KB 密文'),
+          _row(
+            '上次上传',
+            uploaded.isEmpty
+                ? '还没有上传过，首次上传会自动新建一个私有 gist'
+                : '${_when(uploaded)} · ${bytes ~/ 1024} KB 密文',
+          ),
           _row('包含内容', included.isEmpty ? '—' : included.join(' · ')),
           if (note.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(note,
-                style: TextStyle(fontSize: 12, height: 1.5, color: t.warn)),
+            Text(
+              note,
+              style: TextStyle(fontSize: 12, height: 1.5, color: t.warn),
+            ),
           ],
           const SizedBox(height: 14),
           Row(
@@ -812,11 +982,13 @@ class _SyncCard extends StatelessWidget {
                 label: model.githubLoggingIn
                     ? '等待浏览器授权…'
                     : github['signedIn'] == true
-                        ? '重新登录 GitHub'
-                        : '使用浏览器登录 GitHub',
+                    ? '重新登录 GitHub'
+                    : '使用浏览器登录 GitHub',
                 icon: Icons.open_in_browser_rounded,
                 emphasised: github['signedIn'] != true,
-                onTap: model.githubLoggingIn || !ghFound ? null : model.githubLogin,
+                onTap: model.githubLoggingIn || !ghFound
+                    ? null
+                    : model.githubLogin,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -824,8 +996,8 @@ class _SyncCard extends StatelessWidget {
                   model.githubLoggingIn
                       ? '浏览器里点一次 Authorize 就行，不用输验证码；回来会自动完成同步。'
                       : ghFound
-                          ? '登录会打开你自己的浏览器，Akashic 收不到密码或令牌。'
-                          : '需要先在 版本控制依赖 装好 GitHub CLI。',
+                      ? '登录会打开你自己的浏览器，Akashic 收不到密码或令牌。'
+                      : '需要先在 版本控制依赖 装好 GitHub CLI。',
                   style: TextStyle(fontSize: 11.5, color: t.inkTertiary),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -860,9 +1032,11 @@ class _SyncCard extends StatelessWidget {
           ),
           if (log.isNotEmpty) ...[
             const SizedBox(height: 10),
-            Text('${log['title'] ?? ''}',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                overflow: TextOverflow.ellipsis),
+            Text(
+              '${log['title'] ?? ''}',
+              style: TextStyle(fontSize: 12, color: t.inkTertiary),
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ],
       ),
@@ -870,23 +1044,26 @@ class _SyncCard extends StatelessWidget {
   }
 
   Widget _row(String key, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 88,
-              child: Text(key,
-                  style: const TextStyle(
-                      fontSize: 12.5, fontWeight: FontWeight.w600)),
-            ),
-            Expanded(
-              child: Text(value,
-                  style: const TextStyle(fontSize: 12.5, height: 1.45)),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 88,
+          child: Text(
+            key,
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+          ),
         ),
-      );
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12.5, height: 1.45),
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _SyncRestoreForm extends StatelessWidget {
@@ -907,11 +1084,16 @@ class _SyncRestoreForm extends StatelessWidget {
             '会用解密后的云端内容覆盖本机的设置、三站登录态与清单缓存。'
             '当前 settings.json 先另存为 settings.json.before-sync。',
             style: TextStyle(
-                fontSize: 12.5, height: 1.6, color: t.inkSecondary),
+              fontSize: 12.5,
+              height: 1.6,
+              color: t.inkSecondary,
+            ),
           ),
           const SizedBox(height: 8),
-          Text('备份地址不在界面上显示，会在当前登录的 GitHub 账号下自动定位。',
-              style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+          Text(
+            '备份地址不在界面上显示，会在当前登录的 GitHub 账号下自动定位。',
+            style: TextStyle(fontSize: 12, color: t.inkTertiary),
+          ),
           const SizedBox(height: 16),
           NeuDialogActions(
             confirmLabel: '覆盖并恢复',

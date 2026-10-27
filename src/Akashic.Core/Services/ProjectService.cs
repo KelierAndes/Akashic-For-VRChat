@@ -609,16 +609,29 @@ public partial class ProjectService : IProjectService
 
     public string GetPreviewCacheDirectory() => PreviewCachePaths.Root;
 
+    public long GetPreviewCacheQuota() => PreviewCachePaths.Quota;
+
     public async Task<string> SetPreviewCacheDirectoryAsync(string directory)
     {
         var full = string.IsNullOrWhiteSpace(directory)
             ? PreviewCachePaths.DefaultDirectory()
             : Path.GetFullPath(directory.Trim().Trim('"'));
 
-        var applied = PreviewCachePaths.Configure(full);
+        var applied = PreviewCachePaths.Configure(full, LoadSettings().PreviewCacheQuotaBytes);
 
         var settings = LoadSettings();
         settings.PreviewCacheDirectory = applied;
+        await SaveOwnedFieldsAsync(settings);
+        return applied;
+    }
+
+    public async Task<long> SetPreviewCacheQuotaAsync(long bytes)
+    {
+        var applied = PreviewCachePaths.ConfigureQuota(bytes);
+        PreviewCachePaths.EnforceQuota(applied);
+
+        var settings = LoadSettings();
+        settings.PreviewCacheQuotaBytes = applied;
         await SaveOwnedFieldsAsync(settings);
         return applied;
     }
@@ -659,6 +672,8 @@ public partial class ProjectService : IProjectService
         current.BackupExcludePackages = updated.BackupExcludePackages;
         current.DefaultProjectPath = updated.DefaultProjectPath;
         current.ProjectTemplates = updated.ProjectTemplates;
+        current.PreviewCacheDirectory = updated.PreviewCacheDirectory;
+        current.PreviewCacheQuotaBytes = updated.PreviewCacheQuotaBytes;
 
         await File.WriteAllTextAsync(_settingsPath, JsonSerializer.Serialize(current, JsonOptions));
     }

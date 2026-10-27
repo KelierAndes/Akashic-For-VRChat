@@ -47,6 +47,7 @@ class _Row {
 class _ProjectDetailPageState extends State<ProjectDetailPage> {
   List<_Row> _rows = [];
   final Set<String> _selected = {};
+  final Set<String> _closedGroups = {};
   String _filter = '全部';
   String _origin = '全部来源';
   String _category = '全部分类';
@@ -56,15 +57,21 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   static const _filters = ['全部', '已安装', '可升级', '未安装'];
 
   List<String> get _origins => [
-        '全部来源',
-        ...{for (final row in _rows) if (row.origin.isNotEmpty) row.origin},
-      ];
+    '全部来源',
+    ...{
+      for (final row in _rows)
+        if (row.origin.isNotEmpty) row.origin,
+    },
+  ];
 
   List<String> get _categories => [
-        '全部分类',
-        '未分类',
-        ...{for (final row in _rows) if (row.category.isNotEmpty) row.category},
-      ];
+    '全部分类',
+    '未分类',
+    ...{
+      for (final row in _rows)
+        if (row.category.isNotEmpty) row.category,
+    },
+  ];
 
   static String _key(String raw) {
     var text = raw.toLowerCase();
@@ -90,7 +97,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 
     try {
       if (force || model.projects.isEmpty) await model.refreshProjects();
-      final project = model.projects.firstWhere((p) => p.path == widget.projectPath);
+      final project = model.projects.firstWhere(
+        (p) => p.path == widget.projectPath,
+      );
       final registry = await model.packages(force: reloadRegistry);
       final library = await model.libraryFiles(force: force);
       final records = await model.installRecords(project.path, force: force);
@@ -126,11 +135,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
       }
 
       final installedByName = <String, InstalledPackage>{
-        for (final p in project.installedPackages) p.name.toLowerCase(): p
+        for (final p in project.installedPackages) p.name.toLowerCase(): p,
       };
-      final recordByPath = {
-        for (final r in records) '${r['filePath']}': r
-      };
+      final recordByPath = {for (final r in records) '${r['filePath']}': r};
 
       final rows = <_Row>[];
       final registryNames = <String>{};
@@ -141,65 +148,76 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
             ? name
             : '${package['displayName']}';
         registryNames.add(name.toLowerCase());
-        rows.add(_Row(
-          id: name,
-          name: display,
-          group: 'VPM 包',
-          installed: installedByName[name.toLowerCase()]?.version ?? '无',
-          available: '${package['version']}',
-          origin: '注册表',
-          category: categoryOf(display, name),
-          cover: coverOf(display, name),
-          filePath: '',
-        ));
+        rows.add(
+          _Row(
+            id: name,
+            name: display,
+            group: 'VPM 包',
+            installed: installedByName[name.toLowerCase()]?.version ?? '无',
+            available: '${package['version']}',
+            origin: '注册表',
+            category: categoryOf(display, name),
+            cover: coverOf(display, name),
+            filePath: '',
+          ),
+        );
       }
 
       for (final entry in installedByName.values) {
         if (registryNames.contains(entry.name.toLowerCase())) continue;
-        final display = entry.displayName.isEmpty ? entry.name : entry.displayName;
-        rows.add(_Row(
-          id: entry.name,
-          name: display,
-          group: switch (entry.source) {
-            'Local' => '本地包',
-            'Git' => 'Git 仓库',
-            _ => '外部',
-          },
-          installed: entry.version,
-          available: entry.version,
-          origin: switch (entry.source) {
-            'Local' => '本地',
-            'Git' => 'Git',
-            'Registry' => '注册表',
-            'Embedded' => '内嵌',
-            _ => entry.source,
-          },
-          category: categoryOf(display, entry.name),
-          cover: coverOf(display, entry.name),
-          filePath: '',
-        ));
+        final display = entry.displayName.isEmpty
+            ? entry.name
+            : entry.displayName;
+        rows.add(
+          _Row(
+            id: entry.name,
+            name: display,
+            group: switch (entry.source) {
+              'Local' => '本地包',
+              'Git' => 'Git 仓库',
+              _ => '外部',
+            },
+            installed: entry.version,
+            available: entry.version,
+            origin: switch (entry.source) {
+              'Local' => '本地',
+              'Git' => 'Git',
+              'Registry' => '注册表',
+              'Embedded' => '内嵌',
+              _ => entry.source,
+            },
+            category: categoryOf(display, entry.name),
+            cover: coverOf(display, entry.name),
+            filePath: '',
+          ),
+        );
       }
 
       for (final file in library) {
         final path = '${file['filePath']}';
-        final display =
-            '${file['displayName']}'.isEmpty ? path : '${file['displayName']}';
-        rows.add(_Row(
-          id: 'unitypackage:$path',
-          name: display,
-          group: '.unitypackage',
-          installed: recordByPath[path]?['version'] ?? '无',
-          available: '${file['version']}',
-          origin: originOf(display, path, originLabel('${file['origin']}')),
-          category: categoryOf(display, path),
-          cover: coverOf(display, path),
-          filePath: path,
-        ));      }
+        final display = '${file['displayName']}'.isEmpty
+            ? path
+            : '${file['displayName']}';
+        rows.add(
+          _Row(
+            id: 'unitypackage:$path',
+            name: display,
+            group: '.unitypackage',
+            installed: recordByPath[path]?['version'] ?? '无',
+            available: '${file['version']}',
+            origin: originOf(display, path, originLabel('${file['origin']}')),
+            category: categoryOf(display, path),
+            cover: coverOf(display, path),
+            filePath: path,
+          ),
+        );
+      }
 
       _rows = rows;
       if (!_origins.contains(_origin)) _origin = '全部来源';
       if (!_categories.contains(_category)) _category = '全部分类';
-      _status = '共 ${rows.length} 项 · ${installedByName.length} 项已安装 · '
+      _status =
+          '共 ${rows.length} 项 · ${installedByName.length} 项已安装 · '
           '${recordByPath.length} 个 .unitypackage 台账';
     } catch (error) {
       _status = '读取失败：$error';
@@ -208,7 +226,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
     }
   }
 
-  List<_Row> get _shown => _rows.where((row) {
+  List<_Row> get _shown =>
+      _rows.where((row) {
         final matchesState = switch (_filter) {
           '已安装' => row.isInstalled,
           '可升级' => row.upgradable,
@@ -223,17 +242,52 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           return false;
         }
         return true;
-      }).toList()
-        ..sort((a, b) {
-          final byInstalled =
-              (b.isInstalled ? 1 : 0).compareTo(a.isInstalled ? 1 : 0);
-          if (byInstalled != 0) return byInstalled;
-          return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-        });
+      }).toList()..sort((a, b) {
+        final byInstalled = (b.isInstalled ? 1 : 0).compareTo(
+          a.isInstalled ? 1 : 0,
+        );
+        if (byInstalled != 0) return byInstalled;
+        return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      });
+
+  static String _groupOf(_Row row) {
+    if (!row.isUnityPackage) return row.group;
+
+    final path = row.filePath.replaceAll('\\', '/');
+    final cut = path.lastIndexOf('/');
+    if (cut <= 0) return '独立 .unitypackage';
+
+    final parent = path.substring(0, cut);
+    final slash = parent.lastIndexOf('/');
+    var name = slash >= 0 ? parent.substring(slash + 1) : parent;
+    if (name.isEmpty || (name.length == 2 && name.endsWith(':'))) {
+      return '独立 .unitypackage';
+    }
+
+    name = name.replaceAll(
+      RegExp(r'[-_ ]?extracted$', caseSensitive: false),
+      '',
+    );
+    return name.isEmpty ? '独立 .unitypackage' : name;
+  }
+
+  List<Object> _groupedEntries(List<_Row> shown) {
+    final groups = <String, List<_Row>>{};
+    for (final row in shown) {
+      groups.putIfAbsent(_groupOf(row), () => []).add(row);
+    }
+
+    final entries = <Object>[];
+    for (final entry in groups.entries) {
+      entries.add(entry.key);
+      if (!_closedGroups.contains(entry.key)) entries.addAll(entry.value);
+    }
+    return entries;
+  }
 
   Future<void> _installSelected() async {
-    AppScope.of(context).showModal(
-        ProjectPickerForm(title: '安装到工程', onPick: _installInto));
+    AppScope.of(context)
+        .showModal(ProjectPickerForm(title: '安装到工程', onPick: _installInto));
   }
 
   Future<void> _installInto(String projectPath) async {
@@ -294,7 +348,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
             continue;
           }
           await host.uninstallPackageFile(
-              widget.projectPath, '${hit.first['packageId']}');
+            widget.projectPath,
+            '${hit.first['packageId']}',
+          );
         } else {
           await host.removePackage(widget.projectPath, row.id);
         }
@@ -317,10 +373,12 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
   Widget build(BuildContext context) {
     final model = AppScope.of(context);
     final t = NeuTheme.of(context);
-    final matches =
-        model.projects.where((p) => p.path == widget.projectPath).toList();
+    final matches = model.projects
+        .where((p) => p.path == widget.projectPath)
+        .toList();
     final current = matches.isEmpty ? null : matches.first;
     final shown = _shown;
+    final entries = _groupedEntries(shown);
 
     if (current == null) {
       return NeuPageBody(
@@ -338,7 +396,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
 
     return NeuPageBody(
       title: current.name,
-      subtitle: '${current.path} · ${current.projectTypeDisplayName} · '
+      subtitle:
+          '${current.path} · ${current.projectTypeDisplayName} · '
           '${current.unityVersion} · $_status',
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -405,7 +464,9 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               NeuActionButton(
                 label: '刷新',
                 icon: Icons.refresh_rounded,
-                onTap: _busy ? null : () => _load(force: true, reloadRegistry: true),
+                onTap: _busy
+                    ? null
+                    : () => _load(force: true, reloadRegistry: true),
               )
             else ...[
               NeuActionButton(
@@ -427,7 +488,8 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
         Row(
           children: [
             NeuCheckbox(
-              value: shown.isNotEmpty &&
+              value:
+                  shown.isNotEmpty &&
                   shown.every((r) => _selected.contains(r.id)),
               onTap: () => setState(() {
                 final all = shown.every((r) => _selected.contains(r.id));
@@ -436,8 +498,10 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
               }),
             ),
             const SizedBox(width: 9),
-            Text('全选 ${shown.length} / ${_rows.length} 项',
-                style: TextStyle(fontSize: 12, color: t.inkTertiary)),
+            Text(
+              '全选 ${shown.length} / ${_rows.length} 项',
+              style: TextStyle(fontSize: 12, color: t.inkTertiary),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -455,51 +519,129 @@ class _ProjectDetailPageState extends State<ProjectDetailPage> {
           ),
         ),
       ],
-      content: ListView.separated(
+      content: ListView.builder(
         padding: EdgeInsets.zero,
-        itemCount: shown.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemCount: entries.length,
         itemBuilder: (context, index) {
-          final row = shown[index];
-          final checked = _selected.contains(row.id);
+          final entry = entries[index];
+          if (entry is String) {
+            final group = shown.where((row) => _groupOf(row) == entry).toList();
+            final open = !_closedGroups.contains(entry);
+            final installed = group.where((row) => row.isInstalled).length;
 
-          return NeuCard(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-            child: Row(
-              children: [
-                NeuCheckbox(
-                  value: checked,
-                  onTap: () => setState(() => checked
-                      ? _selected.remove(row.id)
-                      : _selected.add(row.id)),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  flex: 5,
+            return Padding(
+              padding: EdgeInsets.only(
+                top: index == 0 ? 0 : 10,
+                bottom: 7,
+                left: 16,
+                right: 8,
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => setState(() {
+                  if (!_closedGroups.remove(entry)) _closedGroups.add(entry);
+                }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Row(
                     children: [
-                      NeuCover(row.cover, width: 44, height: 32),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(row.name,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: t.ink)),
+                      Icon(
+                        open
+                            ? Icons.expand_more_rounded
+                            : Icons.chevron_right_rounded,
+                        size: 17,
+                        color: t.inkTertiary,
                       ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        entry.endsWith('.unitypackage')
+                            ? Icons.inventory_2_outlined
+                            : Icons.folder_outlined,
+                        size: 14,
+                        color: t.inkTertiary,
+                      ),
+                      const SizedBox(width: 7),
+                      Flexible(
+                        child: Text(
+                          entry,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: t.inkSecondary,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      NeuPill('${group.length} 项'),
+                      if (installed > 0) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '已安装 $installed',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            color: t.inkTertiary,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                NeuCell(row.installed, flex: 2),
-                NeuCell(row.available, flex: 2),
-                NeuCell(row.origin, flex: 2),
-                NeuCell(row.category.isEmpty ? '—' : row.category, flex: 2),
-                NeuCell(row.group, flex: 2),
-                if (row.upgradable)
-                  const NeuPill('可升级',
-                      bg: Color(0xFFBFE3C9), fg: Color(0xFF237A45)),
-              ],
+              ),
+            );
+          }
+
+          final row = entry as _Row;
+          final checked = _selected.contains(row.id);
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: NeuCard(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              child: Row(
+                children: [
+                  NeuCheckbox(
+                    value: checked,
+                    onTap: () => setState(
+                      () => checked
+                          ? _selected.remove(row.id)
+                          : _selected.add(row.id),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    flex: 5,
+                    child: Row(
+                      children: [
+                        NeuCover(row.cover, width: 44, height: 32),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            row.name,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: t.ink,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  NeuCell(row.installed, flex: 2),
+                  NeuCell(row.available, flex: 2),
+                  NeuCell(row.origin, flex: 2),
+                  NeuCell(row.category.isEmpty ? '—' : row.category, flex: 2),
+                  NeuCell(row.group, flex: 2),
+                  if (row.upgradable)
+                    const NeuPill(
+                      '可升级',
+                      bg: Color(0xFFBFE3C9),
+                      fg: Color(0xFF237A45),
+                    ),
+                ],
+              ),
             ),
           );
         },

@@ -86,14 +86,24 @@ public sealed class PackageContentCache
             if (child is null)
                 throw new InvalidOperationException("压缩包里没有找到 .unitypackage。");
 
-            var inner = ExtractInnerPackage(path, child, ct);
-            return LoadUnityPackage(inner, $"{Path.GetFileName(path)} / {child}", ct);
+            var label = $"{Path.GetFileName(path)} / {child.RelativePath}";
+
+            if (child.ArchiveEntry.Length == 0)
+            {
+                if (!File.Exists(child.FilePath))
+                    throw new InvalidOperationException("子包不在压缩包里，磁盘上也没有这个文件。");
+
+                return LoadUnityPackage(child.FilePath, label, ct);
+            }
+
+            var inner = ExtractInnerPackage(path, child.ArchiveEntry, ct);
+            return LoadUnityPackage(inner, label, ct);
         }
 
         return LoadUnityPackage(path, Path.GetFileName(path), ct);
     }
 
-    private static string? PickChild(ResourceRow row, string? entry)
+    private static ResourceRow? PickChild(ResourceRow row, string? entry)
     {
         if (row.Children.Count == 0) return null;
 
@@ -101,20 +111,15 @@ public sealed class PackageContentCache
         {
             foreach (var match in row.Children)
             {
-                if (string.Equals(match.RelativePath, entry, StringComparison.OrdinalIgnoreCase))
-                    return ChildEntryOf(match);
-                if (string.Equals(match.ArchiveEntry, entry, StringComparison.OrdinalIgnoreCase))
-                    return ChildEntryOf(match);
-                if (string.Equals(Path.GetFileName(match.RelativePath), entry, StringComparison.OrdinalIgnoreCase))
-                    return ChildEntryOf(match);
+                if (string.Equals(match.RelativePath, entry, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(match.ArchiveEntry, entry, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(Path.GetFileName(match.RelativePath), entry, StringComparison.OrdinalIgnoreCase))
+                    return match;
             }
         }
 
-        return ChildEntryOf(row.Children[0]);
+        return row.Children[0];
     }
-
-    private static string? ChildEntryOf(ResourceRow child) =>
-        child.ArchiveEntry.Length > 0 ? child.ArchiveEntry : child.FilePath;
 
     private string ExtractInnerPackage(string zipPath, string entrySpec, CancellationToken ct)
     {

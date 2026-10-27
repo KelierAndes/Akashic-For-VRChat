@@ -15,7 +15,7 @@ public sealed partial class PrefabParser
         "m_GameObject", "m_Enabled", "m_EditorHideFlags", "m_Script", "m_Name", "m_EditorClassIdentifier"
     };
 
-    private const string MaterialCacheVersion = "material-v7";
+    private const string MaterialCacheVersion = "material-v9";
 
     private readonly UnityMetaIndex _index;
     private readonly string _root;
@@ -401,6 +401,7 @@ public sealed partial class PrefabParser
                 if (shaderRef.IsExternal)
                 {
                     material.Shader = ResolveShader(shaderRef.Guid);
+                    material.BuiltInShader = BuiltInShaderName(shaderRef);
                     ApplyShader(material);
                 }
 
@@ -509,9 +510,62 @@ public sealed partial class PrefabParser
     private const string BuiltInStandardGuid = "0000000000000000f000000000000000";
     private const string BuiltInExtraGuid = "0000000000000000e000000000000000";
 
+    private static readonly HashSet<string> UnlitBuiltInShaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Sprites/Default", "Sprites/Diffuse", "UI/Default",
+        "Unlit/Color", "Unlit/Texture", "Unlit/Transparent"
+    };
+
+    private static string BuiltInShaderName(Ref reference)
+    {
+        if (!string.Equals(reference.Guid, BuiltInStandardGuid, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(reference.Guid, BuiltInExtraGuid, StringComparison.OrdinalIgnoreCase))
+            return string.Empty;
+
+        return reference.FileId switch
+        {
+            46 => "Standard",
+            47 => "Standard (Specular)",
+            10750 => "Legacy Shaders/Diffuse",
+            10751 => "Legacy Shaders/VertexLit",
+            10752 => "Sprites/Default",
+            10753 => "Sprites/Diffuse",
+            10755 => "UI/Default",
+            _ => "内置着色器#" + reference.FileId
+        };
+    }
+
+    private static readonly string[] StandardMarkers =
+    [
+        "_Glossiness", "_Metallic", "_Mode", "_Parallax", "_DetailAlbedoMap", "_SmoothnessTextureChannel"
+    ];
+
+    private static bool LooksLikeUnityUi(PreviewMaterial material) =>
+        material.Colors.Keys.Any(key =>
+            key.Equals("_ClipRect", StringComparison.OrdinalIgnoreCase) ||
+            key.Equals("_ColorTint", StringComparison.OrdinalIgnoreCase)) ||
+        material.Floats.Keys.Any(key => key.Equals("_Stencil", StringComparison.OrdinalIgnoreCase));
+
+    private static bool LooksLikeStandard(PreviewMaterial material) =>
+        StandardMarkers.Any(key => material.Floats.ContainsKey(key));
+
     private void ApplyRenderState(PreviewMaterial material, string? shaderGuid, List<string> keywords)
     {
-        var builtInStandard = string.Equals(shaderGuid, BuiltInStandardGuid, StringComparison.OrdinalIgnoreCase)
+        // 材质引用的是内置着色器却认不出名字时（Unity 会把找不到的 Shader 换成内置兜底 id），按属性签名猜它原本是哪种。
+        if (material.BuiltInShader.StartsWith("内置着色器#", StringComparison.OrdinalIgnoreCase) &&
+            material.ShaderFamily != "lilToon" && material.Kind != "toon")
+        {
+            if (LooksLikeUnityUi(material)) material.BuiltInShader = "UI/Default";
+            else if (LooksLikeStandard(material)) material.BuiltInShader = "Standard";
+        }
+
+        if (material.BuiltInShader.Length > 0)
+        {
+            material.ShaderFamily = material.BuiltInShader;
+            if (UnlitBuiltInShaders.Contains(material.BuiltInShader)) material.Kind = "unlit";
+        }
+
+        var builtInStandard = material.BuiltInShader.StartsWith("Standard", StringComparison.OrdinalIgnoreCase)
                               || material.ShaderName.EndsWith("Standard", StringComparison.OrdinalIgnoreCase);
         if (builtInStandard)
         {
@@ -562,8 +616,6 @@ public sealed partial class PrefabParser
 
     private void ApplyLilToon(PreviewMaterial material, string? shaderGuid)
     {
-        if (string.Equals(shaderGuid, BuiltInStandardGuid, StringComparison.OrdinalIgnoreCase)) return;
-
         var probe = $"{material.ShaderName} {Path.GetFileNameWithoutExtension(material.Shader)}";
         var isLil = material.Floats.ContainsKey("_TransparentMode")
                     || material.Colors.ContainsKey("_1st_ShadeColor")

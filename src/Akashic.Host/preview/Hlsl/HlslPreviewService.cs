@@ -76,6 +76,8 @@ public sealed class HlslPreviewService : IDisposable
         var gizmoShader = options.Gizmo ? await _compiler.GetDebugAsync("gizmo", ct) : null;
         var fallbackOpaque = await _compiler.GetFallbackAsync(false, ct);
         var fallbackCutout = await _compiler.GetFallbackAsync(true, ct);
+        var fallbackUnlit = await _compiler.GetFallbackAsync(false, ct, unlit: true);
+        var notes = new List<string>();
 
         foreach (var material in scene.Materials)
         {
@@ -92,16 +94,32 @@ public sealed class HlslPreviewService : IDisposable
             }
 
             CompiledShader? shader = null;
-            if (File.Exists(material.Shader))
+            var shaderPath = material.Shader;
+            if (!File.Exists(shaderPath) || shaderPath.Length == 0)
             {
-                shader = await _compiler.GetAsync(material.Shader, scene.Root, material.Keywords,
+                var builtIn = material.BuiltInShader.Length > 0
+                    ? material.BuiltInShader
+                    : material.ShaderFamily == "Standard"
+                        ? "Standard"
+                        : string.Empty;
+                shaderPath = builtIn.Length > 0 ? _compiler.ResolveBuiltIn(builtIn) ?? shaderPath : shaderPath;
+            }
+
+            if (File.Exists(shaderPath))
+            {
+                shader = await _compiler.GetAsync(shaderPath, scene.Root, material.Keywords,
                     options.Outline && (material.UseOutline || material.OutlineWidth > 0.0001f), ct);
             }
 
             if (shader is null || !shader.Ok)
-                shader = string.Equals(material.AlphaMode, "mask", StringComparison.OrdinalIgnoreCase)
-                    ? fallbackCutout
-                    : fallbackOpaque;
+            {
+                notes.Add($"{material.Name} · {DescribeFallback(material, shader)}");
+                shader = material.Kind == "unlit"
+                    ? fallbackUnlit
+                    : string.Equals(material.AlphaMode, "mask", StringComparison.OrdinalIgnoreCase)
+                        ? fallbackCutout
+                        : fallbackOpaque;
+            }
 
             shaders[material] = shader;
         }
@@ -109,12 +127,33 @@ public sealed class HlslPreviewService : IDisposable
         await _renderGate.WaitAsync(ct);
         try
         {
-            return await Task.Run(() => _renderer!.Render(scene, shaders, fallbackOpaque, options), ct);
+            var frame = await Task.Run(() => _renderer!.Render(scene, shaders, fallbackOpaque, options), ct);
+            frame.FallbackNotes = notes.Distinct().ToList();
+            return frame;
         }
         finally
         {
             _renderGate.Release();
         }
+    }
+
+    private static string DescribeFallback(PreviewMaterial material, CompiledShader? shader)
+    {
+        if (shader is not null && !shader.Ok)
+        {
+            var error = shader.Error.Replace('\n', ' ').Trim();
+            if (error.Length > 120) error = error[..120] + "…";
+            return error.Length > 0 ? "着色器编译失败：" + error : "着色器编译失败";
+        }
+
+        if (material.Shader.Length == 0) return "这个材质没写着色器";
+
+        if (material.BuiltInShader.Length > 0)
+            return material.BuiltInShader.StartsWith("内置着色器", StringComparison.Ordinal)
+                ? material.BuiltInShader + "，用近似材质代替"
+                : "内置着色器 " + material.BuiltInShader + "，用近似材质代替";
+
+        return "找不到着色器文件 " + Path.GetFileName(material.Shader);
     }
 
     private Task<HlslSceneData> SceneAsync(PreviewBuildArtifacts artifacts, bool gizmo, CancellationToken ct)

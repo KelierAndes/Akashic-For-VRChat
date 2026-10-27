@@ -17,7 +17,8 @@ var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = ar
 builder.Logging.ClearProviders();
 var dataRoot = Path.Combine(
     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Akashic");
-PreviewCachePaths.Configure(ReadPreviewCacheSetting(Path.Combine(dataRoot, "settings.json")));
+var previewCache = ReadPreviewCacheSettings(Path.Combine(dataRoot, "settings.json"));
+PreviewCachePaths.Configure(previewCache.directory, previewCache.quota);
 var fileLogging = new SidecarFileLoggerProvider(Path.Combine(dataRoot, "logs", "host.log"));
 builder.Logging.AddProvider(fileLogging);
 builder.WebHost.ConfigureKestrel(kestrel =>
@@ -117,21 +118,31 @@ await app.WaitForShutdownAsync();
 await app.StopAsync();
 fileLogging.Dispose();
 
-static string? ReadPreviewCacheSetting(string settingsPath)
+static (string? directory, long quota) ReadPreviewCacheSettings(string settingsPath)
 {
     try
     {
-        if (!File.Exists(settingsPath)) return null;
+        if (!File.Exists(settingsPath)) return (null, 0);
+
         using var document = JsonDocument.Parse(File.ReadAllText(settingsPath));
-        if (document.RootElement.TryGetProperty("previewCacheDirectory", out var value) &&
-            value.ValueKind == JsonValueKind.String)
-            return value.GetString();
+        var root = document.RootElement;
+
+        var directory = root.TryGetProperty("previewCacheDirectory", out var dir) &&
+                        dir.ValueKind == JsonValueKind.String
+            ? dir.GetString()
+            : null;
+
+        var quota = root.TryGetProperty("previewCacheQuotaBytes", out var bytes) &&
+                    bytes.ValueKind == JsonValueKind.Number && bytes.TryGetInt64(out var value)
+            ? value
+            : 0L;
+
+        return (directory, quota);
     }
     catch (Exception)
     {
+        return (null, 0);
     }
-
-    return null;
 }
 
 static string Handshake(string url, SidecarOptions options)

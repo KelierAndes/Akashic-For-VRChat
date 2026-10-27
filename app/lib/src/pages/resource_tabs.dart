@@ -24,8 +24,31 @@ const resourceCategories = [
   '其他',
 ];
 
+bool resourceRowMatches(Map<String, dynamic> row, String needle) {
+  if (needle.isEmpty) return true;
+  for (final field in const [
+    'name',
+    'displayName',
+    'relativePath',
+    'filePath',
+    'boothShop',
+    'category',
+  ]) {
+    if ('${row[field]}'.toLowerCase().contains(needle)) return true;
+  }
+  final children = (row['children'] as List?) ?? const [];
+  return children.any(
+    (child) =>
+        child is Map &&
+        resourceRowMatches(child.cast<String, dynamic>(), needle),
+  );
+}
+
 class UserPackagesTab extends StatefulWidget {
-  const UserPackagesTab({super.key});
+  const UserPackagesTab({super.key, this.query = '', this.onOpenPackage});
+
+  final String query;
+  final void Function(Map<String, dynamic> target)? onOpenPackage;
 
   @override
   State<UserPackagesTab> createState() => _UserPackagesTabState();
@@ -90,16 +113,22 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     return '共 ${_rows.length} 个包 · 未匹配 $unmatched · Booth $booth · Asset Store $store';
   }
 
-  List<Map<String, dynamic>> get _shown => _rows.where((row) {
-    final source = '${row['matchSource']}';
-    return switch (_filter) {
-      '未匹配' => row['matched'] != true,
-      '全部' => true,
-      'Booth' => source == 'Booth',
-      'Asset Store' => source == 'AssetStore',
-      _ => '${row['category']}' == _filter,
-    };
-  }).toList();
+  List<Map<String, dynamic>> get _shown {
+    final needle = widget.query.toLowerCase();
+    if (needle.isNotEmpty) {
+      return _rows.where((row) => resourceRowMatches(row, needle)).toList();
+    }
+    return _rows.where((row) {
+      final source = '${row['matchSource']}';
+      return switch (_filter) {
+        '未匹配' => row['matched'] != true,
+        '全部' => true,
+        'Booth' => source == 'Booth',
+        'Asset Store' => source == 'AssetStore',
+        _ => '${row['category']}' == _filter,
+      };
+    }).toList();
+  }
 
   Future<void> _startMatch({bool force = false}) async {
     final host = AppScope.of(context).host;
@@ -187,8 +216,24 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     var target = row;
     final children = ((row['children'] as List?) ?? const [])
         .cast<Map<String, dynamic>>();
-    if (resourceKey == null && children.isNotEmpty) target = children.first;
+    if (resourceKey == null && children.isNotEmpty) {
+      target = children.firstWhere(
+        (child) => '${child['kind']}' == 'unitypackage',
+        orElse: () => children.first,
+      );
+    }
     if ('${target['kind']}' != 'unitypackage') return;
+
+    final key = resourceKey ?? '${target['key']}';
+    final open = widget.onOpenPackage;
+    if (open != null) {
+      open({
+        'resourceKey': key,
+        'resourceName': '${target['name']}',
+        'entry': entry,
+      });
+      return;
+    }
 
     final tokens = NeuTheme.of(context);
     Navigator.of(context).push(
@@ -197,7 +242,7 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
           tokens: tokens,
           child: PreviewPage(
             host: host,
-            resourceKey: resourceKey ?? '${target['key']}',
+            resourceKey: key,
             resourceName: '${target['name']}',
             entry: entry,
           ),
@@ -511,9 +556,7 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                 padding: const EdgeInsets.only(left: 77, top: 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (final child in kids) _childRow(child),
-                  ],
+                  children: [for (final child in kids) _childRow(child)],
                 ),
               ),
           ],
@@ -632,7 +675,10 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
 }
 
 class BoothShelfTab extends StatefulWidget {
-  const BoothShelfTab({super.key});
+  const BoothShelfTab({super.key, this.query = '', this.onOpenPackage});
+
+  final String query;
+  final void Function(Map<String, dynamic> target)? onOpenPackage;
 
   @override
   State<BoothShelfTab> createState() => _BoothShelfTabState();
@@ -640,6 +686,7 @@ class BoothShelfTab extends StatefulWidget {
 
 class _BoothShelfTabState extends State<BoothShelfTab> {
   List<Map<String, dynamic>> _rows = [];
+  final Set<String> _open = {};
   String _category = '全部分类';
   String _status = '';
 
@@ -677,9 +724,15 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
     },
   ];
 
-  List<Map<String, dynamic>> get _shown => _category == '全部分类'
-      ? _rows
-      : _rows.where((row) => '${row['category']}' == _category).toList();
+  List<Map<String, dynamic>> get _shown {
+    final needle = widget.query.toLowerCase();
+    if (needle.isNotEmpty) {
+      return _rows.where((row) => resourceRowMatches(row, needle)).toList();
+    }
+    return _category == '全部分类'
+        ? _rows
+        : _rows.where((row) => '${row['category']}' == _category).toList();
+  }
 
   Future<void> _edit(Map<String, dynamic> row) async {
     final model = AppScope.of(context);
@@ -713,6 +766,28 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
     final host = AppScope.of(context).host;
     if (host == null) return;
 
+    var target = row;
+    final children = ((row['children'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    if (children.isNotEmpty) {
+      target = children.firstWhere(
+        (child) => '${child['kind']}' == 'unitypackage',
+        orElse: () => children.first,
+      );
+    }
+    if ('${target['kind']}' != 'unitypackage') return;
+
+    final key = '${target['key']}';
+    final open = widget.onOpenPackage;
+    if (open != null) {
+      open({
+        'resourceKey': key,
+        'resourceName': '${target['name']}',
+        'entry': null,
+      });
+      return;
+    }
+
     final tokens = NeuTheme.of(context);
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -720,10 +795,183 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
           tokens: tokens,
           child: PreviewPage(
             host: host,
-            resourceKey: '${row['key']}',
-            resourceName: '${row['name']}',
+            resourceKey: key,
+            resourceName: '${target['name']}',
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _shelfCard(Map<String, dynamic> row) {
+    final t = NeuTheme.of(context);
+    final key = '${row['key']}';
+    final kids = ((row['children'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+    final open = _open.contains(key);
+    final container = kids.isNotEmpty;
+
+    final card = NeuCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
+        children: [
+          NeuCover('${row['coverUrl']}'),
+          const SizedBox(width: 13),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _preview(row),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${row['name']}',
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    container
+                        ? '含 ${kids.length} 个 .unitypackage · ${row['boothShop']}'
+                        : '${row['boothShop']} · ${row['filePath']}',
+                    style: TextStyle(fontSize: 11, color: t.inkTertiary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          NeuPill('${row['category']}'.isEmpty ? '其他' : '${row['category']}'),
+          const SizedBox(width: 8),
+          _IconPoke(
+            icon: Icons.open_in_new_rounded,
+            tooltip: '打开商品页',
+            enabled: '${row['sourceUrl']}'.isNotEmpty,
+            onTap: () {
+              final url = '${row['sourceUrl']}';
+              if (url.isNotEmpty) {
+                AppScope.of(context).openUrl(url);
+              }
+            },
+          ),
+          const SizedBox(width: 6),
+          _IconPoke(
+            icon: Icons.view_in_ar_outlined,
+            tooltip: '预览 prefab 模型与组件',
+            enabled: true,
+            onTap: () => _preview(row),
+          ),
+          const SizedBox(width: 6),
+          _IconPoke(
+            icon: Icons.edit_outlined,
+            tooltip: '编辑分类、标签、源链接与封面',
+            enabled: true,
+            onTap: () => _edit(row),
+          ),
+          if (container) ...[
+            const SizedBox(width: 6),
+            _IconPoke(
+              icon: open
+                  ? Icons.expand_less_rounded
+                  : Icons.expand_more_rounded,
+              tooltip: open ? '收起压缩包内容' : '展开压缩包内容',
+              enabled: true,
+              onTap: () => setState(() {
+                if (open) {
+                  _open.remove(key);
+                } else {
+                  _open.add(key);
+                }
+              }),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (!container || !open) return card;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        card,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(28, 8, 0, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [for (final child in kids) _shelfChild(child)],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _shelfChild(Map<String, dynamic> child) {
+    final t = NeuTheme.of(context);
+    final source = '${child['matchSource']}';
+    final relative = '${child['relativePath']}';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Row(
+        children: [
+          Icon(Icons.inventory_2_outlined, size: 14, color: t.inkTertiary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${child['name']}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (relative.contains('/'))
+                  Text(
+                    relative,
+                    style: TextStyle(fontSize: 10, color: t.inkTertiary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+          if ('${child['category']}'.isNotEmpty) ...[
+            NeuPill('${child['category']}'),
+            const SizedBox(width: 6),
+          ],
+          if (source.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.only(right: 6),
+              child: NeuPill(
+                'Booth',
+                bg: Color(0xFFBFE3C9),
+                fg: Color(0xFF237A45),
+              ),
+            ),
+          IconButton(
+            tooltip: '预览这个包',
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _preview(child),
+            icon: Icon(Icons.view_in_ar_outlined, color: t.inkSecondary),
+          ),
+          IconButton(
+            tooltip: '编辑这个包',
+            iconSize: 16,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => _edit(child),
+            icon: Icon(Icons.edit_outlined, color: t.inkSecondary),
+          ),
+        ],
       ),
     );
   }
@@ -779,75 +1027,7 @@ class _BoothShelfTabState extends State<BoothShelfTab> {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final row = shown[index];
-                    return NeuCard(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 13,
-                      ),
-                      child: Row(
-                        children: [
-                          NeuCover('${row['coverUrl']}'),
-                          const SizedBox(width: 13),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${row['name']}',
-                                  style: const TextStyle(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  '${row['boothShop']} · ${row['filePath']}',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: t.inkTertiary,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          NeuPill(
-                            '${row['category']}'.isEmpty
-                                ? '其他'
-                                : '${row['category']}',
-                          ),
-                          const SizedBox(width: 8),
-                          _IconPoke(
-                            icon: Icons.open_in_new_rounded,
-                            tooltip: '打开商品页',
-                            enabled: '${row['sourceUrl']}'.isNotEmpty,
-                            onTap: () {
-                              final url = '${row['sourceUrl']}';
-                              if (url.isNotEmpty) {
-                                AppScope.of(context).openUrl(url);
-                              }
-                            },
-                          ),
-                          const SizedBox(width: 6),
-                          _IconPoke(
-                            icon: Icons.view_in_ar_outlined,
-                            tooltip: '预览 prefab 模型与组件',
-                            enabled: true,
-                            onTap: () => _preview(row),
-                          ),
-                          const SizedBox(width: 6),
-                          _IconPoke(
-                            icon: Icons.edit_outlined,
-                            tooltip: '编辑分类、标签、源链接与封面',
-                            enabled: true,
-                            onTap: () => _edit(row),
-                          ),
-                        ],
-                      ),
-                    );
+                    return _shelfCard(row);
                   },
                 ),
         ),

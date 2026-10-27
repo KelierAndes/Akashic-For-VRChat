@@ -63,8 +63,11 @@ class _NavPanelState extends State<NavPanel> {
                 radius: 8,
                 depth: 4,
                 onTap: widget.onToggle,
-                child: Icon(Icons.picture_in_picture_alt_outlined,
-                    size: 16, color: t.inkSecondary),
+                child: Icon(
+                  Icons.picture_in_picture_alt_outlined,
+                  size: 16,
+                  color: t.inkSecondary,
+                ),
               ),
             ),
             Expanded(
@@ -97,14 +100,22 @@ class _NavPanelState extends State<NavPanel> {
                   const SizedBox(height: 18),
                   for (var i = 0; i < AppNav.entries.length; i++) ...[
                     if (AppNav.entries[i].section != null) ...[
-                      if (i > 0) const NeuDivider(margin: EdgeInsets.symmetric(vertical: 8, horizontal: 6)),
+                      if (i > 0)
+                        const NeuDivider(
+                          margin: EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 6,
+                          ),
+                        ),
                       _SectionLabel(AppNav.entries[i].section!),
                     ],
                     _NavItem(
                       icon: AppNav.entries[i].icon,
                       label: AppNav.entries[i].label,
                       count: widget.badges[AppNav.entries[i].id],
-                      dot: AppNav.entries[i].id == 'settings' && model.updateAvailable,
+                      dot:
+                          AppNav.entries[i].id == 'settings' &&
+                          model.updateAvailable,
                       selected: widget.navIndex == i,
                       onTap: () => widget.onNavChanged(i),
                     ),
@@ -113,8 +124,8 @@ class _NavPanelState extends State<NavPanel> {
               ),
             ),
             const NeuDivider(
-                margin:
-                    EdgeInsets.symmetric(vertical: 8, horizontal: 14)),
+              margin: EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
               child: Row(
@@ -153,8 +164,7 @@ class _AccountTile extends StatelessWidget {
   final Map<String, dynamic> github;
   final Map<String, dynamic> sync;
 
-  String get _title =>
-      github['signedIn'] == true ? '${github['login']}' : name;
+  String get _title => github['signedIn'] == true ? '${github['login']}' : name;
 
   String get _subline {
     if (github.isEmpty) return detail;
@@ -194,14 +204,22 @@ class _AccountTile extends StatelessWidget {
               boxShadow: neuRaised(depth: 5, dark: t.shadowDark),
             ),
             child: signedIn && avatar.isNotEmpty
-                ? Image.network(avatar,
+                ? Image.network(
+                    avatar,
                     width: 48,
                     height: 48,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => const Icon(Icons.person_rounded,
-                        color: Colors.white, size: 26))
-                : const Icon(Icons.person_rounded,
-                    color: Colors.white, size: 26),
+                    errorBuilder: (_, _, _) => const Icon(
+                      Icons.person_rounded,
+                      color: Colors.white,
+                      size: 26,
+                    ),
+                  )
+                : const Icon(
+                    Icons.person_rounded,
+                    color: Colors.white,
+                    size: 26,
+                  ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -320,15 +338,16 @@ class _NavItem extends StatelessWidget {
                 height: 8,
                 margin: const EdgeInsets.only(right: 6),
                 decoration: const BoxDecoration(
-                    color: Color(0xFF3E9E63), shape: BoxShape.circle),
+                  color: Color(0xFF3E9E63),
+                  shape: BoxShape.circle,
+                ),
               ),
             if (count != null)
               NeuBox(
                 mode: NeuMode.inset,
                 radius: 20,
                 depth: 2.5,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 child: Text(
                   '$count',
                   style: TextStyle(fontSize: 11, color: t.inkSecondary),
@@ -355,7 +374,7 @@ class _SearchResults extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
         child: Text(
-          model.searchBusy ? '正在搜索…' : '没有匹配的项目或软件包。',
+          model.searchBusy ? '正在搜索…' : '没有匹配的项目或包。',
           style: TextStyle(fontSize: 12, color: t.inkTertiary),
         ),
       );
@@ -392,6 +411,21 @@ class _SearchResults extends StatelessWidget {
               },
             ),
         ],
+        if (model.searchLibrary.isNotEmpty) ...[
+          _ResultGroup('本地 .unitypackage'),
+          for (final row in model.searchLibrary)
+            _ResultRow(
+              icon: Icons.inventory_2_outlined,
+              title: '${row['name']}',
+              detail: '${row['relativePath']}'.isNotEmpty
+                  ? '${row['relativePath']}'
+                  : '${row['filePath']}',
+              onTap: () {
+                onPicked();
+                model.openSearchLibrary(row);
+              },
+            ),
+        ],
       ],
     );
   }
@@ -407,11 +441,14 @@ class _ResultGroup extends StatelessWidget {
     final t = NeuTheme.of(context);
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
-      child: Text(text,
-          style: TextStyle(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-              color: t.inkTertiary)),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: t.inkTertiary,
+        ),
+      ),
     );
   }
 }
@@ -445,13 +482,19 @@ class _ResultRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title,
-                      style: const TextStyle(
-                          fontSize: 12.5, fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis),
-                  Text(detail,
-                      style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
-                      overflow: TextOverflow.ellipsis),
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    detail,
+                    style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ],
               ),
             ),

@@ -162,7 +162,7 @@ public partial class UnityPackageLibraryService
             }
 
             if (IsArchive(name))
-                AddArchiveLeaves(containers, containerKey, Path.GetFullPath(entry), relative, relative, 1, ct);
+                AddArchiveLeaves(containers, containerKey, Path.GetFullPath(entry), relative, string.Empty, 1, ct);
         }
     }
 
@@ -250,31 +250,16 @@ public partial class UnityPackageLibraryService
 
         if (!IsPackage(name)) return;
 
-        var identity = Identity(name, entrySpec is null ? PhysicalSize(filePath) : stamp.Size);
-
-        if (entrySpec is not null)
+        if (container.Leaves.TryGetValue(relative, out var existing))
         {
-            // 同一个包既在压缩包里又以解包后的文件存在时，只保留磁盘上那份。
-            if (container.Leaves.ContainsKey(relative) || container.Physical.Contains(identity)) return;
-        }
-        else
-        {
-            container.Physical.Add(identity);
+            // 压缩包里的条目优先：预览要靠 ArchiveEntry 从 zip 里取，不能被 -extracted 里的同名文件顶掉。
+            if (entrySpec is null || existing.ArchiveEntry.Length > 0) return;
         }
 
         var leaf = BuildLeaf(filePath, entrySpec, stamp, containerKey, relative);
         if (leaf is null) return;
 
         container.Leaves[relative] = leaf;
-    }
-
-    private static string Identity(string name, long size) => $"{name}|{size}";
-
-    private static long PhysicalSize(string path)
-    {
-        try { return new FileInfo(path).Length; }
-        catch (IOException) { return -1; }
-        catch (UnauthorizedAccessException) { return -1; }
     }
 
     private ResourceRow? BuildLeaf(string filePath, string? entrySpec, (long Size, DateTime Modified) stamp,
@@ -326,6 +311,18 @@ public partial class UnityPackageLibraryService
 
     private ResourceRow? BuildContainer(ContainerBuild container)
     {
+        if (container.ZipPath is not null)
+        {
+            var fromArchive = container.Leaves.Where(pair => pair.Value.ArchiveEntry.Length > 0).ToList();
+            if (fromArchive.Count > 0)
+            {
+                foreach (var pair in container.Leaves
+                             .Where(pair => pair.Value.ArchiveEntry.Length == 0)
+                             .ToList())
+                    container.Leaves.Remove(pair.Key);
+            }
+        }
+
         if (container.Leaves.Count == 0) return null;
 
         var zip = container.ZipPath;
@@ -428,7 +425,5 @@ public partial class UnityPackageLibraryService
         public string? FolderPath { get; set; }
 
         public Dictionary<string, ResourceRow> Leaves { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-        public HashSet<string> Physical { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 }

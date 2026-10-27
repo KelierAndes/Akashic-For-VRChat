@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Akashic.Core.Data;
 using Akashic.Core.Models;
+using Akashic.Core.Services.Preview;
 
 namespace Akashic.Core.Services;
 
@@ -58,12 +59,15 @@ public sealed class ConfigSyncService : IConfigSyncService
     private readonly AkashicDatabase _db;
     private readonly IAssetStoreService? _assetStore;
     private readonly IResourceCatalogService? _resources;
+    private readonly IThemeService? _theme;
+    private readonly IRailLayoutService? _rail;
     private readonly string _settingsPath;
     private readonly string _dataDir;
 
     public ConfigSyncService(ISessionVault vault, GitHubCli gitHub, string? settingsPath = null,
         AkashicDatabase? database = null, IAssetStoreService? assetStore = null,
-        IResourceCatalogService? resources = null)
+        IResourceCatalogService? resources = null, IThemeService? theme = null,
+        IRailLayoutService? rail = null)
     {
         _vault = vault;
         _gitHub = gitHub;
@@ -72,6 +76,8 @@ public sealed class ConfigSyncService : IConfigSyncService
         _db = database ?? new AkashicDatabase(_dataDir);
         _assetStore = assetStore;
         _resources = resources;
+        _theme = theme;
+        _rail = rail;
     }
 
     private static string DataRoot => Path.Combine(
@@ -96,7 +102,7 @@ public sealed class ConfigSyncService : IConfigSyncService
         var identity = exe == null ? null : await _gitHub.IdentityAsync(ct);
         var settings = LoadSettings();
 
-        var included = new List<string> { "设置（工程列表、路径、模板、快捷栏、主题与透明度）" };
+        var included = new List<string> { "设置（工程列表、路径、模板、快捷栏、主题、透明度与预览缓存）" };
         included.AddRange(ActiveCacheLabels());
         included.AddRange(Sessions
             .Where(site => _vault.Load(site.Site)?.Cookies.Count > 0)
@@ -479,10 +485,16 @@ public sealed class ConfigSyncService : IConfigSyncService
         _db.ImportSnapshots();
         _assetStore?.ReloadCaches();
         _resources?.ReloadMeta();
+        _theme?.Reload();
+        _rail?.Reload();
+
+        var applied = LoadSettings();
+        PreviewCachePaths.Configure(applied.PreviewCacheDirectory, applied.PreviewCacheQuotaBytes);
 
         var output = $"已还原 {written.Count} 项：{string.Join(" · ", written)}";
         if (skipped.Count > 0) output += $"\n\n跳过 {skipped.Count} 项：{string.Join(" · ", skipped)}";
-        output += "\n\n登录态、清单缓存、主题与透明度、快捷栏立即可用；工程列表与其他设置在重启 Akashic 后生效。";
+        output += "\n\n登录态、清单缓存、主题与透明度、快捷栏、预览缓存目录与上限立即可用；" +
+                  "工程列表与其他设置在重启 Akashic 后生效。";
 
         return VcsRunResult.Ok("sync-pull", string.Empty,
             $"配置已还原（{restored} 站登录态）", output);

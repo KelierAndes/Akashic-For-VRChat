@@ -27,6 +27,10 @@ public interface IProjectService
 
     Task<string> SetPreviewCacheDirectoryAsync(string directory);
 
+    long GetPreviewCacheQuota();
+
+    Task<long> SetPreviewCacheQuotaAsync(long bytes);
+
     bool BackupExcludesPackages { get; }
 
     Task SetBackupExcludesPackagesAsync(bool exclude);

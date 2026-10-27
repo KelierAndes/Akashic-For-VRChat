@@ -44,6 +44,9 @@ public class AppSettings
     [JsonPropertyName("previewCacheDirectory")]
     public string PreviewCacheDirectory { get; set; } = string.Empty;
 
+    [JsonPropertyName("previewCacheQuotaBytes")]
+    public long PreviewCacheQuotaBytes { get; set; } = 8L * 1024 * 1024 * 1024;
+
     [JsonPropertyName("unityPackageLibraryPaths")]
     public List<string> UnityPackageLibraryPaths { get; set; } = [];
     [JsonPropertyName("unityPackageFiles")]

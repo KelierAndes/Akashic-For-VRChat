@@ -36,6 +36,24 @@ public sealed class ShaderCompileService
 
     public string? ToolError => _fxc is null ? "找不到随包的 fxc 编译器。" : null;
 
+    public string BuiltInStandardPath => Path.Combine(_shimRoot, "Standard.shader");
+
+    public string BuiltInUiPath => Path.Combine(_shimRoot, "UIDefault.shader");
+
+    public string? ResolveBuiltIn(string shaderName)
+    {
+        if (shaderName.StartsWith("Standard", StringComparison.OrdinalIgnoreCase) &&
+            File.Exists(BuiltInStandardPath))
+            return BuiltInStandardPath;
+
+        var ui = shaderName.StartsWith("UI/", StringComparison.OrdinalIgnoreCase) ||
+                 shaderName.StartsWith("Sprites/", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(shaderName, "Unlit/Texture", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(shaderName, "Unlit/Color", StringComparison.OrdinalIgnoreCase);
+
+        return ui && File.Exists(BuiltInUiPath) ? BuiltInUiPath : null;
+    }
+
     public async Task<CompiledShader> GetAsync(string shaderPath, string contentRoot,
         IReadOnlyList<string> keywords, bool includeOutline, CancellationToken ct)
     {
@@ -188,9 +206,9 @@ public sealed class ShaderCompileService
         }
     }
 
-    public async Task<CompiledShader> GetFallbackAsync(bool alphaTest, CancellationToken ct)
+    public async Task<CompiledShader> GetFallbackAsync(bool alphaTest, CancellationToken ct, bool unlit = false)
     {
-        var key = "fallback-" + (alphaTest ? "cutout" : "opaque");
+        var key = unlit ? "fallback-unlit" : "fallback-" + (alphaTest ? "cutout" : "opaque");
         if (_memory.TryGetValue(key, out var memory)) return memory;
 
         await _gate.WaitAsync(ct);
@@ -217,7 +235,7 @@ public sealed class ShaderCompileService
                 }
             }
 
-            var compiled = await CompileFallbackCoreAsync(key, alphaTest, ct);
+            var compiled = await CompileFallbackCoreAsync(key, alphaTest, ct, unlit);
             if (compiled.Ok)
                 await File.WriteAllTextAsync(metaPath, JsonSerializer.Serialize(compiled, JsonOptions), ct);
             _memory[key] = compiled;
@@ -229,12 +247,13 @@ public sealed class ShaderCompileService
         }
     }
 
-    private async Task<CompiledShader> CompileFallbackCoreAsync(string key, bool alphaTest, CancellationToken ct)
+    private async Task<CompiledShader> CompileFallbackCoreAsync(string key, bool alphaTest, CancellationToken ct,
+        bool unlit = false)
     {
         var result = new CompiledShader
         {
             ShaderPath = _fallbackSource,
-            ShaderName = "Akashic/FallbackLit",
+            ShaderName = unlit ? "Akashic/FallbackUnlit" : "Akashic/FallbackLit",
             Fallback = true
         };
 
@@ -246,7 +265,9 @@ public sealed class ShaderCompileService
 
         var dir = Path.Combine(_root, key);
         Directory.CreateDirectory(dir);
-        var defines = alphaTest ? new List<string> { "_ALPHATEST_ON" } : [];
+        var defines = new List<string>();
+        if (alphaTest) defines.Add("_ALPHATEST_ON");
+        if (unlit) defines.Add("AKASHIC_UNLIT");
         var (pass, log) = await CompilePassAsync(dir, 0, "Fallback", false,
             new ShaderLabPassInfo { Name = "Fallback", LightMode = "ForwardBase" },
             File.ReadAllText(_fallbackSource), "vert", "frag", defines,

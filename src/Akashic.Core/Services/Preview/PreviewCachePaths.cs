@@ -5,9 +5,12 @@ public static class PreviewCachePaths
     private static readonly object Gate = new();
     private static readonly string[] GcSections = ["packages", "builds", "archives", "textures"];
 
-    public const long QuotaBytes = 8L * 1024 * 1024 * 1024;
+    public const long DefaultQuotaBytes = 8L * 1024 * 1024 * 1024;
+    public const long MinQuotaBytes = 2L * 1024 * 1024 * 1024;
+    public const long MaxQuotaBytes = 128L * 1024 * 1024 * 1024;
 
     private static string _root = string.Empty;
+    private static long _quota = DefaultQuotaBytes;
 
     public static string Root
     {
@@ -18,6 +21,17 @@ public static class PreviewCachePaths
                 if (_root.Length > 0) return _root;
                 _root = Ensure(DefaultDirectory());
                 return _root;
+            }
+        }
+    }
+
+    public static long Quota
+    {
+        get
+        {
+            lock (Gate)
+            {
+                return _quota;
             }
         }
     }
@@ -55,16 +69,19 @@ public static class PreviewCachePaths
         return cut <= 0 ? version : version[..cut];
     }
 
-    public static void EnforceQuota(long quota = QuotaBytes)
+    public static void EnforceQuota() => EnforceQuota(Quota);
+
+    public static void EnforceQuota(long quota)
     {
-        var total = MeasureBytes(Root);
+        var root = Root;
+        var total = MeasureBytes(root);
         if (total <= quota) return;
 
         var entries = new List<(string Path, long Size, DateTime Modified)>();
 
         foreach (var section in GcSections)
         {
-            var container = Path.Combine(Root, section);
+            var container = Path.Combine(root, section);
             if (!Directory.Exists(container)) continue;
 
             foreach (var version in Enumerate(container, Directory.EnumerateDirectories))
@@ -98,16 +115,33 @@ public static class PreviewCachePaths
         catch (Exception) { return DateTime.MinValue; }
     }
 
-    public static string Configure(string? configured)
+    public static string Configure(string? configured, long? quotaBytes = null)
     {
         lock (Gate)
         {
             _root = Ensure(string.IsNullOrWhiteSpace(configured)
                 ? DefaultDirectory()
                 : configured);
+
+            if (quotaBytes > 0) _quota = ClampQuota(quotaBytes);
+            else if (_quota <= 0) _quota = DefaultQuotaBytes;
+
             return _root;
         }
     }
+
+    public static long ConfigureQuota(long quotaBytes)
+    {
+        lock (Gate)
+        {
+            _quota = ClampQuota(quotaBytes);
+            return _quota;
+        }
+    }
+
+    private static long ClampQuota(long? quotaBytes) => quotaBytes is null or <= 0
+        ? DefaultQuotaBytes
+        : Math.Clamp(quotaBytes.Value, MinQuotaBytes, MaxQuotaBytes);
 
     public static string DefaultDirectory() =>
         Path.Combine(AppContext.BaseDirectory, "cache", "preview");

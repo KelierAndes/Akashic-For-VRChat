@@ -53,6 +53,8 @@ public sealed class RenderFrame
 
     public int Fallbacks { get; set; }
 
+    public List<string> FallbackNotes { get; set; } = [];
+
     public string? Warning { get; set; }
 }
 
@@ -154,15 +156,15 @@ public sealed class D3D11PreviewRenderer : IDisposable
     public RenderFrame Render(HlslSceneData scene, IReadOnlyDictionary<PreviewMaterial, CompiledShader> shaders,
         CompiledShader fallbackShader, RenderOptions options)
     {
-        var width = Math.Clamp(options.Width, 128, 2048);
-        var height = Math.Clamp(options.Height, 128, 2048);
+        var width = Math.Clamp(options.Width, 128, 4096);
+        var height = Math.Clamp(options.Height, 128, 4096);
         EnsureTargets(width, height);
 
         var mode = (options.Mode ?? "textured").ToLowerInvariant();
         var debug = mode is "clay" or "wireframe";
         var wireframe = mode == "wireframe";
         var key = scene.SessionId + "|" + options.Outline + "|" + mode + "|" + options.Gizmo + "|" +
-                  options.LightBackground;
+                  options.LightBackground + "|" + ShaderSignature(scene, shaders, fallbackShader);
         if (!string.Equals(_sessionKey, key, StringComparison.Ordinal) || _session is null)
         {
             _session?.Dispose();
@@ -214,6 +216,20 @@ public sealed class D3D11PreviewRenderer : IDisposable
             Materials = _session.Materials,
             Fallbacks = _session.Fallbacks
         };
+    }
+
+    private static string ShaderSignature(HlslSceneData scene,
+        IReadOnlyDictionary<PreviewMaterial, CompiledShader> shaders, CompiledShader fallback)
+    {
+        var parts = new List<string>(scene.Materials.Count);
+        foreach (var material in scene.Materials)
+        {
+            var shader = material is not null && shaders.TryGetValue(material, out var found) ? found : fallback;
+            parts.Add((material?.Path ?? material?.Name ?? "$default") + "=" + shader.ShaderPath +
+                      "#" + (shader.Ok ? "ok" : "bad"));
+        }
+
+        return string.Join(";", parts);
     }
 
     private int DrawView(HlslSceneData scene, ViewSpec spec, int width, int height, float ticks,

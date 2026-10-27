@@ -100,6 +100,8 @@ public class PreviewMaterial
 
     public string ShaderName { get; set; } = string.Empty;
 
+    public string BuiltInShader { get; set; } = string.Empty;
+
     public string ShaderFamily { get; set; } = string.Empty;
 
     public string Pipeline { get; set; } = "builtin";

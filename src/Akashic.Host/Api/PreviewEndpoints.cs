@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.RegularExpressions;
 using Akashic.Core.Models;
 using Akashic.Core.Services.Preview;
@@ -19,7 +20,8 @@ public static partial class PreviewEndpoints
         [".png"] = "image/png",
         [".jpg"] = "image/jpeg",
         [".jpeg"] = "image/jpeg",
-        [".svg"] = "image/svg+xml"
+        [".svg"] = "image/svg+xml",
+        [".pdf"] = "application/pdf"
     };
 
     private static readonly HashSet<string> BuildFiles = new(StringComparer.OrdinalIgnoreCase)
@@ -67,6 +69,12 @@ public static partial class PreviewEndpoints
                 var frame = await hlsl.RenderAsync(options, ct);
                 context.Response.Headers["X-Akashic-Draws"] = frame.DrawCalls.ToString();
                 context.Response.Headers["X-Akashic-Fallbacks"] = frame.Fallbacks.ToString();
+                if (frame.FallbackNotes.Count > 0)
+                {
+                    context.Response.Headers["X-Akashic-Fallback-Detail"] =
+                        Uri.EscapeDataString(string.Join(" | ", frame.FallbackNotes.Take(8)));
+                }
+
                 context.Response.Headers["Cache-Control"] = "no-store";
                 return Results.Bytes(frame.Jpeg, "image/jpeg");
             }
@@ -139,12 +147,59 @@ public static partial class PreviewEndpoints
             try
             {
                 var full = await preview.AssetAsync(resource, Query(context, "entry"), relative, ct);
+
+                if (Path.GetExtension(full).Equals(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.Headers["Cache-Control"] = "no-store";
+                    return Results.File(full, "application/pdf", enableRangeProcessing: true);
+                }
+
                 var (target, contentType) = textures.Resolve(full);
                 return Results.File(target, contentType, enableRangeProcessing: true);
             }
             catch (Exception)
             {
                 return Results.NotFound();
+            }
+        });
+
+        app.MapGet("/preview/{token}/text", async Task<IResult> (string token, HttpContext context,
+            IPreviewService preview, CancellationToken ct) =>
+        {
+            var resource = Query(context, "k");
+            var relative = Query(context, "p");
+            if (resource.Length == 0 || relative.Length == 0) return Results.NotFound();
+
+            var limit = Math.Clamp(ParseInt(Query(context, "limit"), 200_000), 1024, 2_000_000);
+
+            try
+            {
+                var full = await preview.AssetAsync(resource, Query(context, "entry"), relative, ct);
+                var info = new FileInfo(full);
+                if (!info.Exists) return Results.NotFound();
+
+                if (info.Length > 32L * 1024 * 1024)
+                    return Results.Problem("这个文件超过 32 MB，不适合按文本预览。", statusCode: 413,
+                        title: "preview-text");
+
+                var bytes = await File.ReadAllBytesAsync(full, ct);
+                var decoded = DecodeText(bytes, limit);
+
+                if (decoded is null)
+                    return Results.Problem("这是二进制文件，没有可显示的文本内容。", statusCode: 415, title: "preview-text");
+
+                context.Response.Headers["Cache-Control"] = "no-store";
+                return Results.Json(new
+                {
+                    text = decoded.Value.Text,
+                    encoding = decoded.Value.Encoding,
+                    size = info.Length,
+                    truncated = decoded.Value.Truncated
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 422, title: "preview-text");
             }
         });
 
@@ -155,7 +210,8 @@ public static partial class PreviewEndpoints
             var relative = Query(context, "p");
             if (resource.Length == 0 || relative.Length == 0) return Results.NotFound();
 
-            var size = Math.Clamp(ParseInt(Query(context, "size"), 512), 128, 1024);
+            var size = Math.Clamp(ParseInt(Query(context, "size"), 512), 128, 1536);
+            var light = Query(context, "light") is "1" or "true";
 
             try
             {
@@ -167,7 +223,8 @@ public static partial class PreviewEndpoints
                     Height = size,
                     View = "iso",
                     Mode = "textured",
-                    Outline = false
+                    Outline = false,
+                    LightBackground = light
                 }, ct);
 
                 context.Response.Headers["Cache-Control"] = "public, max-age=600";
@@ -184,6 +241,79 @@ public static partial class PreviewEndpoints
 
     private static string Query(HttpContext context, string key) =>
         context.Request.Query.TryGetValue(key, out var values) ? values.ToString() : string.Empty;
+
+    private static (string Text, string Encoding, bool Truncated)? DecodeText(byte[] bytes, int limit)
+    {
+        string raw;
+        string label;
+
+        if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
+        {
+            raw = Encoding.Unicode.GetString(bytes, 2, bytes.Length - 2);
+            label = "UTF-16 LE";
+        }
+        else if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
+        {
+            raw = Encoding.BigEndianUnicode.GetString(bytes, 2, bytes.Length - 2);
+            label = "UTF-16 BE";
+        }
+        else if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+        {
+            raw = Encoding.UTF8.GetString(bytes, 3, bytes.Length - 3);
+            label = "UTF-8";
+        }
+        else
+        {
+            if (LooksBinary(bytes)) return null;
+
+            string? decoded = null;
+            label = "UTF-8";
+
+            try
+            {
+                decoded = new UTF8Encoding(false, true).GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                label = "Shift-JIS";
+
+                try
+                {
+                    decoded = Encoding.GetEncoding(932).GetString(bytes);
+                }
+                catch (ArgumentException)
+                {
+                    decoded = null;
+                }
+            }
+
+            if (decoded is null)
+            {
+                decoded = Encoding.Latin1.GetString(bytes);
+                label = "Latin-1";
+            }
+
+            raw = decoded;
+        }
+
+        var truncated = raw.Length > limit;
+        var text = (truncated ? raw[..limit] : raw).Replace("\r\n", "\n").Replace('\r', '\n');
+        var builder = new StringBuilder(text.Length);
+
+        foreach (var character in text)
+            if (character >= ' ' || character is '\n' or '\t') builder.Append(character);
+
+        return (builder.ToString(), label, truncated);
+    }
+
+    private static bool LooksBinary(byte[] bytes)
+    {
+        var probe = Math.Min(bytes.Length, 4096);
+        for (var i = 0; i < probe; i++)
+            if (bytes[i] == 0) return true;
+
+        return false;
+    }
 
     private static int ParseInt(string text, int fallback) =>
         int.TryParse(text, out var value) ? value : fallback;

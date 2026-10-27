@@ -158,7 +158,15 @@ public sealed class GlbBuilder : IDisposable
             if (!unlit)
             {
                 var toon = source.Kind is "toon" or "liltoon";
-                material.WithMetallicRoughness(toon ? 0f : 0.05f, toon ? 0.95f : 0.65f);
+                var standard = !toon && (source.ShaderFamily == "Standard" ||
+                                         source.BuiltInShader.StartsWith("Standard", StringComparison.OrdinalIgnoreCase));
+                var metallic = standard && source.Floats.TryGetValue("_Metallic", out var metal)
+                    ? Math.Clamp(metal, 0f, 1f)
+                    : 0.05f;
+                var smoothness = standard && source.Floats.TryGetValue("_Glossiness", out var gloss)
+                    ? Math.Clamp(gloss, 0f, 1f)
+                    : 0.35f;
+                material.WithMetallicRoughness(toon ? 0f : metallic, toon ? 0.95f : 1f - smoothness);
 
                 var normal = LoadImage(source.NormalTexture);
                 if (normal is not null) material.WithNormal(normal, source.NormalScale);

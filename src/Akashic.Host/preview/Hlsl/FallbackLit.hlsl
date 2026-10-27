@@ -65,6 +65,14 @@ float4 frag(v2f i) : SV_Target
 #endif
 #endif
 
+    #ifdef AKASHIC_UNLIT
+    float4 flatColor = tex2D(_MainTex, i.uv) * _Color;
+#ifdef _ALPHATEST_ON
+    clip(flatColor.a - max(_Cutoff, 0.001));
+#endif
+    return flatColor;
+#endif
+
     float4 color = tex2D(_MainTex, i.uv) * _Color;
 
 #ifdef _ALPHATEST_ON

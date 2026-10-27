@@ -77,7 +77,10 @@ class AppModel extends ChangeNotifier {
     return rows;
   }
 
-  Future<List<dynamic>> installRecords(String path, {bool force = false}) async {
+  Future<List<dynamic>> installRecords(
+    String path, {
+    bool force = false,
+  }) async {
     final cached = _recordCache[path];
     if (!force && cached != null) return cached;
 
@@ -144,31 +147,32 @@ class AppModel extends ChangeNotifier {
       });
 
   Future<void> deleteTemplate(TemplateRow template) => _run((client) async {
-        await client.deleteTemplate(template.directory);
-        templates = await client.templates();
-        creation = await client.creationInput();
-        status = '已删除模板「${template.name}」';
-      });
+    await client.deleteTemplate(template.directory);
+    templates = await client.templates();
+    creation = await client.creationInput();
+    status = '已删除模板「${template.name}」';
+  });
 
-  Future<void> createProject(
-          {required String name,
-          required String? parent,
-          required String unityVersion,
-          required String? templateDirectory}) =>
-      _run((client) async {
-        await client.createProject(name, parent, unityVersion, templateDirectory);
-        projects = await client.projects();
-        state = await client.state();
-        status = '已创建 $name';
-      });
+  Future<void> createProject({
+    required String name,
+    required String? parent,
+    required String unityVersion,
+    required String? templateDirectory,
+  }) => _run((client) async {
+    await client.createProject(name, parent, unityVersion, templateDirectory);
+    projects = await client.projects();
+    state = await client.state();
+    status = '已创建 $name';
+  });
 
   Future<void> backupProject(UnityProject project) => _run((client) async {
-        final result = await client.backupProject(project.path);
-        status = result;
-        await refreshBackupCounts();
-      });
+    final result = await client.backupProject(project.path);
+    status = result;
+    await refreshBackupCounts();
+  });
 
-  Future<void> openFolder(String path) => _run((client) => client.openFolder(path));
+  Future<void> openFolder(String path) =>
+      _run((client) => client.openFolder(path));
 
   Future<void> openUrl(String url) => _run((client) => client.openUrl(url));
 
@@ -203,8 +207,8 @@ class AppModel extends ChangeNotifier {
   List<String> get railTiles => rail.isEmpty ? AppNav.defaultRail : rail;
 
   Map<String, int> get badges => {
-        if (projects.isNotEmpty) 'projects': projects.length,
-      };
+    if (projects.isNotEmpty) 'projects': projects.length,
+  };
 
   Future<void> setRail(List<String> next) async {
     rail = next;
@@ -242,17 +246,21 @@ class AppModel extends ChangeNotifier {
     setRail([...railTiles]..remove(raw));
   }
 
-
   String search = '';
   List<UnityProject> searchProjects = [];
   List<Map<String, dynamic>> searchPackages = [];
+  List<Map<String, dynamic>> searchLibrary = [];
   bool searchBusy = false;
   Timer? _searchTimer;
 
   String packageQuery = '';
+  String resourceQuery = '';
 
   bool get hasSearchResults =>
-      search.isNotEmpty && (searchProjects.isNotEmpty || searchPackages.isNotEmpty);
+      search.isNotEmpty &&
+      (searchProjects.isNotEmpty ||
+          searchPackages.isNotEmpty ||
+          searchLibrary.isNotEmpty);
 
   void runSearch(String value) {
     search = value.trim();
@@ -261,6 +269,7 @@ class AppModel extends ChangeNotifier {
     if (search.isEmpty) {
       searchProjects = [];
       searchPackages = [];
+      searchLibrary = [];
       searchBusy = false;
       notifyListeners();
       return;
@@ -278,9 +287,11 @@ class AppModel extends ChangeNotifier {
     final lower = query.toLowerCase();
     searchBusy = true;
     searchProjects = projects
-        .where((p) =>
-            p.name.toLowerCase().contains(lower) ||
-            p.path.toLowerCase().contains(lower))
+        .where(
+          (p) =>
+              p.name.toLowerCase().contains(lower) ||
+              p.path.toLowerCase().contains(lower),
+        )
         .take(8)
         .toList();
     notifyListeners();
@@ -294,9 +305,52 @@ class AppModel extends ChangeNotifier {
       searchPackages = [];
     }
 
+    notifyListeners();
+
+    try {
+      searchLibrary = _searchLocalPackages(await resourceRows(), lower);
+    } on HostException {
+      searchLibrary = [];
+    }
+
     if (search != query) return;
     searchBusy = false;
     notifyListeners();
+  }
+
+  List<Map<String, dynamic>> _searchLocalPackages(
+    List<dynamic> rows,
+    String lower,
+  ) {
+    final matches = <Map<String, dynamic>>[];
+
+    for (final raw in rows) {
+      if (raw is! Map) continue;
+      final row = Map<String, dynamic>.from(raw);
+      final children = ((row['children'] as List?) ?? const [])
+          .whereType<Map>()
+          .toList();
+
+      if (children.isNotEmpty) {
+        for (final child in children) {
+          final leaf = Map<String, dynamic>.from(child);
+          if ('${leaf['kind']}' != 'unitypackage') continue;
+          if (_matchesPackage(leaf, lower)) matches.add(leaf);
+        }
+      } else if ('${row['kind']}' == 'unitypackage' &&
+          _matchesPackage(row, lower)) {
+        matches.add(row);
+      }
+    }
+
+    return matches.take(8).toList();
+  }
+
+  static bool _matchesPackage(Map<String, dynamic> row, String lower) {
+    return '${row['name']}'.toLowerCase().contains(lower) ||
+        '${row['relativePath']}'.toLowerCase().contains(lower) ||
+        '${row['filePath']}'.toLowerCase().contains(lower) ||
+        '${row['boothShop']}'.toLowerCase().contains(lower);
   }
 
   void clearSearch() {
@@ -304,6 +358,7 @@ class AppModel extends ChangeNotifier {
     search = '';
     searchProjects = [];
     searchPackages = [];
+    searchLibrary = [];
     searchBusy = false;
     notifyListeners();
   }
@@ -320,9 +375,16 @@ class AppModel extends ChangeNotifier {
     jumpTo('packages');
   }
 
+  void openSearchLibrary(Map<String, dynamic> row) {
+    resourceQuery = '${row['name']}';
+    clearSearch();
+    jumpTo('resources');
+  }
+
   List<UnityProject> get visible {
     final shown = projects.where((p) {
-      if (category != categories.first && p.projectTypeDisplayName != category) {
+      if (category != categories.first &&
+          p.projectTypeDisplayName != category) {
         return false;
       }
       if (cloudFilter == cloudStates[1] && !p.hasCloudLink) return false;
@@ -333,7 +395,9 @@ class AppModel extends ChangeNotifier {
     if (sortBy == sortModes[1]) {
       shown.sort((a, b) => a.lastModified.compareTo(b.lastModified));
     } else if (sortBy == sortModes[2]) {
-      shown.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      shown.sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
     } else {
       shown.sort((a, b) => b.lastModified.compareTo(a.lastModified));
     }
@@ -344,8 +408,8 @@ class AppModel extends ChangeNotifier {
   String get listSummary => projects.isEmpty
       ? '还没有登记任何工程'
       : (visible.length == projects.length
-          ? '共 ${projects.length} 个项目'
-          : '显示 ${visible.length} / 共 ${projects.length} 个项目');
+            ? '共 ${projects.length} 个项目'
+            : '显示 ${visible.length} / 共 ${projects.length} 个项目');
 
   Future<void> connect() async {
     try {
@@ -448,15 +512,18 @@ class AppModel extends ChangeNotifier {
 
     final started = client
         .vrchatLocalMap()
-        .then((result) =>
-            ((result['map'] as Map?) ?? const {}).cast<String, dynamic>())
+        .then(
+          (result) =>
+              ((result['map'] as Map?) ?? const {}).cast<String, dynamic>(),
+        )
         .then((map) {
-      _vrchatLocalMapKept = map;
-      return map;
-    }).catchError((Object _) {
-      _vrchatLocalMap = null;
-      return _vrchatLocalMapKept;
-    });
+          _vrchatLocalMapKept = map;
+          return map;
+        })
+        .catchError((Object _) {
+          _vrchatLocalMap = null;
+          return _vrchatLocalMapKept;
+        });
     _vrchatLocalMap = started;
     return started;
   }
@@ -467,7 +534,6 @@ class AppModel extends ChangeNotifier {
   }
 
   final Set<String> coverAttempts = {};
-
 
   String backupDirectory = '';
   List<Map<String, dynamic>> backups = [];
@@ -488,8 +554,7 @@ class AppModel extends ChangeNotifier {
 
   Map<String, Map<String, dynamic>> vcsByPath = {};
 
-  String hostingOf(String path) =>
-      vcsByPath[path]?['kind'] as String? ?? '';
+  String hostingOf(String path) => vcsByPath[path]?['kind'] as String? ?? '';
 
   Map<String, int> backupCounts = {};
 
@@ -508,7 +573,8 @@ class AppModel extends ChangeNotifier {
     try {
       final counts = await client.backupCounts();
       backupCounts = {
-        for (final entry in counts.entries) entry.key: (entry.value as num).toInt(),
+        for (final entry in counts.entries)
+          entry.key: (entry.value as num).toInt(),
       };
     } on HostException {
       return;
@@ -528,8 +594,9 @@ class AppModel extends ChangeNotifier {
     if (client == null) return;
 
     try {
-      _indexVcsStates(await client
-          .vcsStates([for (final project in projects) project.path]));
+      _indexVcsStates(
+        await client.vcsStates([for (final project in projects) project.path]),
+      );
     } on HostException {
       return;
     }
@@ -539,8 +606,8 @@ class AppModel extends ChangeNotifier {
   String get backupSummary => backupsLoading
       ? '正在扫描备份目录…'
       : backups.isEmpty
-          ? '备份目录里没有可还原的压缩包'
-          : '${backups.length} 个备份 · ${_shortDir(backupDirectory)}';
+      ? '备份目录里没有可还原的压缩包'
+      : '${backups.length} 个备份 · ${_shortDir(backupDirectory)}';
 
   String get vcsSummary => vcsTools.isEmpty
       ? '正在检测本机的版本托管工具…'
@@ -569,10 +636,11 @@ class AppModel extends ChangeNotifier {
     }
   }
 
-  Future<void> restoreBackup(
-      {required String filePath,
-      required String targetPath,
-      required bool overwrite}) async {
+  Future<void> restoreBackup({
+    required String filePath,
+    required String targetPath,
+    required bool overwrite,
+  }) async {
     final client = host;
     if (client == null) return;
 
@@ -582,8 +650,11 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      status = restoreMessage =
-          await client.restoreBackup(filePath, targetPath, overwrite);
+      status = restoreMessage = await client.restoreBackup(
+        filePath,
+        targetPath,
+        overwrite,
+      );
     } on HostException catch (error) {
       status = restoreMessage = error.message;
     } finally {
@@ -796,8 +867,9 @@ class AppModel extends ChangeNotifier {
 
   void _mergeVcsState(Map<String, dynamic> state) {
     final path = state['projectPath'] as String? ?? '';
-    final index =
-        vcsStates.indexWhere((s) => (s['projectPath'] as String?) == path);
+    final index = vcsStates.indexWhere(
+      (s) => (s['projectPath'] as String?) == path,
+    );
 
     if (index >= 0) {
       vcsStates[index] = state;
@@ -808,8 +880,14 @@ class AppModel extends ChangeNotifier {
     vcsByPath[path] = state;
   }
 
-  Future<void> runVcs(String action, String path,
-      {String? kind, String? message, String? url, bool push = false}) async {
+  Future<void> runVcs(
+    String action,
+    String path, {
+    String? kind,
+    String? message,
+    String? url,
+    bool push = false,
+  }) async {
     final client = host;
     if (client == null) return;
 
@@ -817,8 +895,14 @@ class AppModel extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final result = await client.vcsRun(action, path,
-          kind: kind, message: message, url: url, push: push);
+      final result = await client.vcsRun(
+        action,
+        path,
+        kind: kind,
+        message: message,
+        url: url,
+        push: push,
+      );
       vcsLog = result;
       status = '${result['title'] ?? ''}';
       _mergeVcsState(await client.vcsState(path, deep: true));
@@ -862,28 +946,28 @@ class AppModel extends ChangeNotifier {
   }
 
   Future<void> addProject(String path) => _run((client) async {
-        final added = await client.addProject(path);
-        if (!projects.any((p) => p.path == added.path)) projects.add(added);
-        status = '已添加 ${added.name}';
-        await matchCloudFor(added);
-      });
+    final added = await client.addProject(path);
+    if (!projects.any((p) => p.path == added.path)) projects.add(added);
+    status = '已添加 ${added.name}';
+    await matchCloudFor(added);
+  });
 
   Future<void> detectProjects(String directory) => _run((client) async {
-        final result = await client.detectProjects(directory);
-        projects = await client.projects();
-        status = result.message;
-      });
+    final result = await client.detectProjects(directory);
+    projects = await client.projects();
+    status = result.message;
+  });
 
   Future<void> removeProject(UnityProject project) => _run((client) async {
-        await client.removeProject(project.path);
-        projects.removeWhere((p) => p.path == project.path);
-        status = '已从列表移除 ${project.name}';
-      });
+    await client.removeProject(project.path);
+    projects.removeWhere((p) => p.path == project.path);
+    status = '已从列表移除 ${project.name}';
+  });
 
   Future<void> launch(UnityProject project) => _run((client) async {
-        final result = await client.launchProject(project.path);
-        status = result.message;
-      });
+    final result = await client.launchProject(project.path);
+    status = result.message;
+  });
 
   Future<void> matchCloudFor(UnityProject project) async {
     final client = host;
@@ -902,7 +986,9 @@ class AppModel extends ChangeNotifier {
     themeChoice = choice;
     notifyListeners();
 
-    if (choice != 2) unawaited(host?.setDarkTheme(choice == 1) ?? Future<void>.value());
+    if (choice != 2) {
+      unawaited(host?.setDarkTheme(choice == 1) ?? Future<void>.value());
+    }
   }
 
   void setVisual({required double opacity}) {

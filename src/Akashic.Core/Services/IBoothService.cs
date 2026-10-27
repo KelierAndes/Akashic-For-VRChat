@@ -32,7 +32,8 @@ public interface IBoothService
 
     BoothLibraryPage ParseFreeLibraryPage(string extractorResultJson);
 
-    Task<List<BoothMatchCandidate>> SearchAsync(string query, CancellationToken ct = default);
+    Task<List<BoothMatchCandidate>> SearchAsync(string query, CancellationToken ct = default,
+        string? tag = null);
 
     Task<BoothMatchCandidate?> GetItemAsync(string itemId, CancellationToken ct = default);
 

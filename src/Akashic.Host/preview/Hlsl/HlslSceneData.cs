@@ -1,5 +1,6 @@
 using System.Numerics;
 using Akashic.Core.Models;
+using Akashic.Core.Services.Preview;
 using Assimp;
 using Mesh = Assimp.Mesh;
 using Matrix4x4 = System.Numerics.Matrix4x4;
@@ -82,6 +83,19 @@ public static class HlslSceneBuilder
         var hasBounds = false;
         var meshNodes = Flatten(scene.Nodes).Count(item => item.Mesh is not null);
 
+        var packageMaterials = new Lazy<Dictionary<string, string>>(() => IndexPackageMaterials(scene.Root));
+        PrefabParser? parser = null;
+
+        PreviewMaterial? NamedPackageMaterial(string name)
+        {
+            var key = NormalizeMaterialName(name);
+            if (key.Length == 0 || !packageMaterials.Value.TryGetValue(key, out var materialPath)) return null;
+
+            parser ??= new PrefabParser(scene.Root, new UnityMetaIndex(scene.Root));
+            var parsed = parser.ParseMaterial(materialPath);
+            return parsed is not null && parsed.Shader.Length > 0 ? parsed : null;
+        }
+
         foreach (var node in Flatten(scene.Nodes))
         {
             if (node.Mesh is null) continue;
@@ -129,11 +143,12 @@ public static class HlslSceneBuilder
                     var key = path + "|" + mesh.MaterialIndex;
                     if (!synthetic.TryGetValue(key, out var generated))
                     {
-                        generated = SyntheticMaterial(mesh, model, path);
+                        var fallback = SyntheticMaterial(mesh, model, path);
+                        generated = NamedPackageMaterial(fallback.Name) ?? fallback;
                         synthetic[key] = generated;
                     }
 
-                    material = material ?? generated;
+                    material = generated;
                     ApplyTextureHints(material, mesh, model, path);
                 }
                 else
@@ -361,6 +376,35 @@ public static class HlslSceneBuilder
         return text;
     }
 
+    private static string NormalizeMaterialName(string value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? string.Empty
+            : new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static Dictionary<string, string> IndexPackageMaterials(string root)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return map;
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root, "*.mat", SearchOption.AllDirectories))
+            {
+                if (map.Count >= 4096) break;
+                var key = NormalizeMaterialName(Path.GetFileNameWithoutExtension(file));
+                if (key.Length > 0) map.TryAdd(key, file);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return map;
+    }
+
     private static PreviewMaterial? MaterialFor(PreviewNode node, Mesh mesh, Scene scene)
     {
         if (node.Materials.Count == 0) return null;
@@ -394,6 +438,10 @@ public static class HlslSceneBuilder
             Name = string.IsNullOrWhiteSpace(source?.Name)
                 ? Path.GetFileNameWithoutExtension(assetPath) + "_" + Math.Max(mesh.MaterialIndex, 0)
                 : source.Name,
+            ShaderName = "Standard",
+            BuiltInShader = "Standard",
+            ShaderFamily = "Standard",
+            Kind = "lit",
             BaseColor = [diffuse.R, diffuse.G, diffuse.B, diffuse.A],
             DoubleSided = source?.IsTwoSided == true,
             AlphaMode = source is not null &&

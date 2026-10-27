@@ -94,7 +94,7 @@ class _AppShellState extends State<AppShell> {
       case 'vrchatsync':
         return const VRChatSyncPage();
       case 'resources':
-        return const ResourcesPage();
+        return ResourcesPage();
       case 'restore':
         return const RestorePage();
       case 'packages':

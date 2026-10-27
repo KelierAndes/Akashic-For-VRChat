@@ -170,12 +170,38 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         }
     }
 
+    private static readonly string[] DependencyTokens =
+    [
+        "liltoon", "modularavatar", "vrchatsdk", "comvrchat", "vrcfury",
+        "poiyomi", "animatorascode", "avataroptimizer", "textanimator",
+        "vrchatutility"
+    ];
+
+    private static bool IsDependencyPackage(ResourceRow row)
+    {
+        var name = PackageCategory.Normalize(row.Name);
+        if (name.Length == 0) return false;
+
+        return DependencyTokens.Any(token =>
+            name.Equals(token, StringComparison.Ordinal) ||
+            name.StartsWith(token, StringComparison.Ordinal));
+    }
+
     private static void InheritFromChildren(ResourceRow row)
     {
-        var matched = row.Children.FirstOrDefault(child => child.Matched) ??
-                      row.Children.FirstOrDefault(child => child.CoverUrl.Length > 0);
+        var matched = row.Children.FirstOrDefault(child => child.Matched && !IsDependencyPackage(child)) ??
+                      row.Children.FirstOrDefault(child => child.CoverUrl.Length > 0 && !IsDependencyPackage(child));
 
         if (matched is null) return;
+
+        if (!row.Matched && matched.Matched)
+        {
+            row.Matched = true;
+            row.MatchSource = matched.MatchSource;
+            row.BoothId = matched.BoothId;
+            row.BoothShop = matched.BoothShop;
+            row.Attempted = true;
+        }
 
         if (row.CoverUrl.Length == 0) row.CoverUrl = matched.CoverUrl;
         if (row.Category.Length == 0) row.Category = matched.Category;
@@ -353,6 +379,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
             var containers = rows
                 .Where(row => row.IsContainer && row.CanMatch)
+                .Where(row => !IsDependencyPackage(row))
                 .Where(row => force || (!row.Matched && !row.Attempted))
                 .ToList();
 
@@ -369,6 +396,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             var leaves = rows
                 .SelectMany(row => row.IsContainer ? (row.Matched ? [] : row.Children) : [row])
                 .Where(row => row.IsMatchable)
+                .Where(row => !IsDependencyPackage(row))
                 .Where(row => force || (!row.Matched && !row.Attempted))
                 .ToList();
 
@@ -472,13 +500,22 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         if (query.Length < 3) return null;
 
         var candidates = await _booth.SearchAsync(query, ct);
+        var picked = PickBest(candidates, row.Name);
+        if (picked is not null) return picked;
+
+        var tagged = await _booth.SearchAsync(query, ct, "VRChat");
+        return PickBest(tagged, row.Name);
+    }
+
+    private static BoothMatchCandidate? PickBest(IReadOnlyList<BoothMatchCandidate> candidates, string name)
+    {
         if (candidates.Count == 0) return null;
 
         BoothMatchCandidate? best = null;
 
         foreach (var candidate in candidates)
         {
-            candidate.Score = PackageCategory.Score(row.Name, candidate.Title, candidate.Shop);
+            candidate.Score = PackageCategory.Score(name, candidate.Title, candidate.Shop);
             if (best is null || candidate.Score > best.Score) best = candidate;
         }
 
@@ -497,7 +534,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             return only;
         }
 
-        var queryTokens = PackageCategory.QueryTokens(row.Name);
+        var queryTokens = PackageCategory.QueryTokens(name);
         if (queryTokens.Count > 0)
         {
             var ranked = distinct

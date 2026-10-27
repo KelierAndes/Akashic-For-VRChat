@@ -180,11 +180,15 @@ public class BoothService : IBoothService
 
     public BoothLibraryPage ParseFreeLibraryPage(string extractorResultJson) => ParseItemPage(extractorResultJson);
 
-    public async Task<List<BoothMatchCandidate>> SearchAsync(string query, CancellationToken ct = default)
+    public async Task<List<BoothMatchCandidate>> SearchAsync(string query, CancellationToken ct = default,
+        string? tag = null)
     {
         if (string.IsNullOrWhiteSpace(query)) return [];
 
-        var url = new Uri($"https://booth.pm/ja/search/{Uri.EscapeDataString(query.Trim())}?adult=include");
+        var filter = string.IsNullOrWhiteSpace(tag)
+            ? "adult=include"
+            : $"adult=include&tags%5B%5D={Uri.EscapeDataString(tag.Trim())}";
+        var url = new Uri($"https://booth.pm/ja/search/{Uri.EscapeDataString(query.Trim())}?{filter}");
         using var response = await SendAsync(_boothClient, url, HttpCompletionOption.ResponseContentRead,
             sendCookies: true, ct, extraCookies: AdultCookie);
 

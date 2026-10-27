@@ -12,7 +12,7 @@
     position: fixed; left: 12px; bottom: 10px; right: 12px;
     display: flex; gap: 10px; align-items: center;
     font: 12px "Segoe UI", "Microsoft YaHei UI", sans-serif;
-    color: #aeb6c2; pointer-events: none;
+    color: #aeb6c2; pointer-events: none; z-index: 4;
   }
   #hud b { color: #e8ecf2; font-weight: 600; }
   #status {
@@ -379,6 +379,7 @@ let hlslQueued = false;
 let hlslMode = 'textured';
 let hlslGizmoOn = true;
 let baseSummary = '';
+let hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: '' };
 
 const hlslGizmo = document.getElementById('hlslGizmo');
 const modeLabels = { textured: '贴图', clay: '白膜', wireframe: '网格' };
@@ -409,6 +410,9 @@ window.akashicSetHlsl = (on) => {
   hlslOn = !!on;
   hlslToggle.classList.toggle('on', hlslOn);
   hlslView.classList.toggle('on', hlslOn);
+  summary.style.display = hlslOn ? 'none' : '';
+  hint.style.marginLeft = hlslOn ? '0' : 'auto';
+  hint.style.marginRight = hlslOn ? 'auto' : '0';
   controls.enabled = !hlslOn;
   hint.textContent = hlslOn ? '滚轮缩放 · 拖拽平移 · 双击复位' : '左键旋转 · 右键平移 · 滚轮缩放';
   if (hlslOn) {
@@ -422,6 +426,13 @@ window.akashicSetHlsl = (on) => {
 };
 
 window.akashicHlslState = () => ({ enabled: hlslOn, busy: hlslBusy, mode: hlslMode });
+
+window.akashicHlslInfo = () => ({
+  enabled: hlslOn, busy: hlslBusy, mode: hlslMode,
+  gizmo: hlslGizmoOn, light: backgroundLight,
+  draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
+  detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
+});
 
 if (params.get('embed') === '1') {
   hlslToggle.style.display = 'none';
@@ -503,8 +514,11 @@ async function requestHlsl(showStatus) {
   if (hlslBusy) { hlslQueued = true; return; }
 
   hlslBusy = true;
-  const size = Math.min(1400, Math.max(480,
-    Math.round(Math.min(window.innerWidth, window.innerHeight) * Math.min(window.devicePixelRatio || 1, 1.5))));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const viewport = Math.min(window.innerWidth, window.innerHeight);
+  const pane = Math.min(2048, Math.max(480, Math.round(viewport * dpr)));
+  const gap = Math.max(2, Math.round(pane / 160));
+  const size = Math.min(4096, pane * 2 + gap);
 
   try {
     const response = await fetch('/api/preview/render', {
@@ -535,8 +549,21 @@ async function requestHlsl(showStatus) {
     if (showStatus) hideStatus();
     const draws = response.headers.get('X-Akashic-Draws') || '?';
     const fallbacks = response.headers.get('X-Akashic-Fallbacks') || '0';
-    summary.textContent = `D3D11 四视图 · ${modeLabels[hlslMode] || hlslMode} · ${draws} 次绘制 · ${fallbacks} 个回退材质`;
+    const detailRaw = response.headers.get('X-Akashic-Fallback-Detail') || '';
+    let detail = '';
+    try { detail = decodeURIComponent(detailRaw); } catch { detail = detailRaw; }
+
+    const head = `D3D11 四视图 · ${modeLabels[hlslMode] || hlslMode} · ${draws} 次绘制`;
+    const shown = detail ? detail.split(' | ').slice(0, 2) : [];
+    const text = fallbacks === '0'
+      ? `${head} · 全部材质都跑的是真实着色器`
+      : `${head} · ${fallbacks} 个回退材质${shown.length ? '：' + shown.join(' | ') : ''}`;
+
+    hlslInfo = { draws, fallbacks, detail, summary: text, error: '' };
+    summary.textContent = text;
+    summary.title = detail;
   } catch (error) {
+    hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: String(error?.message || error) };
     window.akashicSetHlsl(false);
     setStatus('HLSL 渲染失败：' + (error?.message || error), true);
     setTimeout(() => { statusBox.classList.add('hide'); }, 4500);

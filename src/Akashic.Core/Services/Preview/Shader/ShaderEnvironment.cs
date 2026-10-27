@@ -4,9 +4,15 @@ namespace Akashic.Core.Services.Preview.Shader;
 
 public static class ShaderEnvironment
 {
-    public const string Version = "shim-v5";
+    public const string Version = "shim-v7";
 
     private const string Prefix = "Akashic.Core.Services.Preview.Shader.Resources.";
+
+    public static string StandardShaderPath(string cacheRoot) =>
+        Path.Combine(Ensure(cacheRoot), "Standard.shader");
+
+    public static string UiShaderPath(string cacheRoot) =>
+        Path.Combine(Ensure(cacheRoot), "UIDefault.shader");
 
     public static string Ensure(string cacheRoot)
     {

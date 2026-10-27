@@ -1935,6 +1935,22 @@ nobody can rebuild from the gist alone. See the class summary for where that sto
 The only files ever carried, by name relative to the data directory. Anything else in a
 bundle is ignored, which is also what stops a crafted gist from writing outside it.
 
+What a new feature has to do to be synced is short: a new setting lands in `settings.json` by
+itself, provided the service that owns the field keeps its write whitelist up to date (a field
+that never reaches the disk is a field the gist has never seen). A new list cache has to join
+this table *and* the database snapshot export, otherwise it exists only on the machine that
+made it. Scan results stay out on purpose — `resources`, `package_files` and `archive_files`
+are keyed by absolute paths, so shipping them would describe directories the other machine does
+not have. Categories and Booth matches still cross over, because `resource_meta` keys on the
+resource name and the receiving side re-attaches them during its own first scan.
+
+### `PreviewCachePaths.Configure(applied.PreviewCacheDirectory, applied.PreviewCacheQuotaBytes);`
+
+A restore moves the preview cache with the configuration: the directory and the size cap come
+from the file that has just landed, and one reclaim pass runs against the new cap immediately.
+Without this the restored machine keeps writing where the old one pointed, at the old quota,
+until someone happens to restart the sidecar.
+
 ### `private VcsRunResult? Blocked(string action) =>`
 
 The 启用 gist 同步 switch, honoured by both directions — including the automatic upload

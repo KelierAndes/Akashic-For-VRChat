@@ -23,11 +23,40 @@ public static class SettingsEndpoints
             return new { backupDirectory = projects.GetBackupDirectory() };
         });
 
+        group.MapGet("/settings/preview-cache", (IProjectService projects) =>
+        {
+            var root = projects.GetPreviewCacheDirectory();
+            return Results.Json(new
+            {
+                directory = root,
+                size = PreviewCachePaths.MeasureBytes(root),
+                quota = projects.GetPreviewCacheQuota()
+            });
+        });
+
         group.MapPost("/settings/preview-cache-dir", async (DirectoryRequest request,
             IProjectService projects) =>
         {
             var applied = await projects.SetPreviewCacheDirectoryAsync(request.Directory);
-            return new { directory = applied, size = PreviewCachePaths.MeasureBytes(applied) };
+            return new
+            {
+                directory = applied,
+                size = PreviewCachePaths.MeasureBytes(applied),
+                quota = projects.GetPreviewCacheQuota()
+            };
+        });
+
+        group.MapPost("/settings/preview-cache-quota", async (QuotaRequest request,
+            IProjectService projects) =>
+        {
+            var quota = await projects.SetPreviewCacheQuotaAsync(request.Bytes);
+            var root = projects.GetPreviewCacheDirectory();
+            return new
+            {
+                directory = root,
+                size = PreviewCachePaths.MeasureBytes(root),
+                quota
+            };
         });
 
         group.MapPost("/settings/preview-cache-clear", async Task<IResult> (IProjectService projects,
@@ -111,6 +140,8 @@ public static class SettingsEndpoints
 }
 
 public sealed record ExcludePackages(bool Exclude);
+
+public sealed record QuotaRequest(long Bytes);
 
 public sealed record SiteRequest(string Site);
 

@@ -13,6 +13,15 @@ class PreviewImage {
   final String message;
 }
 
+class PreviewText {
+  const PreviewText(this.text, this.encoding, this.truncated, this.message);
+
+  final String? text;
+  final String encoding;
+  final bool truncated;
+  final String message;
+}
+
 class HostException implements Exception {
   HostException(this.message, {this.status});
 
@@ -294,12 +303,21 @@ class HostClient {
     {'directory': directory},
   );
 
+  Future<Map<String, dynamic>> getPreviewCache() async =>
+      await _send('GET', 'api/settings/preview-cache') as Map<String, dynamic>;
+
   Future<Map<String, dynamic>> setPreviewCacheDir(String directory) async =>
-      await _send('POST', 'api/settings/preview-cache-dir', {'directory': directory})
+      await _send('POST', 'api/settings/preview-cache-dir', {
+        'directory': directory,
+      }) as Map<String, dynamic>;
+
+  Future<Map<String, dynamic>> setPreviewCacheQuota(int bytes) async =>
+      await _send('POST', 'api/settings/preview-cache-quota', {'bytes': bytes})
           as Map<String, dynamic>;
 
   Future<Map<String, dynamic>> clearPreviewCache() async =>
-      await _send('POST', 'api/settings/preview-cache-clear', {}) as Map<String, dynamic>;
+      await _send('POST', 'api/settings/preview-cache-clear', {})
+          as Map<String, dynamic>;
 
   Future<void> forgetSession(String site) =>
       _send('POST', 'api/settings/forget-session', {'site': site});
@@ -629,11 +647,25 @@ class HostClient {
   String previewFileUrl(String resourceKey, String path, {String? entry}) =>
       _previewUrl('file', resourceKey, path, entry);
 
-  String previewMaterialUrl(String resourceKey, String path,
-          {String? entry, int size = 512}) =>
-      '${_previewUrl('material', resourceKey, path, entry)}&size=$size';
+  String previewTextUrl(String resourceKey, String path, {String? entry}) =>
+      _previewUrl('text', resourceKey, path, entry);
 
-  String _previewUrl(String route, String resourceKey, String path, String? entry) {
+  String previewMaterialUrl(
+    String resourceKey,
+    String path, {
+    String? entry,
+    int size = 640,
+    bool light = false,
+  }) =>
+      '${_previewUrl('material', resourceKey, path, entry)}&size=$size'
+      '${light ? '&light=1' : ''}';
+
+  String _previewUrl(
+    String route,
+    String resourceKey,
+    String path,
+    String? entry,
+  ) {
     final query = StringBuffer()
       ..write('k=${Uri.encodeQueryComponent(resourceKey)}')
       ..write('&p=${Uri.encodeQueryComponent(path)}');
@@ -648,7 +680,9 @@ class HostClient {
   Future<PreviewImage> fetchPreviewImage(String url) async {
     try {
       final request = await _http.openUrl('GET', Uri.parse(url));
-      final response = await request.close().timeout(const Duration(minutes: 3));
+      final response = await request.close().timeout(
+        const Duration(minutes: 3),
+      );
       final chunks = await response
           .fold<List<int>>(<int>[], (all, part) => all..addAll(part))
           .timeout(const Duration(minutes: 3));
@@ -670,6 +704,44 @@ class HostClient {
       return PreviewImage(null, '渲染超时了，这个材质的着色器可能太重。');
     } catch (error) {
       return PreviewImage(null, '$error');
+    }
+  }
+
+  Future<PreviewText> fetchPreviewText(String url) async {
+    try {
+      final request = await _http.openUrl('GET', Uri.parse(url));
+      final response = await request.close().timeout(
+        const Duration(seconds: 40),
+      );
+      final body = await response
+          .transform(utf8.decoder)
+          .join()
+          .timeout(const Duration(seconds: 40));
+
+      if (response.statusCode != 200) {
+        var message = '侧车返回 ${response.statusCode}';
+        try {
+          final decoded = jsonDecode(body) as Map<String, dynamic>;
+          message = '${decoded['detail'] ?? decoded['title'] ?? message}';
+        } catch (_) {
+          if (body.trim().isNotEmpty) message = body.trim();
+        }
+        return PreviewText(null, '', false, message);
+      }
+
+      final decoded = jsonDecode(body) as Map<String, dynamic>;
+      return PreviewText(
+        '${decoded['text'] ?? ''}',
+        '${decoded['encoding'] ?? ''}',
+        decoded['truncated'] == true,
+        '',
+      );
+    } on SocketException {
+      return const PreviewText(null, '', false, '侧车没有响应，预览服务可能已经退出。');
+    } on TimeoutException {
+      return const PreviewText(null, '', false, '读取超时了，这个文件可能太大。');
+    } catch (error) {
+      return PreviewText(null, '', false, '$error');
     }
   }
 

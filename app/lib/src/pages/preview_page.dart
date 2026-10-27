@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
+import 'asset_viewer.dart';
 
 class PreviewPage extends StatefulWidget {
   const PreviewPage({
@@ -16,33 +18,20 @@ class PreviewPage extends StatefulWidget {
     required this.resourceKey,
     required this.resourceName,
     this.entry,
+    this.initialAsset,
   });
 
   final HostClient host;
   final String resourceKey;
   final String resourceName;
   final String? entry;
+  final Map<String, dynamic>? initialAsset;
 
   @override
   State<PreviewPage> createState() => _PreviewPageState();
 }
 
 class _PreviewPageState extends State<PreviewPage> {
-  static const List<String> _kindOrder = [
-    'prefab',
-    'model',
-    'material',
-    'texture',
-    'shader',
-    'animation',
-    'controller',
-    'script',
-    'audio',
-    'video',
-    'text',
-    'scene',
-  ];
-
   final List<Map<String, dynamic>> _assets = [];
   final TextEditingController _search = TextEditingController();
   String _kindFilter = '';
@@ -59,10 +48,8 @@ class _PreviewPageState extends State<PreviewPage> {
   bool _flat = false;
   bool _hlsl = false;
   Map<String, dynamic>? _viewer;
-  MemoryImage? _viewerImage;
-  String _viewerError = '';
-  bool _viewerLoading = false;
-  int _viewerToken = 0;
+  Map<String, dynamic>? _renderInfo;
+  Timer? _renderPoll;
 
   @override
   void initState() {
@@ -72,6 +59,7 @@ class _PreviewPageState extends State<PreviewPage> {
 
   @override
   void dispose() {
+    _renderPoll?.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -108,16 +96,26 @@ class _PreviewPageState extends State<PreviewPage> {
       });
 
       if (!mounted) return;
+      final initial = widget.initialAsset;
+      final target = initial == null
+          ? null
+          : assets.cast<Map<String, dynamic>?>().firstWhere(
+              (asset) => '${asset?['path']}' == '${initial['path']}',
+              orElse: () => null,
+            );
+
       setState(() {
         _assets
           ..clear()
           ..addAll(assets);
         _loading = false;
         _kindFilter = '';
-        _pickerVisible = assets.length != 1;
+        _pickerVisible = target == null && assets.length != 1;
       });
 
-      if (assets.length == 1) {
+      if (target != null) {
+        await _build(target);
+      } else if (assets.length == 1) {
         await _build(assets.first);
       }
     } catch (error) {
@@ -133,19 +131,19 @@ class _PreviewPageState extends State<PreviewPage> {
     final host = widget.host;
     final path = '${asset['path']}';
 
-    _viewerToken++;
+    _renderPoll?.cancel();
+    _renderPoll = null;
     setState(() {
       _building = true;
       _error = '';
       _viewer = null;
-      _viewerImage = null;
-      _viewerError = '';
-      _viewerLoading = false;
+      _viewerUrl = '';
       _picked = asset;
       _pickerVisible = false;
       _selected = null;
       _flat = false;
       _hlsl = false;
+      _renderInfo = null;
       _collapsed.clear();
     });
 
@@ -183,44 +181,11 @@ class _PreviewPageState extends State<PreviewPage> {
       _viewer = asset;
       _pickerVisible = true;
     });
-    _loadViewer(asset, kind);
-  }
-
-  Future<void> _loadViewer(Map<String, dynamic> asset, String kind) async {
-    final host = widget.host;
-    final path = '${asset['path']}';
-    final token = ++_viewerToken;
-
-    setState(() {
-      _viewerImage = null;
-      _viewerError = '';
-      _viewerLoading = kind == 'texture' || kind == 'material';
-    });
-
-    if (!_viewerLoading) return;
-
-    final url = kind == 'material'
-        ? host.previewMaterialUrl(widget.resourceKey, path, entry: widget.entry)
-        : host.previewFileUrl(widget.resourceKey, path, entry: widget.entry);
-
-    final image = await host.fetchPreviewImage(url);
-    if (!mounted || token != _viewerToken) return;
-
-    setState(() {
-      _viewerLoading = false;
-      _viewerError = image.message;
-      final bytes = image.bytes;
-      if (bytes != null) _viewerImage = MemoryImage(bytes);
-    });
   }
 
   void _closeViewer() {
-    _viewerToken++;
     setState(() {
       _viewer = null;
-      _viewerImage = null;
-      _viewerError = '';
-      _viewerLoading = false;
     });
   }
 
@@ -232,11 +197,6 @@ class _PreviewPageState extends State<PreviewPage> {
 
     if (_pickerVisible) {
       Navigator.of(context).pop();
-      return;
-    }
-
-    if (_assets.length > 1) {
-      setState(() => _pickerVisible = true);
       return;
     }
 
@@ -257,24 +217,52 @@ class _PreviewPageState extends State<PreviewPage> {
 
   Future<void> _toggleHlsl() async {
     final next = !_hlsl;
-    setState(() => _hlsl = next);
+    setState(() {
+      _hlsl = next;
+      if (next) _renderInfo = null;
+    });
 
     await _web?.evaluateJavascript(
       source: 'window.akashicSetHlsl && window.akashicSetHlsl($next)',
     );
 
-    if (!next) return;
+    if (!next) {
+      _renderPoll?.cancel();
+      _renderPoll = null;
+      return;
+    }
 
     await Future<void>.delayed(const Duration(milliseconds: 1500));
     final state = await _web?.evaluateJavascript(
-      source:
-          'window.akashicHlslState ? JSON.stringify(window.akashicHlslState()) : ""',
+      source: 'window.akashicHlslState ? JSON.stringify(window.akashicHlslState()) : ""',
     );
 
     if (!mounted) return;
     if ('$state'.contains('"enabled":false')) {
       setState(() => _hlsl = false);
+      return;
     }
+
+    await _refreshRenderInfo();
+    _renderPoll?.cancel();
+    _renderPoll = Timer.periodic(const Duration(milliseconds: 900), (_) {
+      _refreshRenderInfo();
+    });
+  }
+
+  Future<void> _refreshRenderInfo() async {
+    final raw = await _web?.evaluateJavascript(
+      source: 'window.akashicHlslInfo ? JSON.stringify(window.akashicHlslInfo()) : ""',
+    );
+    if (!mounted || raw == null || '$raw'.isEmpty || '$raw' == 'null') return;
+
+    try {
+      final decoded = jsonDecode('$raw');
+      if (decoded is! Map) return;
+      final info = Map<String, dynamic>.from(decoded);
+      if (info['enabled'] != true) return;
+      setState(() => _renderInfo = info);
+    } catch (_) {}
   }
 
   @override
@@ -450,8 +438,8 @@ class _PreviewPageState extends State<PreviewPage> {
     }
 
     final kinds = <String>[
-      ..._kindOrder.where((kind) => (counts[kind] ?? 0) > 0),
-      ...counts.keys.where((kind) => !_kindOrder.contains(kind)),
+      ...assetKindOrder.where((kind) => (counts[kind] ?? 0) > 0),
+      ...counts.keys.where((kind) => !assetKindOrder.contains(kind)),
     ];
     final visible = _kindFilter.isEmpty
         ? assets
@@ -489,7 +477,7 @@ class _PreviewPageState extends State<PreviewPage> {
                   Padding(
                     padding: const EdgeInsets.only(left: 6),
                     child: _kindChip(
-                      _kindLabel(kind),
+                      assetKindLabel(kind),
                       counts[kind] ?? 0,
                       t,
                       kind: kind,
@@ -540,7 +528,12 @@ class _PreviewPageState extends State<PreviewPage> {
                         child: _assetTile(entry, t),
                       );
                     }
-                    return _kindHeader('$entry', counts['$entry'] ?? 0, t, index == 0);
+                    return _kindHeader(
+                      '$entry',
+                      counts['$entry'] ?? 0,
+                      t,
+                      index == 0,
+                    );
                   },
                 ),
         ),
@@ -566,7 +559,9 @@ class _PreviewPageState extends State<PreviewPage> {
 
     final entries = <Object>[];
     for (final kind in kinds) {
-      final group = assets.where((asset) => '${asset['kind']}' == kind).toList();
+      final group = assets
+          .where((asset) => '${asset['kind']}' == kind)
+          .toList();
       if (group.isEmpty) continue;
       entries.add(kind);
       entries.addAll(group);
@@ -579,10 +574,10 @@ class _PreviewPageState extends State<PreviewPage> {
       padding: EdgeInsets.only(top: first ? 0 : 10, bottom: 7, left: 2),
       child: Row(
         children: [
-          Icon(_kindIcon(kind), size: 13, color: t.inkTertiary),
+          Icon(assetKindIcon(kind), size: 13, color: t.inkTertiary),
           const SizedBox(width: 6),
           Text(
-            _kindLabel(kind),
+            assetKindLabel(kind),
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -600,9 +595,6 @@ class _PreviewPageState extends State<PreviewPage> {
   }
 
   Widget _viewerPane(Map<String, dynamic> asset, NeuTokens t) {
-    final kind = '${asset['kind']}';
-    final previewable = kind == 'texture' || kind == 'material';
-
     return NeuCard(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -610,17 +602,16 @@ class _PreviewPageState extends State<PreviewPage> {
         children: [
           Row(
             children: [
-              Icon(_kindIcon(kind), size: 17, color: t.inkSecondary),
-              const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${asset['name']}',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
+                  '查看文件',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: t.inkSecondary,
+                  ),
                 ),
               ),
-              NeuPill(_kindLabel(kind)),
-              const SizedBox(width: 8),
               NeuActionButton(
                 label: '关闭',
                 icon: Icons.close_rounded,
@@ -628,101 +619,20 @@ class _PreviewPageState extends State<PreviewPage> {
               ),
             ],
           ),
-          const SizedBox(height: 5),
-          Text(
-            '${asset['folder']} · ${_formatBytes((asset['size'] as num?)?.toInt() ?? 0)}',
-            style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           Expanded(
-            child: !previewable
-                ? Center(
-                    child: Text(
-                      '这类文件没有内建预览，可以在资源管理器里打开。',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                    ),
-                  )
-                : Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1B1E23),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    padding: const EdgeInsets.all(16),
-                    child: Center(child: _viewerBody(kind)),
-                  ),
+            child: AssetViewer(
+              key: ValueKey('${asset['path']}'),
+              host: widget.host,
+              resourceKey: widget.resourceKey,
+              asset: asset,
+              entry: widget.entry,
+            ),
           ),
         ],
       ),
     );
   }
-
-  Widget _viewerBody(String kind) {
-    if (_viewerLoading) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 22,
-            height: 22,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
-          ),
-          const SizedBox(height: 14),
-          Text(
-            kind == 'material' ? '正在用 HLSL 渲染材质球…' : '正在读取贴图…',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 12, color: Colors.white70),
-          ),
-        ],
-      );
-    }
-
-    final image = _viewerImage;
-    if (image != null) {
-      return Image(image: image, fit: BoxFit.contain);
-    }
-
-    return Text(
-      _viewerError.isEmpty ? '没有拿到可显示的内容。' : _viewerError,
-      textAlign: TextAlign.center,
-      style: const TextStyle(fontSize: 12, color: Colors.white70),
-    );
-  }
-
-  static IconData _kindIcon(String kind) => switch (kind) {
-    'prefab' => Icons.account_tree_outlined,
-    'model' => Icons.view_in_ar_outlined,
-    'texture' => Icons.image_outlined,
-    'material' => Icons.bubble_chart_outlined,
-    'shader' => Icons.code_rounded,
-    'animation' => Icons.animation_rounded,
-    'controller' => Icons.pets_outlined,
-    'script' => Icons.data_object_rounded,
-    'audio' => Icons.audiotrack_outlined,
-    'video' => Icons.movie_outlined,
-    'text' => Icons.description_outlined,
-    'scene' => Icons.landscape_outlined,
-    _ => Icons.insert_drive_file_outlined,
-  };
-
-  static String _kindLabel(String kind) => switch (kind) {
-    'prefab' => 'Prefab',
-    'model' => '模型',
-    'texture' => '贴图',
-    'material' => '材质',
-    'shader' => '着色器',
-    'animation' => '动画',
-    'controller' => '动画状态机',
-    'script' => '脚本',
-    'audio' => '音频',
-    'video' => '视频',
-    'text' => '文本',
-    'scene' => '场景',
-    _ => '文件',
-  };
 
   Widget _assetTile(Map<String, dynamic> asset, NeuTokens t) {
     final kind = '${asset['kind']}';
@@ -742,11 +652,7 @@ class _PreviewPageState extends State<PreviewPage> {
               color: Colors.black.withValues(alpha: 0.045),
               borderRadius: BorderRadius.circular(9),
             ),
-            child: Icon(
-              _kindIcon(kind),
-              size: 19,
-              color: t.inkSecondary,
-            ),
+            child: Icon(assetKindIcon(kind), size: 19, color: t.inkSecondary),
           ),
           const SizedBox(width: 13),
           Expanded(
@@ -790,10 +696,10 @@ class _PreviewPageState extends State<PreviewPage> {
             ),
           ),
           const SizedBox(width: 10),
-          NeuPill(_kindLabel(kind)),
+          NeuPill(assetKindLabel(kind)),
           const SizedBox(width: 8),
           Text(
-            _formatBytes((asset['size'] as num?)?.toInt() ?? 0),
+            formatAssetBytes((asset['size'] as num?)?.toInt() ?? 0),
             style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
           ),
           const SizedBox(width: 12),
@@ -807,13 +713,6 @@ class _PreviewPageState extends State<PreviewPage> {
         ],
       ),
     );
-  }
-
-  static String _formatBytes(int bytes) {
-    if (bytes >= 1048576) return '${(bytes / 1048576).toStringAsFixed(1)} MB';
-    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes > 0) return '$bytes B';
-    return '—';
   }
 
   Widget _hierarchy(NeuTokens t) {
@@ -979,6 +878,7 @@ class _PreviewPageState extends State<PreviewPage> {
       children: [
         if (_viewerUrl.isNotEmpty)
           InAppWebView(
+            key: ValueKey(_viewerUrl),
             initialUrlRequest: URLRequest(url: WebUri(_viewerUrl)),
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
@@ -1064,6 +964,7 @@ class _PreviewPageState extends State<PreviewPage> {
             ),
           ),
           Expanded(
+            flex: 5,
             child: node == null
                 ? Center(
                     child: Text(
@@ -1113,10 +1014,130 @@ class _PreviewPageState extends State<PreviewPage> {
                     ],
                   ),
           ),
+          Container(height: 1, color: Colors.black.withValues(alpha: 0.06)),
+          Expanded(flex: 3, child: _renderPanel(t)),
         ],
       ),
     );
   }
+
+  Widget _renderPanel(NeuTokens t) {
+    final info = _renderInfo;
+    final nodes = ((_scene?['nodes'] as List?) ?? const []).length;
+    final meshes = '${_scene?['meshCount'] ?? 0}';
+    final materials = '${_scene?['materialCount'] ?? 0}';
+    final mode = switch ('${info?['mode'] ?? ''}') {
+      'clay' => '白膜',
+      'wireframe' => '网格',
+      'textured' => '贴图',
+      _ => '—',
+    };
+    final detail = '${info?['detail'] ?? ''}'.trim();
+    final error = '${info?['error'] ?? ''}'.trim();
+    final fallbacks = '${info?['fallbacks'] ?? ''}';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
+      children: [
+        Row(
+          children: [
+            Icon(Icons.speed_rounded, size: 14, color: t.inkSecondary),
+            const SizedBox(width: 6),
+            Text(
+              '渲染信息',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: t.inkSecondary,
+              ),
+            ),
+            const Spacer(),
+            NeuPill(_hlsl ? 'HLSL' : '实时 3D'),
+          ],
+        ),
+        const SizedBox(height: 9),
+        _infoRow(t, '场景', '$nodes 节点 · $meshes 网格 · $materials 材质'),
+        if (_scene == null) ...[
+          const SizedBox(height: 10),
+          Text(
+            '打开一个 prefab 后，这里会显示离屏渲染的统计数据。',
+            style: TextStyle(fontSize: 11, color: t.inkTertiary),
+          ),
+        ] else if (!_hlsl) ...[
+          const SizedBox(height: 10),
+          Text(
+            'HLSL 未启用。打开右上角「HLSL 精确」后，这里会显示绘制次数、回退材质与原因。',
+            style: TextStyle(fontSize: 11, height: 1.5, color: t.inkTertiary),
+          ),
+        ] else if (info == null) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const SizedBox(
+                width: 13,
+                height: 13,
+                child: CircularProgressIndicator(strokeWidth: 1.6),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '正在等待渲染结果…',
+                style: TextStyle(fontSize: 11, color: t.inkTertiary),
+              ),
+            ],
+          ),
+        ] else ...[
+          _infoRow(t, '模式', mode),
+          _infoRow(t, '绘制', '${info['draws']} 次'),
+          _infoRow(
+            t,
+            '材质',
+            fallbacks == '0' ? '全部使用真实着色器' : '$fallbacks 个回退材质',
+          ),
+          if (error.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              error,
+              style: TextStyle(fontSize: 11, height: 1.45, color: t.warn),
+            ),
+          ] else if (detail.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text('回退明细', style: TextStyle(fontSize: 11, color: t.inkSecondary)),
+            const SizedBox(height: 3),
+            SelectableText(
+              detail.replaceAll(' | ', '\n'),
+              style: TextStyle(
+                fontSize: 10.5,
+                height: 1.45,
+                color: t.inkTertiary,
+              ),
+            ),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _infoRow(NeuTokens t, String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 30,
+          child: Text(
+            label,
+            style: TextStyle(fontSize: 11, color: t.inkTertiary),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(fontSize: 11, height: 1.4, color: t.ink),
+          ),
+        ),
+      ],
+    ),
+  );
 
   Widget _section(NeuTokens t, String title) => Padding(
     padding: const EdgeInsets.only(bottom: 6),

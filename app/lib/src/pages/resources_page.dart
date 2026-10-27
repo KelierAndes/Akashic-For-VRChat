@@ -7,6 +7,8 @@ import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
 import '../ui/theme.dart';
 import 'resource_tabs.dart';
+import 'asset_viewer.dart';
+import 'preview_page.dart';
 
 class ResourcesPage extends StatefulWidget {
   const ResourcesPage({super.key, this.initialTab = 0});
@@ -21,33 +23,164 @@ class ResourcesPage extends StatefulWidget {
 
 class _ResourcesPageState extends State<ResourcesPage> {
   late int _tab = widget.initialTab;
+  final TextEditingController _query = TextEditingController();
+  Map<String, dynamic>? _panel;
+  Map<String, dynamic>? _preview;
+
+  @override
+  void dispose() {
+    _query.dispose();
+    super.dispose();
+  }
+
+  void _openPackage(Map<String, dynamic> row) => setState(() {
+    _panel = row;
+    _preview = null;
+  });
+
+  void _closePanel() => setState(() {
+    _panel = null;
+    _preview = null;
+  });
 
   @override
   Widget build(BuildContext context) {
+    final model = AppScope.of(context);
+
+    if (model.resourceQuery.isNotEmpty) {
+      final handoff = model.resourceQuery;
+      model.resourceQuery = '';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _query.text = handoff;
+          _tab = 1;
+          _panel = null;
+          _preview = null;
+        });
+      });
+    }
+
+    final panel = _panel;
+    final preview = _preview;
+    final host = model.host;
+    final query = _query.text.trim();
+    final opened = panel != null && host != null;
+
     return NeuPageBody(
       title: '资源',
-      subtitle: ResourcesPage.tabs[_tab],
-      fixed: [
-        NeuTabs(
-          tabs: ResourcesPage.tabs,
-          index: _tab,
-          onChanged: (i) => setState(() => _tab = i),
-        ),
-      ],
-      content: switch (_tab) {
-        0 => const _RepositoriesTab(),
-        1 => const UserPackagesTab(),
-        2 => const _ExternalTab(),
-        3 => const BoothShelfTab(),
-        _ => const _AssetStoreShelfTab(),
-      },
+      subtitle: opened ? '包内文件 · 点「查看」就地预览' : ResourcesPage.tabs[_tab],
+      trailing: opened
+          ? NeuActionButton(
+              label: '返回资源列表',
+              icon: Icons.arrow_back_rounded,
+              onTap: _closePanel,
+            )
+          : null,
+      fixed: opened
+          ? const []
+          : [
+              NeuTabs(
+                tabs: ResourcesPage.tabs,
+                index: _tab,
+                onChanged: (i) => setState(() {
+                  _tab = i;
+                  _panel = null;
+                  _preview = null;
+                }),
+              ),
+              const SizedBox(height: 12),
+              NeuSearchField(
+                hint: '搜索名称、路径、店铺或地址…',
+                controller: _query,
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+      content: opened
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  flex: preview == null ? 10 : 5,
+                  child: PackageAssetsPanel(
+                    key: ValueKey('${panel['resourceKey']}'),
+                    host: host,
+                    resourceKey: '${panel['resourceKey']}',
+                    resourceName: '${panel['resourceName']}',
+                    entry: panel['entry'] == null ? null : '${panel['entry']}',
+                    picked: preview,
+                    onPick: (asset) => setState(() => _preview = asset),
+                    onOpenModel: (asset) {
+                      final tokens = NeuTheme.of(context);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => NeuTheme(
+                            tokens: tokens,
+                            child: PreviewPage(
+                              host: host,
+                              resourceKey: '${panel['resourceKey']}',
+                              resourceName: '${panel['resourceName']}',
+                              entry: panel['entry'] == null
+                                  ? null
+                                  : '${panel['entry']}',
+                              initialAsset: asset,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                if (preview != null) ...[
+                  const SizedBox(width: 14),
+                  Expanded(
+                    flex: 5,
+                    child: NeuCard(
+                      padding: const EdgeInsets.all(14),
+                      child: AssetViewer(
+                        key: ValueKey(
+                          '${panel['resourceKey']}|${preview['path']}',
+                        ),
+                        host: host,
+                        resourceKey: '${panel['resourceKey']}',
+                        asset: preview,
+                        entry: panel['entry'] == null
+                            ? null
+                            : '${panel['entry']}',
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: switch (_tab) {
+                    0 => _RepositoriesTab(query: query),
+                    1 => UserPackagesTab(
+                      query: query,
+                      onOpenPackage: _openPackage,
+                    ),
+                    2 => _ExternalTab(query: query),
+                    3 => BoothShelfTab(
+                      query: query,
+                      onOpenPackage: _openPackage,
+                    ),
+                    _ => _AssetStoreShelfTab(query: query),
+                  },
+                ),
+              ],
+            ),
     );
   }
 }
 
-
 class _RepositoriesTab extends StatefulWidget {
-  const _RepositoriesTab();
+  const _RepositoriesTab({this.query = ''});
+
+  final String query;
 
   @override
   State<_RepositoriesTab> createState() => _RepositoriesTabState();
@@ -128,15 +261,27 @@ class _RepositoriesTabState extends State<_RepositoriesTab> {
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
     final model = AppScope.of(context);
+    final needle = widget.query.toLowerCase();
+    final shown = _urls
+        .where(
+          (url) =>
+              needle.isEmpty ||
+              (url as String).toLowerCase().contains(needle) ||
+              _derivedName(url).toLowerCase().contains(needle),
+        )
+        .toList();
 
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-                child: Text(_status,
-                    style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                    overflow: TextOverflow.ellipsis)),
+              child: Text(
+                _status,
+                style: TextStyle(fontSize: 12, color: t.inkTertiary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             NeuActionButton(
               label: '从 VCC 导入',
               icon: Icons.cloud_download_rounded,
@@ -157,13 +302,15 @@ class _RepositoriesTabState extends State<_RepositoriesTab> {
               label: '添加',
               icon: Icons.add_rounded,
               emphasised: true,
-              onTap: () => model.showModal(NeuPromptForm(
-                title: '添加仓库源',
-                label: 'URL',
-                hint: 'https://…',
-                helper: '例：https://vpm.anatawa12.com/vpm.json',
-                onSubmit: _add,
-              )),
+              onTap: () => model.showModal(
+                NeuPromptForm(
+                  title: '添加仓库源',
+                  label: 'URL',
+                  hint: 'https://…',
+                  helper: '例：https://vpm.anatawa12.com/vpm.json',
+                  onSubmit: _add,
+                ),
+              ),
             ),
           ],
         ),
@@ -171,30 +318,40 @@ class _RepositoriesTabState extends State<_RepositoriesTab> {
         Expanded(
           child: ListView.separated(
             padding: EdgeInsets.zero,
-            itemCount: _urls.length,
+            itemCount: shown.length,
             separatorBuilder: (_, _) => const SizedBox(height: 10),
             itemBuilder: (context, index) {
-              final url = _urls[index] as String;
+              final url = shown[index] as String;
+              final position = _urls.indexOf(url);
 
               return NeuCard(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 13,
+                ),
                 child: Row(
                   children: [
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(_derivedName(url),
-                              style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            _derivedName(url),
+                            style: const TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           const SizedBox(height: 2),
-                          Text(url,
-                              style: TextStyle(
-                                  fontSize: 11.5, color: t.inkTertiary),
-                              overflow: TextOverflow.ellipsis),
+                          Text(
+                            url,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: t.inkTertiary,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ],
                       ),
                     ),
@@ -202,27 +359,30 @@ class _RepositoriesTabState extends State<_RepositoriesTab> {
                     NeuPill(_names[url] != null ? '仓库自报名称' : '按 URL 推导'),
                     const SizedBox(width: 8),
                     _IconPoke(
-                        icon: Icons.arrow_upward_rounded,
-                        tooltip: '上移',
-                        enabled: index > 0,
-                        onTap: () => _move(index, -1)),
+                      icon: Icons.arrow_upward_rounded,
+                      tooltip: '上移',
+                      enabled: position > 0,
+                      onTap: () => _move(position, -1),
+                    ),
                     const SizedBox(width: 6),
                     _IconPoke(
-                        icon: Icons.arrow_downward_rounded,
-                        tooltip: '下移',
-                        enabled: index < _urls.length - 1,
-                        onTap: () => _move(index, 1)),
+                      icon: Icons.arrow_downward_rounded,
+                      tooltip: '下移',
+                      enabled: position < _urls.length - 1,
+                      onTap: () => _move(position, 1),
+                    ),
                     const SizedBox(width: 6),
                     _IconPoke(
-                        icon: Icons.delete_outline_rounded,
-                        tooltip: '移除仓库源',
-                        enabled: true,
-                        onTap: () async {
-                          final host = AppScope.of(context).host;
-                          if (host == null) return;
-                          final next = await host.removeRegistrySource(url);
-                          if (mounted) setState(() => _urls = next);
-                        }),
+                      icon: Icons.delete_outline_rounded,
+                      tooltip: '移除仓库源',
+                      enabled: true,
+                      onTap: () async {
+                        final host = AppScope.of(context).host;
+                        if (host == null) return;
+                        final next = await host.removeRegistrySource(url);
+                        if (mounted) setState(() => _urls = next);
+                      },
+                    ),
                   ],
                 ),
               );
@@ -261,19 +421,22 @@ class _IconPoke extends StatelessWidget {
         insetColor: t.inset,
         border: glassBorder(alpha: 0.45),
         onTap: enabled ? onTap : null,
-        child: Icon(icon,
-            size: 16,
-            color: enabled
-                ? t.inkSecondary
-                : t.inkTertiary.withValues(alpha: 0.4)),
+        child: Icon(
+          icon,
+          size: 16,
+          color: enabled
+              ? t.inkSecondary
+              : t.inkTertiary.withValues(alpha: 0.4),
+        ),
       ),
     );
   }
 }
 
-
 class _ExternalTab extends StatefulWidget {
-  const _ExternalTab();
+  const _ExternalTab({this.query = ''});
+
+  final String query;
 
   @override
   State<_ExternalTab> createState() => _ExternalTabState();
@@ -311,25 +474,39 @@ class _ExternalTabState extends State<_ExternalTab> {
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
     final model = AppScope.of(context);
+    final needle = widget.query.toLowerCase();
+    final shown = _items
+        .where(
+          (item) =>
+              needle.isEmpty ||
+              '${item['displayName']}'.toLowerCase().contains(needle) ||
+              '${item['name']}'.toLowerCase().contains(needle) ||
+              '${item['location']}'.toLowerCase().contains(needle),
+        )
+        .toList();
 
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-                child: Text(_status,
-                    style: TextStyle(fontSize: 12, color: t.inkTertiary))),
+              child: Text(
+                _status,
+                style: TextStyle(fontSize: 12, color: t.inkTertiary),
+              ),
+            ),
             NeuActionButton(
               label: '添加 Git 仓库',
               icon: Icons.code_rounded,
-              onTap: () => model.showModal(NeuPromptForm(
-                title: '添加外部仓库',
-                label: '仓库地址',
-                hint: 'https://github.com/owner/repo',
-                helper:
-                    '支持 GitHub / GitLab / Gitee，按分支或标签下载归档',
-                onSubmit: _addRepository,
-              )),
+              onTap: () => model.showModal(
+                NeuPromptForm(
+                  title: '添加外部仓库',
+                  label: '仓库地址',
+                  hint: 'https://github.com/owner/repo',
+                  helper: '支持 GitHub / GitLab / Gitee，按分支或标签下载归档',
+                  onSubmit: _addRepository,
+                ),
+              ),
             ),
             const SizedBox(width: 10),
             NeuActionButton(
@@ -339,7 +516,8 @@ class _ExternalTabState extends State<_ExternalTab> {
               onTap: () async {
                 final host = AppScope.of(context).host;
                 final picked = await FilePicker.getDirectoryPath(
-                    dialogTitle: '选择包含 package.json 的包目录');
+                  dialogTitle: '选择包含 package.json 的包目录',
+                );
                 if (host == null || picked == null) return;
                 try {
                   await host.addExternalFolder(picked);
@@ -356,33 +534,42 @@ class _ExternalTabState extends State<_ExternalTab> {
           child: _items.isEmpty
               ? const NeuEmptyState(
                   height: 200,
-                  text: '还没有外部包。\n本地包目录，或 GitHub / GitLab / Gitee 仓库都可以登记在这里。')
+                  text: '还没有外部包。\n本地包目录，或 GitHub / GitLab / Gitee 仓库都可以登记在这里。',
+                )
               : ListView.separated(
                   padding: EdgeInsets.zero,
-                  itemCount: _items.length,
+                  itemCount: shown.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final item = _items[index];
+                    final item = shown[index];
                     return NeuCard(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
+                        horizontal: 16,
+                        vertical: 13,
+                      ),
                       child: Row(
                         children: [
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('${item['displayName']}',
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                  '${item['displayName']}',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 const SizedBox(height: 2),
                                 Text(
-                                    '${item['name']} · ${item['location']}',
-                                    style: TextStyle(
-                                        fontSize: 11.5, color: t.inkTertiary),
-                                    overflow: TextOverflow.ellipsis),
+                                  '${item['name']} · ${item['location']}',
+                                  style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: t.inkTertiary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ],
                             ),
                           ),
@@ -390,15 +577,16 @@ class _ExternalTabState extends State<_ExternalTab> {
                           NeuPill('${item['kind']}'),
                           const SizedBox(width: 8),
                           _IconPoke(
-                              icon: Icons.delete_outline_rounded,
-                              tooltip: '移除（工程引用不受影响）',
-                              enabled: true,
-                              onTap: () async {
-                                final host = AppScope.of(context).host;
-                                if (host == null) return;
-                                await host.removeExternal('${item['id']}');
-                                await _load();
-                              }),
+                            icon: Icons.delete_outline_rounded,
+                            tooltip: '移除（工程引用不受影响）',
+                            enabled: true,
+                            onTap: () async {
+                              final host = AppScope.of(context).host;
+                              if (host == null) return;
+                              await host.removeExternal('${item['id']}');
+                              await _load();
+                            },
+                          ),
                         ],
                       ),
                     );
@@ -410,9 +598,10 @@ class _ExternalTabState extends State<_ExternalTab> {
   }
 }
 
-
 class _AssetStoreShelfTab extends StatefulWidget {
-  const _AssetStoreShelfTab();
+  const _AssetStoreShelfTab({this.query = ''});
+
+  final String query;
 
   @override
   State<_AssetStoreShelfTab> createState() => _AssetStoreShelfTabState();
@@ -438,27 +627,43 @@ class _AssetStoreShelfTabState extends State<_AssetStoreShelfTab> {
     final all = (await host.assetStoreCache()).cast<Map<String, dynamic>>();
     _cached = all.where((a) => a['localPath'] != null).toList();
     if (mounted) {
-      setState(() => _status =
-          '缓存目录 ${_cached.length} / ${all.length} 项已下载 · $_directory');
+      setState(
+        () => _status =
+            '缓存目录 ${_cached.length} / ${all.length} 项已下载 · $_directory',
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = NeuTheme.of(context);
+    final needle = widget.query.toLowerCase();
+    final shown = _cached
+        .where(
+          (asset) =>
+              needle.isEmpty ||
+              '${asset['name']}'.toLowerCase().contains(needle) ||
+              '${asset['publisher']}'.toLowerCase().contains(needle) ||
+              '${asset['localPath']}'.toLowerCase().contains(needle),
+        )
+        .toList();
 
     return Column(
       children: [
         Row(
           children: [
             Expanded(
-                child: Text(_status,
-                    style: TextStyle(fontSize: 12, color: t.inkTertiary),
-                    overflow: TextOverflow.ellipsis)),
+              child: Text(
+                _status,
+                style: TextStyle(fontSize: 12, color: t.inkTertiary),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
             NeuActionButton(
-                label: '重新扫描',
-                icon: Icons.refresh_rounded,
-                onTap: _load),
+              label: '重新扫描',
+              icon: Icons.refresh_rounded,
+              onTap: _load,
+            ),
           ],
         ),
         const SizedBox(height: 14),
@@ -466,19 +671,23 @@ class _AssetStoreShelfTabState extends State<_AssetStoreShelfTab> {
           child: _cached.isEmpty
               ? NeuEmptyState(
                   height: 200,
-                  text: '缓存目录里还没有下载好的 .unitypackage。\n$_directory\n'
-                      '可以在设置页改到这个目录，或在「Asset Store 导入」页直接下载。')
+                  text:
+                      '缓存目录里还没有下载好的 .unitypackage。\n$_directory\n'
+                      '可以在设置页改到这个目录，或在「Asset Store 导入」页直接下载。',
+                )
               : ListView.separated(
                   padding: EdgeInsets.zero,
-                  itemCount: _cached.length,
+                  itemCount: shown.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
-                    final asset = _cached[index];
+                    final asset = shown[index];
                     final inLibrary = asset['isInLibrary'] == true;
 
                     return NeuCard(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 13),
+                        horizontal: 16,
+                        vertical: 13,
+                      ),
                       child: Row(
                         children: [
                           NeuCover('${asset['imageUrl']}'),
@@ -487,31 +696,40 @@ class _AssetStoreShelfTabState extends State<_AssetStoreShelfTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text('${asset['name']}',
-                                    style: const TextStyle(
-                                        fontSize: 13.5,
-                                        fontWeight: FontWeight.w600),
-                                    overflow: TextOverflow.ellipsis),
+                                Text(
+                                  '${asset['name']}',
+                                  style: const TextStyle(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                                 const SizedBox(height: 2),
                                 Text(
-                                    '${asset['publisher']} · ${asset['localPath']}',
-                                    style: TextStyle(
-                                        fontSize: 11, color: t.inkTertiary),
-                                    overflow: TextOverflow.ellipsis),
+                                  '${asset['publisher']} · ${asset['localPath']}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: t.inkTertiary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ],
                             ),
                           ),
                           const SizedBox(width: 10),
-                          NeuPill('${asset['version']}'.isEmpty
-                              ? '未标注版本'
-                              : '${asset['version']}'),
+                          NeuPill(
+                            '${asset['version']}'.isEmpty
+                                ? '未标注版本'
+                                : '${asset['version']}',
+                          ),
                           const SizedBox(width: 8),
-                          NeuPill(inLibrary ? '已入库' : '未入库',
-                              bg: inLibrary
-                                  ? const Color(0xFFBFE3C9)
-                                  : Colors.black.withValues(alpha: 0.06),
-                              fg:
-                                  inLibrary ? const Color(0xFF237A45) : null),
+                          NeuPill(
+                            inLibrary ? '已入库' : '未入库',
+                            bg: inLibrary
+                                ? const Color(0xFFBFE3C9)
+                                : Colors.black.withValues(alpha: 0.06),
+                            fg: inLibrary ? const Color(0xFF237A45) : null,
+                          ),
                           const SizedBox(width: 8),
                           if (!inLibrary)
                             NeuActionButton(
@@ -521,8 +739,9 @@ class _AssetStoreShelfTabState extends State<_AssetStoreShelfTab> {
                                 final host = AppScope.of(context).host;
                                 if (host == null) return;
                                 await host.addPackageFile(
-                                    '${asset['localPath']}',
-                                    origin: 'AssetStore');
+                                  '${asset['localPath']}',
+                                  origin: 'AssetStore',
+                                );
                                 await _load();
                               },
                             ),
