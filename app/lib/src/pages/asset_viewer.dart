@@ -153,8 +153,8 @@ class _AssetViewerState extends State<AssetViewer> {
   void _orbitBy(double dx, double dy) {
     if (!_isMaterialBall) return;
     setState(() {
-      _yaw += dx * 0.0085;
-      _pitch = (_pitch + dy * 0.0085).clamp(-1.5, 1.5);
+      _yaw -= dx * 0.0085;
+      _pitch = (_pitch - dy * 0.0085).clamp(-1.5, 1.5);
     });
     _scheduleOrbitFetch();
   }
