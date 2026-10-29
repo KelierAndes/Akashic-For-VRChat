@@ -80,6 +80,8 @@ public static partial class PreviewEndpoints
                 context.Response.Headers["X-Akashic-Frame-Height"] = frame.Height.ToString();
                 context.Response.Headers["X-Akashic-Textures"] =
                     $"{frame.Textures}|{frame.TextureBytes / (1024 * 1024)}|{frame.TextureDecodeFailures}";
+                context.Response.Headers["X-Akashic-Texture-Cache"] =
+                    (frame.TextureCacheBytes / (1024 * 1024)).ToString();
                 context.Response.Headers["X-Akashic-Msaa"] = frame.SampleCount.ToString();
                 if (frame.Camera is { } camera)
                 {

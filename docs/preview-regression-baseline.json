@@ -1,6 +1,6 @@
 ﻿{
-    "generated":  "2026-10-29 21:55",
-    "host":  "E:\\Akashic\\VPMManager\\src\\Akashic.Host\\bin\\Release\\net8.0-windows10.0.26100.0\\Akashic.Host.exe",
+    "generated":  "2026-10-29 22:14",
+    "host":  "E:\\Akashic\\VPMManager\\dist\\Akashic\\host\\Akashic.Host.exe",
     "packages":  [
                      "SUIMONO",
                      "Nijiiro",
@@ -22,8 +22,9 @@
                     "notPreviewable":  4,
                     "ballOk":  24,
                     "ballFail":  0,
-                    "buildMsTotal":  7077,
-                    "renderMsTotal":  1849,
-                    "textureMbMax":  201
+                    "buildMsTotal":  10279,
+                    "renderMsTotal":  1827,
+                    "textureMbMax":  201,
+                    "textureCacheMbMax":  427
                 }
 }

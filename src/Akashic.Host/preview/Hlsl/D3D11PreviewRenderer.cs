@@ -75,6 +75,8 @@ public sealed class RenderFrame
 
     public int TextureDecodeFailures { get; set; }
 
+    public long TextureCacheBytes { get; set; }
+
     public int SampleCount { get; set; }
 
     public List<string> FallbackNotes { get; set; } = [];
@@ -122,6 +124,8 @@ public sealed class RendererStatus
 
 public sealed class D3D11PreviewRenderer : IDisposable
 {
+    public const long MaxTextureBytes = 1024L * 1024 * 1024;
+
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11Buffer _engine;
@@ -151,17 +155,22 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private ID3D11Texture2D? _staging;
     private int _width;
     private int _height;
+    private long _textureTotalBytes;
+    private uint _textureClock;
     private readonly Dictionary<string, long> _textureBytes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, uint> _textureUsed = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _decodeFailures = new(StringComparer.OrdinalIgnoreCase);
+    private readonly long _textureCap;
     private string _sessionKey = string.Empty;
     private bool _inverseWarned;
     private readonly DateTime _start = DateTime.UtcNow;
 
-    private D3D11PreviewRenderer(ID3D11Device device, string adapter)
+    private D3D11PreviewRenderer(ID3D11Device device, string adapter, long textureCap)
     {
         _device = device;
         _context = device.ImmediateContext;
         Adapter = adapter;
+        _textureCap = Math.Max(1, textureCap);
         var warp = adapter.Equals("WARP", StringComparison.OrdinalIgnoreCase);
         _maxAnisotropy = warp ? 1 : 8;
         _sampleCount = warp ? 1 : 4;
@@ -191,6 +200,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
     public string Adapter { get; }
 
+    public long TextureCacheBytes => _textureTotalBytes;
+
     public static RendererStatus Probe()
     {
         try
@@ -209,26 +220,26 @@ public sealed class D3D11PreviewRenderer : IDisposable
         }
     }
 
-    public static D3D11PreviewRenderer Create(bool softwareOnly = false)
+    public static D3D11PreviewRenderer Create(bool softwareOnly = false, long textureCap = MaxTextureBytes)
     {
         if (softwareOnly)
         {
             var software = D3D11.D3D11CreateDevice(DriverType.Warp, DeviceCreationFlags.BgraSupport,
                 [FeatureLevel.Level_11_0]);
-            return new D3D11PreviewRenderer(software, "WARP");
+            return new D3D11PreviewRenderer(software, "WARP", textureCap);
         }
 
         try
         {
             var device = D3D11.D3D11CreateDevice(DriverType.Hardware, DeviceCreationFlags.BgraSupport,
                 [FeatureLevel.Level_11_0]);
-            return new D3D11PreviewRenderer(device, "Hardware");
+            return new D3D11PreviewRenderer(device, "Hardware", textureCap);
         }
         catch (Exception)
         {
             var device = D3D11.D3D11CreateDevice(DriverType.Warp, DeviceCreationFlags.BgraSupport,
                 [FeatureLevel.Level_11_0]);
-            return new D3D11PreviewRenderer(device, "WARP");
+            return new D3D11PreviewRenderer(device, "WARP", textureCap);
         }
     }
 
@@ -249,6 +260,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
             _session?.Dispose();
             _session = BuildSession(scene, shaders, fallbackShader, options.Outline, debug, wireframe);
             _sessionKey = key;
+            TrimTextures(_session);
         }
 
         _context.OMSetRenderTargets(_colorView!, _depthView);
@@ -295,6 +307,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
             Textures = textures,
             TextureBytes = textureBytes,
             TextureDecodeFailures = textureFailures,
+            TextureCacheBytes = _textureTotalBytes,
             SampleCount = _sampleCount
         };
     }
@@ -320,6 +333,41 @@ public sealed class D3D11PreviewRenderer : IDisposable
         }
 
         return (seen.Count - failures, bytes, failures);
+    }
+
+    /// <summary>
+    /// Textures stay on the GPU between renders, so an app session that keeps opening avatars
+    /// would otherwise accumulate a full set per model. Evict the least recently used ones that
+    /// the session just built does not reference.
+    /// </summary>
+    private void TrimTextures(GpuSession session)
+    {
+        if (_textureTotalBytes <= _textureCap) return;
+
+        var live = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in session.Items)
+        foreach (var pass in item.Material.Passes)
+        foreach (var texture in pass.Textures)
+        {
+            if (texture.Path.Length > 0) live.Add(texture.Path);
+        }
+
+        foreach (var path in _textureCache.Keys.OrderBy(key => _textureUsed.TryGetValue(key, out var used) ? used : 0L)
+                     .ToArray())
+        {
+            if (_textureTotalBytes <= _textureCap) return;
+            if (live.Contains(path)) continue;
+            if (!_textureCache.TryGetValue(path, out var view)) continue;
+            if (ReferenceEquals(view, _whiteView) || ReferenceEquals(view, _normalView) ||
+                ReferenceEquals(view, _blackView)) continue;
+
+            _textureCache.Remove(path);
+            _textureUsed.Remove(path);
+            _decodeFailures.Remove(path);
+            _textureTotalBytes -= _textureBytes.GetValueOrDefault(path);
+            _textureBytes.Remove(path);
+            view.Dispose();
+        }
     }
 
     private static string ShaderSignature(HlslSceneData scene,
@@ -576,7 +624,11 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
     private ID3D11ShaderResourceView LoadTexture(string path)
     {
-        if (_textureCache.TryGetValue(path, out var cached)) return cached;
+        if (_textureCache.TryGetValue(path, out var cached))
+        {
+            _textureUsed[path] = ++_textureClock;
+            return cached;
+        }
 
         ID3D11ShaderResourceView view;
         long bytes;
@@ -604,8 +656,10 @@ public sealed class D3D11PreviewRenderer : IDisposable
             _decodeFailures.Add(path);
         }
 
-        _textureBytes[path] = bytes;
         _textureCache[path] = view;
+        _textureBytes[path] = bytes;
+        _textureUsed[path] = ++_textureClock;
+        _textureTotalBytes += bytes;
         return view;
     }
 

@@ -11,6 +11,8 @@ public sealed class HlslPreviewService : IDisposable
     private readonly ConcurrentDictionary<string, Lazy<Task<HlslSceneData>>> _scenes = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PreviewBuildArtifacts> _artifacts = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _renderGate = new(1, 1);
+    private readonly List<string> _recent = [];
+    private readonly object _recentGate = new();
     private readonly D3D11PreviewRenderer? _renderer;
     private readonly string? _rendererError;
 
@@ -44,6 +46,7 @@ public sealed class HlslPreviewService : IDisposable
         var artifacts = _artifacts.GetOrAdd(options.SessionId, id =>
             _preview.GetArtifacts(id) ?? throw new InvalidOperationException("预览构建不存在，请重新打开预览。"));
 
+        Touch(options.SessionId);
         var scene = await SceneAsync(artifacts, options.Gizmo, ct);
         if (scene.Items.Count == 0)
             throw new InvalidOperationException("这个内容里没有可渲染的网格——只有粒子系统、UI 或纯脚本组件时无法预览。");
@@ -163,6 +166,34 @@ public sealed class HlslPreviewService : IDisposable
                 : "内置着色器 " + material.BuiltInShader + "，用近似材质代替";
 
         return "找不到着色器文件 " + Path.GetFileName(material.Shader);
+    }
+
+    /// <summary>
+    /// A parsed scene holds every vertex buffer of the prefab, so keeping one per build would
+    /// grow with however many models the user opens in one app session.
+    /// </summary>
+    private void Touch(string sessionId)
+    {
+        lock (_recentGate)
+        {
+            _recent.Remove(sessionId);
+            _recent.Add(sessionId);
+
+            while (_recent.Count > 2)
+            {
+                var stale = _recent[0];
+                _recent.RemoveAt(0);
+
+                foreach (var key in _scenes.Keys
+                             .Where(key => key == stale || key.StartsWith(stale + "|", StringComparison.Ordinal))
+                             .ToArray())
+                {
+                    _scenes.TryRemove(key, out _);
+                }
+
+                _artifacts.TryRemove(stale, out _);
+            }
+        }
     }
 
     private Task<HlslSceneData> SceneAsync(PreviewBuildArtifacts artifacts, bool gizmo, CancellationToken ct)

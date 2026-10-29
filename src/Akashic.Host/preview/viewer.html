@@ -1111,13 +1111,38 @@ window.addEventListener('resize', () => {
   if (hlslOn) requestHlsl(false);
 });
 
+let glLost = false;
+
 renderer.setAnimationLoop(() => {
+  if (document.hidden || glLost) return;
   controls.update();
   if (box.visible) box.update();
   if (hlslOn) return;
   syncCameraFromThree();
   renderer.render(scene, camera);
   drawGizmo();
+});
+
+// Without preventDefault the context is never restored, and the viewer stays blank
+// until the whole page reloads.
+function guardContext(canvas) {
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    glLost = true;
+    setStatus('显卡上下文丢失，正在等待恢复…', true);
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    glLost = false;
+    hideStatus();
+    if (hlslOn) requestHlsl(false); else applyGlbMode(viewMode);
+  });
+}
+
+guardContext(renderer.domElement);
+guardContext(gizmoCanvas);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && hlslOn && !hlslBusy) requestHlsl(false);
 });
 
 boot();

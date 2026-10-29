@@ -269,6 +269,7 @@ class _PreviewPageState extends State<PreviewPage> {
   }
 
   Future<void> _refreshRenderInfo() async {
+    if (_pickerVisible) return;
     final raw = await _web?.evaluateJavascript(
       source: 'window.akashicHlslInfo ? JSON.stringify(window.akashicHlslInfo()) : ""',
     );

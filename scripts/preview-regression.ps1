@@ -107,6 +107,7 @@ $metrics = [ordered]@{
     buildMsTotal  = 0
     renderMsTotal = 0
     textureMbMax  = 0
+    textureCacheMbMax = 0
 }
 
 $rows = @((Invoke-Api '/api/resources').Content | ConvertFrom-Json | ForEach-Object { $_ })
@@ -172,6 +173,10 @@ foreach ($name in $Packages) {
         $textures = Header $render 'X-Akashic-Textures'
         $parts = @($textures.Split('|'))
         if ($parts.Count -eq 3 -and [int]$parts[1] -gt $metrics.textureMbMax) { $metrics.textureMbMax = [int]$parts[1] }
+        $cacheMb = [int](Header $render 'X-Akashic-Texture-Cache')
+        if ($cacheMb -gt $metrics.textureCacheMbMax) { $metrics.textureCacheMbMax = $cacheMb }
+        $process.Refresh()
+        $hostMb = [math]::Round($process.PrivateMemorySize64 / 1MB)
 
         $metrics.draws += $draws
         $metrics.fallbackMats += $fallbacks
@@ -186,8 +191,8 @@ foreach ($name in $Packages) {
             }
         }
 
-        Write-Output ("  {0,-30} draws={1,-4} fb={2,-3} render={3} ms  textures={4}" -f $prefab.name, $draws,
-            $fallbacks, [math]::Round($renderMs), $textures)
+        Write-Output ("  {0,-30} draws={1,-4} fb={2,-3} render={3} ms  textures={4} cache={5} MB host={6} MB" -f $prefab.name, $draws,
+            $fallbacks, [math]::Round($renderMs), $textures, $cacheMb, $hostMb)
     }
 
     if (-not $SkipBalls) {
