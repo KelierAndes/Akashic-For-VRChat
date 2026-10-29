@@ -52,6 +52,7 @@ public class ShaderCacheKeyTests
         Assert.NotEqual(baseline, ShaderCacheKey.For("shim-v7", @"C:\pkg\a.shader", 1234, "_B", true));
         Assert.NotEqual(baseline, ShaderCacheKey.For("shim-v7", @"C:\pkg\a.shader", 1234, "_A", false));
         Assert.NotEqual(baseline, ShaderCacheKey.For("shim-v8", @"C:\pkg\a.shader", 1234, "_A", true));
+        Assert.NotEqual(baseline, ShaderCacheKey.For("shim-v7", @"C:\pkg\a.shader", 1234, "_A", true, "linear"));
     }
 
     [Fact]

@@ -51,6 +51,10 @@ public sealed class RenderOptions
     public float TargetY { get; set; }
 
     public float TargetZ { get; set; }
+
+    public List<string> Keywords { get; set; } = [];
+
+    public string ColorSpace { get; set; } = "gamma";
 }
 
 public sealed class RenderFrame
@@ -256,7 +260,9 @@ public sealed class D3D11PreviewRenderer : IDisposable
         var debug = mode is "clay" or "wireframe";
         var wireframe = mode == "wireframe";
         var key = scene.SessionId + "|" + options.Outline + "|" + mode + "|" + options.Gizmo + "|" +
-                  options.LightBackground + "|" + ShaderSignature(scene, shaders, fallbackShader);
+                  options.LightBackground + "|" + options.ColorSpace + "|" +
+                  string.Join(",", options.Keywords.Order()) + "|" +
+                  ShaderSignature(scene, shaders, fallbackShader);
         if (!string.Equals(_sessionKey, key, StringComparison.Ordinal) || _session is null)
         {
             _session?.Dispose();

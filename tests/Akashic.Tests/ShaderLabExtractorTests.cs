@@ -27,6 +27,19 @@ public class ShaderLabExtractorTests
     }
 
     [Fact]
+    public void CollectsVariantKeywordsPastThePlaceholders()
+    {
+        var keywords = ShaderLabExtractor.Parse(Fixture("basic.shader"))
+            .Passes[0].DefaultKeywords;
+
+        Assert.Contains("_EMISSION", keywords);
+        Assert.Contains("_FADE_ON", keywords);
+        Assert.Contains("_USE_CUSTOM_GRADIENT", keywords);
+        Assert.DoesNotContain("_", keywords);
+        Assert.DoesNotContain("__", keywords);
+    }
+
+    [Fact]
     public void PassSourceCarriesShimAndCommentsPragmas()
     {
         var program = ShaderLabExtractor.Parse(Fixture("basic.shader"));

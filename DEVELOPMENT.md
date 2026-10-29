@@ -414,6 +414,21 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * C5 另两条核对过，记在这里免得再查一遍：`.cso`/反射那份缓存（`hlsl-vN`）在 `ShaderCompileService` 构造里就走 `PreviewCachePaths.VersionedUnder`（不是裸 `Directory.CreateDirectory`），`VersionedUnderReclaimsOnlyTheSameFamily` 是它的用例。**漏的是 `shim-vN`**：`ShaderEnvironment.Ensure` 用的是裸 `Directory.CreateDirectory`，实测 Release 缓存里 `shim-v6` 与 `shim-v7` 并存、Debug 里 `shim-v3/v4/v5` 三代同堂。改成也走 `VersionedUnder` 之后，族规则保证它只删 `shim-*`、`hlsl-*` 一个不碰，两侧都只剩当前版本，出图不受影响（`AudioHairClip` 仍 `draws=5`、材质球 4/4），用例是 `ShimSetupReclaimsItsOwnFamilyAndSparesTheCompileCache`。仓库根那个 `NVIDIA Corporation` 目录是某次 native 调用顺手建的空目录，`.gitignore` 已覆盖，目录当前为空。
 * **实时化的档位判定用数据收口了：档③（每次交互发一个 HTTP 帧请求）够用，档②（共享内存零拷贝帧）不做**（B1 埋点实测，2026-10-30）。`scripts/preview-latency.mjs` 起一个 `--port 0` 侧车，按 key 均匀抽包、每个取第一个能建的 prefab，`build` 之后连打若干帧（奇偶交替 `raw`/JPEG，机位逐帧变），量服务端 `X-Akashic-Render-Ms`/`-Queue-Ms` 与客户端往返，报 p50/p90/max。20 包 5 帧、800×800、发布版实测：**稳态帧往返 p50 17.2 ms、p90 37 ms**，其中 raw 服务端 p50 **3.1 ms**、JPEG 服务端 p50 **12.1 ms**（编码就是这两条路径的差，而 raw 要多发 2.5 MB 像素，往返中位数反而与 JPEG 一样是 17 ms 左右 ⇒ 环回传输不是瓶颈，零拷贝最多换掉个位数毫秒）；**排队 `_renderGate` 等待恒 0**（单人单视窗，没有并发）；**长尾在首帧**：build 后第一帧服务端 p50 72.6 / p90 278.7 / max 500 ms，那是冷 GPU 会话 + 首次 fxc 编译，跟帧缓冲无关，要压它得走预热。`build` 本身 p50 68 ms、p90 1.8 s（冷解包）。抽样 24 包里 15 包可渲染、9 包 422「没有可渲染的网格」——与「不可预览多为真不可预览」一致。
   * 顺手记一条量测坑：**别用 PowerShell 量二进制响应**。同一批 raw 帧，`Invoke-WebRequest` 报出的往返是 **1479 ms p50**（它按文本解码 2.5 MB body），node `fetch` 同一台机同一个侧车是 17 ms。这个脚本最初写成 ps1，数字假到把结论指向「档③ 不可用」，改成 node 才看得见真相。
+* **shader 变体现在看得见也点得动了**（B3，2026-10-30）。前提是修正 `ShaderLabExtractor` 的采集：`#pragma multi_compile` / `shader_feature` 每行**只取第一个 token**，而 Unity 惯常写成 `_ _FOG_LINEAR`（第一位是占位符），于是真实的关键字一直被抓成 `_` 再丢掉。现在收全每行的非占位 token（`_` 与 `__` 都算占位），去重后进 `pass.DefaultKeywords`。
+  * 勾选的关键字**只加进声明它的 Pass**（`extraKeywords ∩ pass.DefaultKeywords`），不是全局限定义——不然第三方 shader 里一个同名 `#ifdef` 会被无声改色。上限 `ShaderCompileService.MaxManualKeywords = 2`，UI 与侧车各钳一次。缓存键本来就含 `keywordKey`，所以每一档是一份独立缓存条目；这正是「C5 的族回收必须先落地才开这个口子」的原因（变体条目会成倍长）。
+  * 面板数据来自 `GET /api/preview/variants?session=<id>`（`HlslPreviewService.DescribeVariantsAsync`）：从 `_scenes` 里已缓存的 `HlslSceneData.Materials` 反推「每个 shader 声明了什么、材质已经勾了什么」。**必须在渲染过一帧之后再调**——场景是首次渲染才建的，没建过就返回 `available:false`，UI 那一节直接不出现（不是报错）。
+  * `UNITY_COLORSPACE_GAMMA` 从 shim 里写死的 `#define 1` 改成 `#ifndef` 兜底 + 由 fxc `/D` 传入：默认（`colorSpace="gamma"`）行为与改前逐像素一致，选「线性」就不传，宏按 0 走。回退与白膜/网格调试 shader 不接这条参数（它们本来不分支这个宏）。实测 UnyStylus 的包内 shader 有这个分支：gamma `ff058e38…` vs 线性 `ff704d4a…`，8 draws、0 回退。
+  * 「勾选后有没有效果」只能按像素判，不能按有没有报错判：lilToon 的 `EDITOR_VISUALIZATION` 勾上完全不变（那是 Unity 编辑器场景可视化用的档），这类要留着但不算 bug。
+  * 两条版本号同时递增（`hlsl-vN` 因为 `ShaderCacheKey.For` 多了 `variantTag`、`shim-vN` 因为 shim 文本变了）。**改了键的组成就必须升 `hlsl-vN`**，否则新旧键混在同一目录里，族回收看不见旧的那批。黄金图这条验收是硬过的：`unlit-textured` 与 `builtin-standard` 两支哈希在改动后一字未变，新增 `variant-off` / `variant-on` / `variant-linear` 三支互不相同（`variant-linear` 恰好等于 `unlit-textured`，正说明它跳过了 gamma 重映射那一步）。
+  * 升版本还顺带暴露一个并发窗口：`ShaderEnvironment.Ensure` 原本无锁，两个 `ShaderCompileService` 并发构造时同时 `File.WriteAllBytes` 会撞共享冲突。旧版本下没暴露，是因为文件早已存在、每个资源都走「字节相同就跳过」；一旦升版本就是全量重写，窗口才打开。现在整个 `Ensure` 进 `lock`。
+* **精确模式的光照只有这些**（C3，2026-10-30，交付物是文字不是代码）。五个降级点必须写在一处，切到「精确」的用户有理由以为阴影和 GI 也是准的：
+  1. 只有一盏固定方向的可见光 `(0.32, 0.62, 0.72)`、光色白、`_WorldSpaceLightPos0` 是常量；
+  2. `ShadeSH9` 返回常量 `(0.22, 0.25, 0.30)`，`Shade4PointLights` / `ShadeVertexLights` 返回 0 ⇒ 点光、聚光、附加光通道全部不存在；
+  3. `SHADOW_ATTENUATION` 恒 1，且 `LightMode` 过滤只留 `ForwardBase`/`Always` ⇒ `ShadowCaster`/`DepthOnly` 被丢，没有任何阴影；
+  4. 雾的宏是空实现，`FOG_LINEAR`/`FOG_EXP`/`FOG_EXP2` 不参与编译；
+  5. `LIGHTMAP_ON`/`SHADOWS_SCREEN`/`_LIGHTPROBE_SH` 恒处关闭档，勾了也不变（B3 的面板会把这种情况直接标出来）。
+  不补管线的原因写在计划里：成本等于重写一个小型 Unity 前向管线（还要 ShadowCaster 收集 + depth prepass），而走样与丢贴图比缺阴影更容易被用户当成 bug，前两者已在 B2 修掉。
+* **蒙皮与 morph 维持现状、不排期**（C2，2026-10-30 决策）。预览的定位是「看这件资产长什么样、材质贴图对不对」，不是「穿在角色身上好不好看」，所以显示绑定姿势的静态网格是符合目标的；真要翻案（目标是看上身效果），C2 直接跳 P1，前置是先读 `.asset` 里序列化的 skin 数据（现在根本不读），再把顶点布局从 128 字节（POSITION/NORMAL/TANGENT/TEXCOORD0-3/COLOR）扩出 `BLENDINDICES`/`BLENDWEIGHTS`，GLB 侧还要导骨架、视窗要播 `gltf.animations`。三段都是硬工作量，缺一段就只是「看起来动了」。
 
 ### 备份与还原
 

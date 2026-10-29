@@ -644,6 +644,11 @@ class HostClient {
     if (entry != null && entry.isNotEmpty) 'entry': entry,
   }, const Duration(minutes: 3)) as Map<String, dynamic>;
 
+  Future<Map<String, dynamic>> previewVariants(String session) async => await _send(
+    'GET',
+    'api/preview/variants?session=${Uri.encodeQueryComponent(session)}',
+  ) as Map<String, dynamic>;
+
   String previewFileUrl(String resourceKey, String path, {String? entry}) =>
       _previewUrl('file', resourceKey, path, entry);
 

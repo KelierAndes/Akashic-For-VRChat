@@ -196,7 +196,9 @@ struct appdata_full
 #define TRANSFORM_TEX(tex, name) ((tex.xy) * name##_ST.xy + name##_ST.zw)
 #define TRANSFORM_OFFSET(offset, name) (offset + name##_ST.zw)
 
-#define UNITY_COLORSPACE_GAMMA 1
+#ifndef UNITY_COLORSPACE_GAMMA
+#define UNITY_COLORSPACE_GAMMA 0
+#endif
 #define UNITY_LIGHTMODEL_AMBIENT (unity_AmbientSky)
 #define unity_ColorSpaceGrey float4(0.5, 0.5, 0.5, 0.5)
 #define unity_ColorSpaceDouble float4(2.0, 2.0, 2.0, 2.0)

@@ -36,9 +36,11 @@ public sealed class TextureCacheTests
 
         var sceneA = HlslSceneBuilder.BuildMaterialPreview("cache-a", textured);
         var sceneB = HlslSceneBuilder.BuildMaterialPreview("cache-b", plain);
-        var shaderA = await compiler.GetAsync(textured.Shader, sceneA.Root, [], false, CancellationToken.None);
+        var shaderA = await compiler.GetAsync(textured.Shader, sceneA.Root, [], false, [], "gamma",
+            CancellationToken.None);
         var standardPath = compiler.ResolveBuiltIn("Standard") ?? throw new InvalidOperationException("缺内置 Standard");
-        var shaderB = await compiler.GetAsync(standardPath, sceneB.Root, [], false, CancellationToken.None);
+        var shaderB = await compiler.GetAsync(standardPath, sceneB.Root, [], false, [], "gamma",
+            CancellationToken.None);
         var fallback = await compiler.GetFallbackAsync(false, CancellationToken.None);
 
         Assert.True(shaderA.Ok && shaderB.Ok);

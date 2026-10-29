@@ -71,7 +71,33 @@ public sealed class GoldenRenderTests
         Assert.True(coverage is > 0.15 and < 0.95, $"非背景像素占比 {coverage:F3} 不在预期区间");
     }
 
-    private static async Task<RenderFrame> RenderAsync(PreviewMaterial material, string goldenKey)
+    [Fact]
+    public async Task ManualVariant_ChangesPixelsAndKeepsTheUntouchedPathIdentical()
+    {
+        var off = await RenderAsync(VariantMaterial(), "variant-off");
+        var on = await RenderAsync(VariantMaterial(), "variant-on", ["_AKASHIC_INVERT_ON"]);
+        var linear = await RenderAsync(VariantMaterial(), "variant-linear", colorSpace: "linear");
+
+        Assert.Equal(0, on.Fallbacks);
+        Assert.NotEqual(Hash(off), Hash(on));
+        Assert.NotEqual(Hash(off), Hash(linear));
+
+        var untouched = await RenderAsync(VariantMaterial(), "variant-off");
+        Assert.Equal(Hash(off), Hash(untouched));
+    }
+
+    private static PreviewMaterial VariantMaterial() => new()
+    {
+        Name = "GoldenVariant",
+        Path = Path.Combine(FixtureRoot, "materials", "variant.mat"),
+        Shader = Path.Combine(FixtureRoot, "shaders", "variant.shader"),
+        BaseTexture = Path.Combine(FixtureRoot, "textures", "golden-checker.png"),
+        Kind = "unlit",
+        AlphaMode = "opaque"
+    };
+
+    private static async Task<RenderFrame> RenderAsync(PreviewMaterial material, string goldenKey,
+        IReadOnlyList<string>? extraKeywords = null, string colorSpace = "gamma")
     {
         var cacheRoot = Path.Combine(AppContext.BaseDirectory, "cache", "preview");
         var compiler = new ShaderCompileService(cacheRoot);
@@ -85,7 +111,8 @@ public sealed class GoldenRenderTests
         }
 
         var scene = HlslSceneBuilder.BuildMaterialPreview(goldenKey, material);
-        var compiled = await compiler.GetAsync(shaderPath, scene.Root, material.Keywords, false, CancellationToken.None);
+        var compiled = await compiler.GetAsync(shaderPath, scene.Root, material.Keywords, false,
+            extraKeywords ?? [], colorSpace, CancellationToken.None);
         Assert.True(compiled.Ok, compiled.Error);
 
         using var renderer = D3D11PreviewRenderer.Create(softwareOnly: true);
@@ -97,7 +124,8 @@ public sealed class GoldenRenderTests
             new RenderOptions
             {
                 SessionId = goldenKey, Width = Size, Height = Size, View = "iso", Mode = "textured",
-                Outline = false, Gizmo = false, Raw = true
+                Outline = false, Gizmo = false, Raw = true,
+                Keywords = [.. extraKeywords ?? []], ColorSpace = colorSpace
             });
 
         Assert.Equal(Size * Size * 4, frame.Pixels.Length);
@@ -105,9 +133,12 @@ public sealed class GoldenRenderTests
         return frame;
     }
 
+    private static string Hash(RenderFrame frame) =>
+        Convert.ToHexString(SHA256.HashData(frame.Pixels)).ToLowerInvariant();
+
     private static void AssertGolden(RenderFrame frame, string key)
     {
-        var hash = Convert.ToHexString(SHA256.HashData(frame.Pixels)).ToLowerInvariant();
+        var hash = Hash(frame);
         var document = File.Exists(GoldenPath)
             ? JsonNode.Parse(File.ReadAllText(GoldenPath))?.AsObject() ?? new JsonObject()
             : new JsonObject();

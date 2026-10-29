@@ -390,11 +390,13 @@ public static class ShaderLabExtractor
                      @"^\s*#pragma\s+(?:shader_feature|multi_compile)(?:_local)?\s+(?<tokens>[^\r\n]+)",
                      RegexOptions.Multiline))
         {
-            var first = pragma.Groups["tokens"].Value
-                .Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(first) && first != "_")
-                pass.DefaultKeywords.Add(first);
+            foreach (var token in pragma.Groups["tokens"].Value
+                         .Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (token.Trim('_').Length == 0 || !ShaderKeywordRules.IsValid(token)) continue;
+                if (!pass.DefaultKeywords.Contains(token, StringComparer.Ordinal))
+                    pass.DefaultKeywords.Add(token);
+            }
         }
 
         var source = new StringBuilder();

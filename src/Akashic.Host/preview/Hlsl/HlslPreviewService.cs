@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Akashic.Core.Models;
 using Akashic.Core.Services.Preview;
+using Akashic.Core.Services.Preview.Shader;
 
 namespace Akashic.Host.Preview.Hlsl;
 
@@ -89,6 +90,14 @@ public sealed class HlslPreviewService : IDisposable
     {
         var shaders = new Dictionary<PreviewMaterial, CompiledShader>();
         var mode = options.Mode.ToLowerInvariant();
+        var manual = options.Keywords
+            .Where(ShaderKeywordRules.IsValid)
+            .Distinct(StringComparer.Ordinal)
+            .Take(ShaderCompileService.MaxManualKeywords)
+            .ToList();
+        var colorSpace = string.Equals(options.ColorSpace, "linear", StringComparison.OrdinalIgnoreCase)
+            ? "linear"
+            : "gamma";
         var debugShader = mode is "clay" or "wireframe"
             ? await _compiler.GetDebugAsync(mode, ct, options.LightBackground)
             : null;
@@ -128,7 +137,8 @@ public sealed class HlslPreviewService : IDisposable
             if (File.Exists(shaderPath))
             {
                 shader = await _compiler.GetAsync(shaderPath, scene.Root, material.Keywords,
-                    options.Outline && (material.UseOutline || material.OutlineWidth > 0.0001f), ct);
+                    options.Outline && (material.UseOutline || material.OutlineWidth > 0.0001f),
+                    manual, colorSpace, ct);
             }
 
             if (shader is null || !shader.Ok)
@@ -210,6 +220,66 @@ public sealed class HlslPreviewService : IDisposable
                 _artifacts.TryRemove(stale, out _);
             }
         }
+    }
+
+    public async Task<object> DescribeVariantsAsync(string sessionId, CancellationToken ct)
+    {
+        HlslSceneData? scene = null;
+        foreach (var key in new[] { sessionId, sessionId + "|gizmo" })
+        {
+            if (!_scenes.TryGetValue(key, out var lazy)) continue;
+            try
+            {
+                scene = await lazy.Value.WaitAsync(ct);
+            }
+            catch (Exception)
+            {
+            }
+            break;
+        }
+
+        if (scene is null)
+        {
+            return new { available = false, options = Array.Empty<object>(), enabled = Array.Empty<string>() };
+        }
+
+        var declared = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var enabled = new SortedSet<string>(StringComparer.Ordinal);
+
+        foreach (var material in scene.Materials)
+        {
+            if (material is null || material.Shader.Length == 0 || !File.Exists(material.Shader)) continue;
+
+            foreach (var keyword in ShaderCompileService.DeclaredKeywords(material.Shader))
+            {
+                if (!declared.TryGetValue(keyword, out var owners)) declared[keyword] = owners = [];
+
+                var shaderName = material.ShaderName.Length > 0
+                    ? material.ShaderName
+                    : Path.GetFileName(material.Shader);
+                if (!owners.Contains(shaderName, StringComparer.Ordinal)) owners.Add(shaderName);
+                if (material.Keywords.Contains(keyword, StringComparer.Ordinal)) enabled.Add(keyword);
+            }
+        }
+
+        return new
+        {
+            available = true,
+            maxManual = ShaderCompileService.MaxManualKeywords,
+            options = declared
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+                .Select(pair => new { keyword = pair.Key, shaders = pair.Value })
+                .ToList(),
+            enabled = enabled.ToList(),
+            engine = new
+            {
+                alwaysOn = new[] { "DIRECTIONAL" },
+                alwaysOff = new[]
+                {
+                    "FOG_LINEAR", "FOG_EXP", "FOG_EXP2", "LIGHTMAP_ON", "SHADOWS_SCREEN", "_LIGHTPROBE_SH"
+                }
+            }
+        };
     }
 
     private Task<HlslSceneData> SceneAsync(PreviewBuildArtifacts artifacts, bool gizmo, CancellationToken ct)

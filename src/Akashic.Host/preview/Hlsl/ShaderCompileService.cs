@@ -12,7 +12,7 @@ namespace Akashic.Host.Preview.Hlsl;
 
 public sealed class ShaderCompileService
 {
-    private const string CacheVersion = "hlsl-v3";
+    private const string CacheVersion = "hlsl-v4";
 
     private const int PassTimeoutSeconds = 60;
 
@@ -44,6 +44,25 @@ public sealed class ShaderCompileService
 
     public int MemoryCount => _memory.Count;
 
+    public const int MaxManualKeywords = 2;
+
+    public static IReadOnlyList<string> DeclaredKeywords(string shaderPath)
+    {
+        try
+        {
+            return ShaderLabExtractor.Parse(shaderPath).Passes
+                .SelectMany(pass => pass.DefaultKeywords)
+                .Where(ShaderKeywordRules.IsValid)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(keyword => keyword, StringComparer.Ordinal)
+                .ToList();
+        }
+        catch (Exception)
+        {
+            return [];
+        }
+    }
+
     public string BuiltInStandardPath => Path.Combine(_shimRoot, "Standard.shader");
 
     public string BuiltInUiPath => Path.Combine(_shimRoot, "UIDefault.shader");
@@ -63,7 +82,8 @@ public sealed class ShaderCompileService
     }
 
     public async Task<CompiledShader> GetAsync(string shaderPath, string contentRoot,
-        IReadOnlyList<string> keywords, bool includeOutline, CancellationToken ct)
+        IReadOnlyList<string> keywords, bool includeOutline, IReadOnlyList<string> extraKeywords,
+        string colorSpace, CancellationToken ct)
     {
         if (_fxc is null)
             return new CompiledShader
@@ -77,9 +97,13 @@ public sealed class ShaderCompileService
             return await GetFallbackAsync(false, ct);
 
         var info = new FileInfo(shaderPath);
-        var keywordKey = ShaderKeywordRules.Key(keywords);
+        var extras = extraKeywords
+            .Where(ShaderKeywordRules.IsValid)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var keywordKey = ShaderKeywordRules.Key(keywords.Concat(extras));
         var key = ShaderCacheKey.For(ShaderEnvironment.Version, shaderPath, info.LastWriteTimeUtc.Ticks,
-            keywordKey, includeOutline);
+            keywordKey, includeOutline, colorSpace);
 
         var metaPath = Path.Combine(_root, key, "meta.json");
         if (_memory.TryGetValue(key, out var memory)) return memory;
@@ -108,7 +132,7 @@ public sealed class ShaderCompileService
             }
 
             var compiled = await CompileAsync(shaderPath, contentRoot, keywords, includeOutline,
-                Path.Combine(_root, key), ct);
+                extras, colorSpace, Path.Combine(_root, key), ct);
             if (!compiled.Ok)
             {
                 _log?.LogWarning("HLSL 编译失败 {shader}：{error}", shaderPath, compiled.Error);
@@ -308,7 +332,8 @@ public sealed class ShaderCompileService
     }
 
     private async Task<CompiledShader> CompileAsync(string shaderPath, string contentRoot,
-        IReadOnlyList<string> keywords, bool includeOutline, string directory, CancellationToken ct)
+        IReadOnlyList<string> keywords, bool includeOutline, IReadOnlyList<string> extraKeywords,
+        string colorSpace, string directory, CancellationToken ct)
     {
         var program = ShaderLabExtractor.Parse(shaderPath);
         var result = new CompiledShader
@@ -364,8 +389,10 @@ public sealed class ShaderCompileService
             Path.Combine(_shimRoot, "UnityStubs")
         };
 
-        var defines = keywords.Where(ShaderKeywordRules.IsValid).Distinct(StringComparer.Ordinal).ToList();
-        defines.Add("DIRECTIONAL");
+        var engineDefines = keywords.Where(ShaderKeywordRules.IsValid).Distinct(StringComparer.Ordinal).ToList();
+        engineDefines.Add("DIRECTIONAL");
+        if (!string.Equals(colorSpace, "linear", StringComparison.OrdinalIgnoreCase))
+            engineDefines.Add("UNITY_COLORSPACE_GAMMA");
 
         var budget = Stopwatch.StartNew();
 
@@ -395,6 +422,12 @@ public sealed class ShaderCompileService
             }
 
             var timeout = TimeSpan.FromSeconds(Math.Min(PassTimeoutSeconds, remaining));
+            var defines = new List<string>(engineDefines);
+            foreach (var keyword in extraKeywords)
+            {
+                if (pass.DefaultKeywords.Contains(keyword, StringComparer.Ordinal)) defines.Add(keyword);
+            }
+
             var (compiled, log, timedOut) = await CompilePassAsync(directory, pass.Index, pass.Name, pass.IsOutline,
                 ToInfo(pass), expanded.Source, pass.VertexEntry, pass.FragmentEntry, defines, fxcIncludes, timeout, ct);
 

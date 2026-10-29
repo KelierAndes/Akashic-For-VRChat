@@ -50,6 +50,14 @@ class _PreviewPageState extends State<PreviewPage> {
   Map<String, dynamic>? _viewer;
   Map<String, dynamic>? _renderInfo;
   Timer? _renderPoll;
+  String _sessionId = '';
+  List<Map<String, dynamic>> _variants = const [];
+  bool _variantsAvailable = false;
+  Set<String> _materialKeywords = {};
+  final Set<String> _manualKeywords = {};
+  String _colorSpace = 'gamma';
+  int _variantLimit = 2;
+  List<String> _engineKeywordsOff = const [];
 
   @override
   void initState() {
@@ -144,6 +152,12 @@ class _PreviewPageState extends State<PreviewPage> {
       _flat = false;
       _hlsl = false;
       _renderInfo = null;
+      _sessionId = '';
+      _variants = const [];
+      _variantsAvailable = false;
+      _materialKeywords = {};
+      _manualKeywords.clear();
+      _colorSpace = 'gamma';
       _collapsed.clear();
     });
 
@@ -158,6 +172,7 @@ class _PreviewPageState extends State<PreviewPage> {
       setState(() {
         _scene = Map<String, dynamic>.from(result['scene'] as Map);
         _viewerUrl = host.absolute('${result['viewerUrl']}');
+        _sessionId = '${result['sessionId']}';
         _building = false;
       });
     } catch (error) {
@@ -259,6 +274,71 @@ class _PreviewPageState extends State<PreviewPage> {
 
     await _refreshRenderInfo();
     _startRenderPoll();
+    await _loadVariants();
+  }
+
+  Future<void> _loadVariants() async {
+    if (_sessionId.isEmpty) return;
+
+    try {
+      final data = await widget.host.previewVariants(_sessionId);
+      if (!mounted) return;
+
+      final options = ((data['options'] as List?) ?? const [])
+          .map((entry) => Map<String, dynamic>.from((entry as Map).cast<String, dynamic>()))
+          .toList();
+      final engine = Map<String, dynamic>.from(
+          ((data['engine'] as Map?) ?? const {}).cast<String, dynamic>());
+
+      setState(() {
+        _variants = options;
+        _variantsAvailable = data['available'] == true;
+        _variantLimit = (data['maxManual'] as num?)?.toInt() ?? 2;
+        _materialKeywords = ((data['enabled'] as List?) ?? const [])
+            .cast<String>()
+            .toSet();
+        _engineKeywordsOff =
+            ((engine['alwaysOff'] as List?) ?? const []).cast<String>();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _applyVariants() async {
+    final list = _manualKeywords.take(_variantLimit).toList();
+    final encoded = list.map((keyword) => "'${keyword.replaceAll("'", '')}'").join(',');
+    await _web?.evaluateJavascript(
+      source: 'window.akashicSetVariants && '
+          'window.akashicSetVariants([$encoded], "$_colorSpace")',
+    );
+    await _refreshRenderInfo();
+  }
+
+  void _toggleVariant(String keyword) {
+    setState(() {
+      if (_materialKeywords.contains(keyword)) return;
+      if (_manualKeywords.contains(keyword)) {
+        _manualKeywords.remove(keyword);
+      } else if (_manualKeywords.length < _variantLimit) {
+        _manualKeywords.add(keyword);
+      } else {
+        return;
+      }
+    });
+    _applyVariants();
+  }
+
+  void _setColorSpace(String space) {
+    if (_colorSpace == space) return;
+    setState(() => _colorSpace = space);
+    _applyVariants();
+  }
+
+  void _resetVariants() {
+    setState(() {
+      _manualKeywords.clear();
+      _colorSpace = 'gamma';
+    });
+    _applyVariants();
   }
 
   void _startRenderPoll() {
@@ -1142,8 +1222,130 @@ class _PreviewPageState extends State<PreviewPage> {
               ),
             ),
           ],
+          if (_variantsAvailable) _variantSection(t),
         ],
       ],
+    );
+  }
+
+  Widget _variantSection(NeuTokens t) {
+    final declared = _variants
+        .map((entry) => '${entry['keyword']}')
+        .where((keyword) => keyword.isNotEmpty);
+    final blocked = declared.where(
+        (keyword) => _engineKeywordsOff.contains(keyword)).toList();
+    final full = _manualKeywords.length >= _variantLimit;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Icon(Icons.tune_rounded, size: 14, color: t.inkSecondary),
+            const SizedBox(width: 6),
+            Text(
+              '着色器变体',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: t.inkSecondary,
+              ),
+            ),
+            const Spacer(),
+            if (_manualKeywords.isNotEmpty || _colorSpace != 'gamma')
+              NeuPill('恢复材质原状', onTap: _resetVariants),
+          ],
+        ),
+        const SizedBox(height: 7),
+        if (_variants.isNotEmpty) ...[
+          Text(
+            '材质已启用',
+            style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final entry in _variants)
+                if (_materialKeywords.contains('${entry['keyword']}'))
+                  _variantPill(t, entry, enabled: true, selected: true, onTap: null),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '可手动启用（最多 $_variantLimit 个，作用于声明它的所有材质）',
+            style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final entry in _variants)
+                if (!_materialKeywords.contains('${entry['keyword']}'))
+                  _variantPill(
+                    t,
+                    entry,
+                    enabled: !full || _manualKeywords.contains('${entry['keyword']}'),
+                    selected: _manualKeywords.contains('${entry['keyword']}'),
+                    onTap: () => _toggleVariant('${entry['keyword']}'),
+                  ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Text(
+              '色彩空间',
+              style: TextStyle(fontSize: 10.5, color: t.inkTertiary),
+            ),
+            const SizedBox(width: 8),
+            NeuPill(
+              'Gamma',
+              bg: _colorSpace == 'gamma' ? t.ink : null,
+              fg: _colorSpace == 'gamma' ? t.raisedHi : t.inkSecondary,
+              onTap: () => _setColorSpace('gamma'),
+              tooltip: '按 Unity 的 gamma 空间项目出图（默认）',
+            ),
+            const SizedBox(width: 6),
+            NeuPill(
+              '线性',
+              bg: _colorSpace == 'linear' ? t.ink : null,
+              fg: _colorSpace == 'linear' ? t.raisedHi : t.inkSecondary,
+              onTap: () => _setColorSpace('linear'),
+              tooltip: '不定义 UNITY_COLORSPACE_GAMMA，只有写着色器分支时才变化',
+            ),
+          ],
+        ),
+        if (blocked.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            '引擎侧恒为关闭：${blocked.join('、')}。这些档在预览里没有实现，勾选不会改变画面。',
+            style: TextStyle(fontSize: 10.5, height: 1.45, color: t.warn),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _variantPill(
+    NeuTokens t,
+    Map<String, dynamic> entry, {
+    required bool enabled,
+    required bool selected,
+    required VoidCallback? onTap,
+  }) {
+    final keyword = '${entry['keyword']}';
+    final shaders = ((entry['shaders'] as List?) ?? const []).cast<String>();
+    return NeuPill(
+      keyword,
+      bg: selected ? t.ink : enabled ? null : t.inset,
+      fg: selected ? t.raisedHi : enabled ? t.inkSecondary : t.inkTertiary,
+      onTap: enabled ? onTap : null,
+      tooltip: '$keyword\n${shaders.join('、')}',
     );
   }
 

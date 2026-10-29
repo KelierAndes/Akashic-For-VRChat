@@ -23,6 +23,8 @@ Shader "Akashic/Fixture/Basic"
             #pragma vertex vert
             #pragma fragment frag
             #pragma shader_feature _EMISSION
+            #pragma multi_compile _ _FADE_ON
+            #pragma shader_feature_local __ _USE_CUSTOM_GRADIENT
 
             float4 _Color;
 

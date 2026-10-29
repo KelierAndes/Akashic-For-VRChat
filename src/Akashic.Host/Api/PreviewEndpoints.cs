@@ -111,6 +111,10 @@ public static partial class PreviewEndpoints
             }
         });
 
+        group.MapGet("/preview/variants", async Task<IResult> (string session, HlslPreviewService hlsl,
+            CancellationToken ct) =>
+            Results.Json(await hlsl.DescribeVariantsAsync(session, ct)));
+
         group.MapGet("/preview/hlsl/status", (HlslPreviewService hlsl) =>
         {
             var (available, error, adapter) = hlsl.Status();

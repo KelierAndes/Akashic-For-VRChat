@@ -454,6 +454,8 @@ let hlslOn = false;
 let hlslBusy = false;
 let hlslQueued = false;
 let viewMode = 'textured';
+let hlslKeywords = [];
+let hlslColorSpace = 'gamma';
 let baseSummary = '';
 let hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: '', textures: '', msaa: '' };
 
@@ -523,6 +525,15 @@ window.akashicSetHlsl = (on) => {
   }
 };
 
+window.akashicSetVariants = (keywords, colorSpace) => {
+  const next = Array.isArray(keywords) ? keywords.slice(0, 2) : [];
+  const nextSpace = colorSpace === 'linear' ? 'linear' : 'gamma';
+  const changed = next.join(',') !== hlslKeywords.join(',') || nextSpace !== hlslColorSpace;
+  hlslKeywords = next;
+  hlslColorSpace = nextSpace;
+  if (hlslOn && changed) requestHlsl(false);
+};
+
 window.akashicHlslState = () => ({ enabled: hlslOn, busy: hlslBusy, mode: viewMode });
 
 window.akashicHlslInfo = () => {
@@ -530,6 +541,7 @@ window.akashicHlslInfo = () => {
     return {
       enabled: true, busy: hlslBusy, mode: viewMode,
       gizmo: gizmoVisible, light: backgroundLight,
+      keywords: hlslKeywords, colorSpace: hlslColorSpace,
       draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
       textures: hlslInfo.textures, msaa: hlslInfo.msaa,
       detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
@@ -734,6 +746,8 @@ async function requestHlsl(showStatus) {
         gizmo: false,
         lightBackground: backgroundLight,
         raw: true,
+        keywords: hlslKeywords,
+        colorSpace: hlslColorSpace,
         ...hlslOrbitParams(),
         fov: HLSL_FOV
       })
