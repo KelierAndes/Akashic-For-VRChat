@@ -75,7 +75,8 @@ VRCAL 只有一条路径（three.js WebGL 看原始模型文件），它不做 p
 | B1 | 已完成（2026-10-29，档③并直接做到全尺寸单视图） | 四视图方案删除：侧车按 `view:"orbit"` 出透视单视图、回原始 RGBA（`X-Akashic-Camera` 让视窗接管机位），视窗用 canvas + 轨道相机做按需渲染（拖动 2–10 ms/帧，静止不发请求）。**未做**：档②的零拷贝帧缓冲（WebView2 仍走本地 HTTP），以及渲染/排队埋点的批量实测 |
 | B2 | 部分完成（2026-10-29） | 第 ②③ 步落地：mip 链（`GenerateMips`）+ 各向异性采样 + 4× MSAA（WARP 下关）。斜视角轮廓走样能量 148.4→81.1（−45%）、正视角 134.4→93.1，单帧 4.1→6.5 ms，贴图显存 151→201 MB（mip +33%）。**偏差**：第 ① 步 BC/DDS 直传没做——实测 12 个工程 4200+ 张贴图里 `.dds` 只有 1 个，本节「绝大多数是 DDS」的前提不成立；数字与结论见 `DEVELOPMENT.md` 的 Prefab 预览小节 |
 | C1 | 部分完成（2026-10-29） | ①contextlost/restore 已接（含坐标轴那块画布，`preventDefault` 是关键）③隐藏时停 `setAnimationLoop`、回到可见补一帧，Flutter 侧视图被遮挡时停 900 ms 轮询。②「模型级 dispose」经核对**不需要做**：换内容整块重建 WebView，GL 资源由浏览器回收；真正只增不减的是服务端的贴图与场景缓存，已分别封顶（1 GB LRU / 最近 2 个会话）并有 `TextureCacheTests` 兜住。④渲染比例下拉未做。**验收未达标部分已判定**：新增 `GET /api/preview/diagnostics[?collect=1]` 报 GC 堆与各缓存计数，实测连看 9 个包，强制 GC 后托管堆恒为 7–21 MB、`scenes`/`artifacts` 稳定在 2、`parsers` 全程 0 —— 私有内存的增长是 .NET 大对象堆未压缩 + GPU/驱动侧占用，不是泄漏；据此把贴图上限从 1 GB 收到 512 MB（实测跨模型累积会被压回，单模型峰值超出上限属预期，因为淘汰只针对「当前会话不再引用」）。②' 给 `_gpuPasses` 加回收试过，无收益且要付重建开销，已撤回。 |
-| B3 / C2 / C3 / C4 / C5 | 未开始 | 见 §六 批次 2、3 |
+| C4 | 已完成（2026-10-29） | 五条全部处理：`MeshToonMaterial` 的说法改成实际的自写 `ShaderMaterial`；`TextureST` 的两路径差异写进 `DEVELOPMENT.md`（补 `KHR_texture_transform` 留作后续，SharpGLTF 1.0.7 已有该扩展）；UI 档位 32 GB 与常量 128 GB 的关系加了说明；文档里所有写死的 `shim-vN`/`hlsl-vN`/`extract-vN`/`tex-vN` 改成占位或指向常量（`ShaderEnvironment.Version`）；上下文丢失的文案随 C1 落地。顺带把 B2 里「贴图绝大多数是 DDS」这条错误前提就地更正。 |
+| B3 / C2 / C3 / C5 | 未开始 | 见 §六 批次 2、3 |
 
 ---
 
