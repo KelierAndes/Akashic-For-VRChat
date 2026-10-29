@@ -124,7 +124,7 @@ public sealed class RendererStatus
 
 public sealed class D3D11PreviewRenderer : IDisposable
 {
-    public const long MaxTextureBytes = 1024L * 1024 * 1024;
+    public const long MaxTextureBytes = 512L * 1024 * 1024;
 
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
@@ -201,6 +201,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
     public string Adapter { get; }
 
     public long TextureCacheBytes => _textureTotalBytes;
+
+    public int GpuPassCount => _gpuPasses.Count;
 
     public static RendererStatus Probe()
     {

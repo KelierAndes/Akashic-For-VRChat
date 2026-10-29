@@ -42,6 +42,8 @@ public sealed class ShaderCompileService
 
     public string? ToolError => _fxc is null ? "找不到随包的 fxc 编译器。" : null;
 
+    public int MemoryCount => _memory.Count;
+
     public string BuiltInStandardPath => Path.Combine(_shimRoot, "Standard.shader");
 
     public string BuiltInUiPath => Path.Combine(_shimRoot, "UIDefault.shader");

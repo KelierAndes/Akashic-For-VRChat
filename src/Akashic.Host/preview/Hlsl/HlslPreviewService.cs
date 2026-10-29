@@ -39,6 +39,22 @@ public sealed class HlslPreviewService : IDisposable
         return (tool is null, tool ?? string.Empty, _renderer.Adapter);
     }
 
+    public object Diagnose()
+    {
+        lock (_recentGate)
+        {
+            return new
+            {
+                textureMb = (_renderer?.TextureCacheBytes ?? 0) / 1024 / 1024,
+                scenes = _scenes.Count,
+                artifacts = _artifacts.Count,
+                recent = _recent.ToArray(),
+                passes = _renderer?.GpuPassCount ?? 0,
+                compiled = _compiler.MemoryCount
+            };
+        }
+    }
+
     public async Task<RenderFrame> RenderAsync(RenderOptions options, CancellationToken ct)
     {
         Guard();

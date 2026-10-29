@@ -39,6 +39,8 @@ public sealed partial class PreviewService : IPreviewService
 
     public string BuildsRoot { get; }
 
+    public int ParserCount => _parsers.Count;
+
     public PreviewService(AkashicDatabase? database = null, PackageContentCache? content = null,
         string? cacheRoot = null)
     {

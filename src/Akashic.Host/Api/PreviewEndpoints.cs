@@ -117,6 +117,41 @@ public static partial class PreviewEndpoints
             return Results.Json(new { available, error, adapter });
         });
 
+        group.MapGet("/preview/diagnostics", (HlslPreviewService hlsl, IPreviewService preview,
+            HttpContext context) =>
+        {
+            var collect = Query(context, "collect") is "1" or "true";
+            if (collect)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+            }
+
+            var info = GC.GetGCMemoryInfo();
+
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+
+            return Results.Json(new
+            {
+                collected = collect,
+                gc = new
+                {
+                    managedMb = GC.GetTotalMemory(false) / 1024 / 1024,
+                    fragmentedMb = info.FragmentedBytes / 1024 / 1024,
+                    committedMb = info.TotalCommittedBytes / 1024 / 1024,
+                    collections = new[] { GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2) }
+                },
+                process = new
+                {
+                    privateMb = self.PrivateMemorySize64 / 1024 / 1024,
+                    workingMb = self.WorkingSet64 / 1024 / 1024
+                },
+                hlsl = hlsl.Diagnose(),
+                parsers = (preview as PreviewService)?.ParserCount ?? -1
+            });
+        });
+
         return group;
     }
 
