@@ -16,8 +16,7 @@ public static class ShaderEnvironment
 
     public static string Ensure(string cacheRoot)
     {
-        var root = Path.Combine(cacheRoot, "hlsl", Version);
-        Directory.CreateDirectory(root);
+        var root = PreviewCachePaths.VersionedUnder(cacheRoot, "hlsl", Version);
         Directory.CreateDirectory(Path.Combine(root, "UnityStubs"));
 
         var assembly = typeof(ShaderEnvironment).Assembly;

@@ -225,7 +225,7 @@ public sealed class GlbBuilder : IDisposable
         Scene? scene = null;
         try
         {
-            scene = _assimp.ImportFile(path,
+            scene = _assimp.ImportFile(AssimpPaths.Openable(path),
                 PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |

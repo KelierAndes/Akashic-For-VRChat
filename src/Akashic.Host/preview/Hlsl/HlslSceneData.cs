@@ -298,7 +298,7 @@ public static class HlslSceneBuilder
     {
         try
         {
-            return assimp.ImportFile(path,
+            return assimp.ImportFile(AssimpPaths.Openable(path),
                 PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |

@@ -1,4 +1,5 @@
 using Akashic.Core.Services.Preview;
+using Akashic.Core.Services.Preview.Shader;
 using Xunit;
 
 namespace Akashic.Tests;
@@ -20,6 +21,35 @@ public class PreviewCachePathsTests
             Assert.True(Directory.Exists(second));
             Assert.False(Directory.Exists(first));
             Assert.True(Directory.Exists(shim));
+        }
+        finally
+        {
+            root.Delete(true);
+        }
+    }
+
+    [Fact]
+    public void ShimSetupReclaimsItsOwnFamilyAndSparesTheCompileCache()
+    {
+        var root = Directory.CreateTempSubdirectory("akashic-cache-");
+        try
+        {
+            var container = Path.Combine(root.FullName, "hlsl");
+            Directory.CreateDirectory(Path.Combine(container, "shim-v6"));
+            Directory.CreateDirectory(Path.Combine(container, "hlsl-v1"));
+
+            var shim = ShaderEnvironment.Ensure(root.FullName);
+
+            Assert.Equal(ShaderEnvironment.Version, Path.GetFileName(shim));
+            Assert.True(File.Exists(Path.Combine(shim, "Standard.shader")));
+            Assert.True(Directory.Exists(Path.Combine(container, "hlsl-v1")));
+
+            var families = Directory.EnumerateDirectories(container)
+                .Select(Path.GetFileName)
+                .Where(name => name!.StartsWith("shim-", StringComparison.Ordinal))
+                .ToArray();
+
+            Assert.Equivalent(new[] { ShaderEnvironment.Version }, families);
         }
         finally
         {

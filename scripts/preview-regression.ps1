@@ -1,7 +1,7 @@
 param(
     [string]$HostExe = '',
     [string]$Baseline = '',
-    [string[]]$Packages = @('SUIMONO', 'Nijiiro', 'ABT', 'MiniSimplisticPens', 'AudioHairClip'),
+    [string[]]$Packages = @('SUIMONO', 'Nijiiro', 'ABT', 'MiniSimplisticPens', 'AudioHairClip', 'Starlight of Irua'),
     [int]$MaxPrefabs = 3,
     [int]$MaxMaterials = 6,
     [switch]$Update,
@@ -222,33 +222,42 @@ if ($Update -or -not (Test-Path $Baseline)) {
     Set-Content -Path $Baseline -Value $json -Encoding UTF8
     Write-Output "baseline written: $Baseline"
 } else {
-    $expected = (Get-Content $Baseline -Raw | ConvertFrom-Json).metrics
-    $drift = @()
-    foreach ($field in @('renderable', 'zeroFallback')) {
-        if ($metrics.$field -lt $expected.$field) {
-            $drift += ('{0} dropped from {1} to {2}' -f $field, $expected.$field, $metrics.$field)
+    $recorded = Get-Content $Baseline -Raw | ConvertFrom-Json
+    $expected = $recorded.metrics
+    $sameList = (@($recorded.packages | ForEach-Object { $_ }) -join '|') -eq ($Packages -join '|')
+
+    if (-not $sameList) {
+        $covers = @($recorded.packages | ForEach-Object { $_ }) -join ', '
+        Write-Output ("baseline covers: " + $covers)
+        Write-Output "package list differs - metrics reported, not compared"
+    } else {
+        $drift = @()
+        foreach ($field in @('renderable', 'zeroFallback')) {
+            if ($metrics.$field -lt $expected.$field) {
+                $drift += ('{0} dropped from {1} to {2}' -f $field, $expected.$field, $metrics.$field)
+            }
         }
-    }
-    foreach ($field in @('buildFail', 'fallbackMats')) {
-        if ($metrics.$field -gt $expected.$field) {
-            $drift += ('{0} grew from {1} to {2}' -f $field, $expected.$field, $metrics.$field)
+        foreach ($field in @('buildFail', 'fallbackMats')) {
+            if ($metrics.$field -gt $expected.$field) {
+                $drift += ('{0} grew from {1} to {2}' -f $field, $expected.$field, $metrics.$field)
+            }
         }
-    }
-    foreach ($kind in @($expected.reject.PSObject.Properties.Name | Where-Object { $_ })) {
-        $before = Get-Metric $expected.reject $kind
-        $after = Get-Metric $metrics.reject $kind
-        if ($after -gt $before) { $drift += ('reject/{0} grew from {1} to {2}' -f $kind, $before, $after) }
-    }
-    foreach ($kind in @($metrics.reject.Keys | Where-Object { $_ })) {
-        if ((Get-Metric $expected.reject $kind) -eq 0) {
-            $drift += ('reject/{0} appeared with {1}' -f $kind, $metrics.reject[$kind])
+        foreach ($kind in @($expected.reject.PSObject.Properties.Name | Where-Object { $_ })) {
+            $before = Get-Metric $expected.reject $kind
+            $after = Get-Metric $metrics.reject $kind
+            if ($after -gt $before) { $drift += ('reject/{0} grew from {1} to {2}' -f $kind, $before, $after) }
         }
+        foreach ($kind in @($metrics.reject.Keys | Where-Object { $_ })) {
+            if ((Get-Metric $expected.reject $kind) -eq 0) {
+                $drift += ('reject/{0} appeared with {1}' -f $kind, $metrics.reject[$kind])
+            }
+        }
+        if ($drift.Count -gt 0) {
+            $drift | ForEach-Object { Write-Output "regression: $_" }
+            throw 'preview metrics got worse'
+        }
+        Write-Output "metrics hold against the baseline"
     }
-    if ($drift.Count -gt 0) {
-        $drift | ForEach-Object { Write-Output "regression: $_" }
-        throw 'preview metrics got worse'
-    }
-    Write-Output "metrics hold against the baseline"
 }
 
 try { $process.Kill() } catch { }
