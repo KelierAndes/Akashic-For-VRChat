@@ -70,7 +70,7 @@ VRCAL 只有一条路径（three.js WebGL 看原始模型文件），它不做 p
 | 编号 | 状态 | 备注 |
 | --- | --- | --- |
 | A1 | 已完成（2026-10-27） | 2 MB / 4 MB 体积闸门、include 自行展开 + 越界拒绝（`ShaderIncludeResolver`）、60 秒 / 180 秒分级超时；失败按 `size/include/timeout/compile/unsupported` 分类型进 `X-Akashic-Reject-<kind>` 与 `-fb` 的 meta。**偏差**：允许根保留了「包内容根」，只拒绝绝对路径与含 `..` 的段——包内跨目录 include 是常态，逃出包内容根才是要防的那一步；因此 200 shader 的 fallback 率回归尚未做（缺第 5 步脚本），目前只有样例包实机验证 |
-| A2 | 进行中（2026-10-27） | 第 1、2、6 步已落地：`tests/Akashic.Tests` 29 个用例（提取器 / include 解析 / 关键字 / 缓存键 / 缓存族与配额）、`scripts/test-all.ps1`；第 3 步黄金图与第 5 步全库回归脚本待做 |
+| A2 | 进行中（2026-10-29） | 第 1、2、3、5、6 步已落地：`tests/Akashic.Tests` 32 个用例（提取器 / include 解析 / 关键字 / 缓存键 / 缓存族与配额 + **黄金图**：WARP 出图，结构断言 + 原始 RGBA 的 SHA256 对 `docs/preview-golden.json`，`AKASHIC_GOLDEN_UPDATE=1` 重生成）；`scripts/preview-regression.ps1` 跑固定 5 包清单并写 `docs/preview-regression-baseline.json`，默认「只准变好」；`test-all.ps1 -Regression` 接入。**待做**：第 4 步 Flutter 状态机测试（`_toggleHlsl` 的 1.5 s 复查与 900 ms 轮询用假时钟断言）。首轮基线（5 包 11 prefab）：可渲染 7、零回退 2、绘制 86、回退材质 19、材质球 24/24、构建失败 0、预期内不可预览 4；顺带量到 ABT 有 2 张贴图解不出（`.dds`/`.exr` 那一类，与 B2 的记录对上）。脚本侧的坑与结论都记在 `DEVELOPMENT.md`。 |
 | B4 | 已完成（2026-10-27） | `KeyedSemaphore`，同 shader 串行、跨 shader 并行，上限 `min(4, CPU/2)`；内存缓存换 `ConcurrentDictionary`。未实测批量预热墙钟时间（缺第 5 步的回归脚本） |
 | B1 | 已完成（2026-10-29，档③并直接做到全尺寸单视图） | 四视图方案删除：侧车按 `view:"orbit"` 出透视单视图、回原始 RGBA（`X-Akashic-Camera` 让视窗接管机位），视窗用 canvas + 轨道相机做按需渲染（拖动 2–10 ms/帧，静止不发请求）。**未做**：档②的零拷贝帧缓冲（WebView2 仍走本地 HTTP），以及渲染/排队埋点的批量实测 |
 | B2 | 部分完成（2026-10-29） | 第 ②③ 步落地：mip 链（`GenerateMips`）+ 各向异性采样 + 4× MSAA（WARP 下关）。斜视角轮廓走样能量 148.4→81.1（−45%）、正视角 134.4→93.1，单帧 4.1→6.5 ms，贴图显存 151→201 MB（mip +33%）。**偏差**：第 ① 步 BC/DDS 直传没做——实测 12 个工程 4200+ 张贴图里 `.dds` 只有 1 个，本节「绝大多数是 DDS」的前提不成立；数字与结论见 `DEVELOPMENT.md` 的 Prefab 预览小节 |

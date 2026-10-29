@@ -1,6 +1,7 @@
 param(
     [switch]$SkipDotnet,
-    [switch]$SkipFlutter
+    [switch]$SkipFlutter,
+    [switch]$Regression
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +23,11 @@ if (-not $SkipFlutter) {
     finally {
         Pop-Location
     }
+}
+
+if ($Regression) {
+    Write-Host 'preview regression (needs the real asset library)...'
+    & (Join-Path $PSScriptRoot 'preview-regression.ps1')
 }
 
 Write-Host 'all tests passed'

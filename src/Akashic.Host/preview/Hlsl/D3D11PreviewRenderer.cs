@@ -209,8 +209,15 @@ public sealed class D3D11PreviewRenderer : IDisposable
         }
     }
 
-    public static D3D11PreviewRenderer Create()
+    public static D3D11PreviewRenderer Create(bool softwareOnly = false)
     {
+        if (softwareOnly)
+        {
+            var software = D3D11.D3D11CreateDevice(DriverType.Warp, DeviceCreationFlags.BgraSupport,
+                [FeatureLevel.Level_11_0]);
+            return new D3D11PreviewRenderer(software, "WARP");
+        }
+
         try
         {
             var device = D3D11.D3D11CreateDevice(DriverType.Hardware, DeviceCreationFlags.BgraSupport,

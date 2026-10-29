@@ -1,0 +1,29 @@
+﻿{
+    "generated":  "2026-10-29 21:55",
+    "host":  "E:\\Akashic\\VPMManager\\src\\Akashic.Host\\bin\\Release\\net8.0-windows10.0.26100.0\\Akashic.Host.exe",
+    "packages":  [
+                     "SUIMONO",
+                     "Nijiiro",
+                     "ABT",
+                     "MiniSimplisticPens",
+                     "AudioHairClip"
+                 ],
+    "metrics":  {
+                    "packages":  5,
+                    "prefabBuilds":  11,
+                    "buildFail":  0,
+                    "renderable":  7,
+                    "zeroFallback":  2,
+                    "draws":  86,
+                    "fallbackMats":  19,
+                    "reject":  {
+
+                               },
+                    "notPreviewable":  4,
+                    "ballOk":  24,
+                    "ballFail":  0,
+                    "buildMsTotal":  7077,
+                    "renderMsTotal":  1849,
+                    "textureMbMax":  201
+                }
+}
