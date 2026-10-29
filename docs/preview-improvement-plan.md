@@ -72,7 +72,8 @@ VRCAL 只有一条路径（three.js WebGL 看原始模型文件），它不做 p
 | A1 | 已完成（2026-10-27） | 2 MB / 4 MB 体积闸门、include 自行展开 + 越界拒绝（`ShaderIncludeResolver`）、60 秒 / 180 秒分级超时；失败按 `size/include/timeout/compile/unsupported` 分类型进 `X-Akashic-Reject-<kind>` 与 `-fb` 的 meta。**偏差**：允许根保留了「包内容根」，只拒绝绝对路径与含 `..` 的段——包内跨目录 include 是常态，逃出包内容根才是要防的那一步；因此 200 shader 的 fallback 率回归尚未做（缺第 5 步脚本），目前只有样例包实机验证 |
 | A2 | 进行中（2026-10-27） | 第 1、2、6 步已落地：`tests/Akashic.Tests` 29 个用例（提取器 / include 解析 / 关键字 / 缓存键 / 缓存族与配额）、`scripts/test-all.ps1`；第 3 步黄金图与第 5 步全库回归脚本待做 |
 | B4 | 已完成（2026-10-27） | `KeyedSemaphore`，同 shader 串行、跨 shader 并行，上限 `min(4, CPU/2)`；内存缓存换 `ConcurrentDictionary`。未实测批量预热墙钟时间（缺第 5 步的回归脚本） |
-| B1 / B2 / B3 / C1 / C2 / C3 / C4 / C5 | 未开始 | 见 §六 批次 2、3 |
+| B1 | 已完成（2026-10-29，档③并直接做到全尺寸单视图） | 四视图方案删除：侧车按 `view:"orbit"` 出透视单视图、回原始 RGBA（`X-Akashic-Camera` 让视窗接管机位），视窗用 canvas + 轨道相机做按需渲染（拖动 2–10 ms/帧，静止不发请求）。**未做**：档②的零拷贝帧缓冲（WebView2 仍走本地 HTTP），以及渲染/排队埋点的批量实测 |
+| B2 / B3 / C1 / C2 / C3 / C4 / C5 | 未开始 | 见 §六 批次 2、3 |
 
 ---
 

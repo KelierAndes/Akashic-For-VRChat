@@ -370,7 +370,7 @@ class _PreviewPageState extends State<PreviewPage> {
           ],
           if (!_pickerVisible) ...[
             NeuActionButton(
-              label: _hlsl ? '返回实时' : 'HLSL 精确',
+              label: _hlsl ? '返回近似' : 'HLSL 精确',
               icon: _hlsl
                   ? Icons.threed_rotation_rounded
                   : Icons.precision_manufacturing_rounded,
@@ -394,7 +394,7 @@ class _PreviewPageState extends State<PreviewPage> {
             NeuActionButton(
               label: '重置视角',
               icon: Icons.center_focus_strong_rounded,
-              onTap: _scene == null || _hlsl
+              onTap: _scene == null
                   ? null
                   : () => _web?.evaluateJavascript(
                       source: 'window.akashicResetView && window.akashicResetView()',
@@ -1066,7 +1066,7 @@ class _PreviewPageState extends State<PreviewPage> {
         ] else if (!_hlsl) ...[
           const SizedBox(height: 10),
           Text(
-            'HLSL 未启用。打开右上角「HLSL 精确」后，这里会显示绘制次数、回退材质与原因。',
+            'HLSL 未启用。打开右上角「HLSL 精确」后，这里会显示绘制次数、单帧耗时、回退材质与原因。',
             style: TextStyle(fontSize: 11, height: 1.5, color: t.inkTertiary),
           ),
         ] else if (info == null) ...[

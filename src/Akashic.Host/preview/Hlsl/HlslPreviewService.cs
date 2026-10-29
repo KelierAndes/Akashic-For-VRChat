@@ -127,10 +127,15 @@ public sealed class HlslPreviewService : IDisposable
             shaders[material] = shader;
         }
 
+        var queueWatch = System.Diagnostics.Stopwatch.StartNew();
         await _renderGate.WaitAsync(ct);
+        var queueMs = queueWatch.Elapsed.TotalMilliseconds;
         try
         {
+            var renderWatch = System.Diagnostics.Stopwatch.StartNew();
             var frame = await Task.Run(() => _renderer!.Render(scene, shaders, fallbackOpaque, options), ct);
+            frame.RenderMs = renderWatch.Elapsed.TotalMilliseconds;
+            frame.QueueMs = queueMs;
             frame.FallbackNotes = notes.Distinct().ToList();
             frame.FailureKinds = failureKinds;
             return frame;

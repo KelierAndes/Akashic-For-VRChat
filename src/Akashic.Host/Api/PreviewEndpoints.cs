@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using Akashic.Core.Models;
@@ -71,6 +72,22 @@ public static partial class PreviewEndpoints
                 context.Response.Headers["X-Akashic-Fallbacks"] = frame.Fallbacks.ToString();
                 foreach (var (kind, count) in frame.FailureKinds)
                     context.Response.Headers["X-Akashic-Reject-" + kind] = count.ToString();
+                context.Response.Headers["X-Akashic-Render-Ms"] =
+                    frame.RenderMs.ToString("F1", CultureInfo.InvariantCulture);
+                context.Response.Headers["X-Akashic-Queue-Ms"] =
+                    frame.QueueMs.ToString("F1", CultureInfo.InvariantCulture);
+                context.Response.Headers["X-Akashic-Frame-Width"] = frame.Width.ToString();
+                context.Response.Headers["X-Akashic-Frame-Height"] = frame.Height.ToString();
+                if (frame.Camera is { } camera)
+                {
+                    context.Response.Headers["X-Akashic-Camera"] = string.Join(";", new[]
+                    {
+                        camera.Yaw, camera.Pitch, camera.Distance,
+                        camera.TargetX, camera.TargetY, camera.TargetZ
+                    }.Select(value => value.ToString("F5", CultureInfo.InvariantCulture))
+                        .Append(camera.Fov.ToString("F3", CultureInfo.InvariantCulture)));
+                }
+
                 if (frame.FallbackNotes.Count > 0)
                 {
                     context.Response.Headers["X-Akashic-Fallback-Detail"] =
@@ -78,7 +95,9 @@ public static partial class PreviewEndpoints
                 }
 
                 context.Response.Headers["Cache-Control"] = "no-store";
-                return Results.Bytes(frame.Jpeg, "image/jpeg");
+                return options.Raw
+                    ? Results.Bytes(frame.Pixels, "application/octet-stream")
+                    : Results.Bytes(frame.Jpeg, "image/jpeg");
             }
             catch (Exception ex)
             {

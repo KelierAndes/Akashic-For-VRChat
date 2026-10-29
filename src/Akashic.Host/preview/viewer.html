@@ -33,38 +33,30 @@
     background: #17191d; z-index: 3;
   }
   #hlslView.on { display: flex; }
-  #hlslBox {
-    position: relative; width: min(100vmin, 1200px); height: min(100vmin, 1200px);
-    max-width: 100%; max-height: 100%; overflow: hidden;
+  #hlslCanvas {
+    width: 100%; height: 100%; display: block; touch-action: none; cursor: grab;
   }
-  #hlslFrame {
-    width: 100%; height: 100%; display: block;
-    transform-origin: 50% 50%; will-change: transform;
-  }
-  #hlslZoom {
+  #hlslCanvas.dragging { cursor: grabbing; }
+  #hlslStats {
     position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 6px;
     pointer-events: none; background: rgba(16, 20, 26, 0.72); color: #c9d6ea;
     font: 11px "Segoe UI", "Microsoft YaHei UI", sans-serif;
   }
-  .hlslLabel {
-    position: absolute; padding: 3px 8px; border-radius: 6px; pointer-events: none;
-    background: rgba(16, 20, 26, 0.72); color: #c9d6ea;
-    font: 11px "Segoe UI", "Microsoft YaHei UI", sans-serif;
+  #gizmoView {
+    position: fixed; right: 16px; top: 96px; width: 108px; height: 108px;
+    z-index: 5; pointer-events: none;
   }
-  .hlslLabel.tl { left: 8px; top: 8px; }
-  .hlslLabel.tr { right: 8px; top: 8px; }
-  .hlslLabel.bl { left: 8px; top: calc(50% + 8px); }
-  .hlslLabel.br { right: 8px; top: calc(50% + 8px); }
-  #hlslModes {
-    position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
-    display: flex; gap: 6px; z-index: 6;
+  #viewModes {
+    position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%);
+    display: none; gap: 6px; z-index: 6;
   }
-  #hlslModes button {
+  #viewModes.on { display: flex; }
+  #viewModes button {
     padding: 5px 11px; border-radius: 7px; border: 1px solid #3a4250;
     background: rgba(28, 33, 41, 0.88); color: #aeb9c9; cursor: pointer;
     font: 12px "Segoe UI", "Microsoft YaHei UI", sans-serif;
   }
-  #hlslModes button.on { border-color: #6f9be8; color: #eef4ff; background: rgba(52, 82, 138, 0.92); }
+  #viewModes button.on { border-color: #6f9be8; color: #eef4ff; background: rgba(52, 82, 138, 0.92); }
   #hlslToggle {
     position: fixed; right: 14px; top: 12px; z-index: 4;
     padding: 7px 12px; border-radius: 8px; border: 1px solid #3a4250;
@@ -90,10 +82,10 @@
   body.light #hlslToggle, body.light #bgToggle {
     background: rgba(255, 255, 255, 0.92); color: #3a4350; border-color: #c6ced9;
   }
-  body.light #hlslModes button {
+  body.light #viewModes button {
     background: rgba(255, 255, 255, 0.92); color: #3a4350; border-color: #c6ced9;
   }
-  body.light .hlslLabel, body.light #hlslZoom {
+  body.light #hlslStats {
     background: rgba(255, 255, 255, 0.82); color: #3a4350;
   }
 </style>
@@ -104,20 +96,15 @@
 <body>
 <div id="stage"></div>
 <div id="hlslView">
-  <div id="hlslBox">
-    <img id="hlslFrame" alt="">
-    <span class="hlslLabel tl">正视</span>
-    <span class="hlslLabel tr">左视</span>
-    <span class="hlslLabel bl">顶视</span>
-    <span class="hlslLabel br">正等测</span>
-    <div id="hlslModes">
-      <button type="button" data-mode="textured" class="on">贴图</button>
-      <button type="button" data-mode="clay">白膜</button>
-      <button type="button" data-mode="wireframe">网格</button>
-      <button type="button" id="hlslGizmo">坐标轴</button>
-    </div>
-    <span id="hlslZoom">缩放 100%</span>
-  </div>
+  <canvas id="hlslCanvas"></canvas>
+  <span id="hlslStats"></span>
+</div>
+<canvas id="gizmoView"></canvas>
+<div id="viewModes">
+  <button type="button" data-mode="textured" class="on">贴图</button>
+  <button type="button" data-mode="clay">白膜</button>
+  <button type="button" data-mode="wireframe">网格</button>
+  <button type="button" id="viewGizmo">坐标轴</button>
 </div>
 <button id="hlslToggle" type="button">HLSL 精确渲染</button>
 <button id="bgToggle" type="button">底色：深色</button>
@@ -134,11 +121,7 @@ const build = params.get('build') || '';
 const token = (location.pathname.split('/').filter(Boolean)[1] || '');
 const stage = document.getElementById('stage');
 const hlslView = document.getElementById('hlslView');
-const hlslBox = document.getElementById('hlslBox');
-const hlslFrame = document.getElementById('hlslFrame');
-const hlslZoomLabel = document.getElementById('hlslZoom');
 const bgToggle = document.getElementById('bgToggle');
-const hlslModes = document.getElementById('hlslModes');
 const hlslToggle = document.getElementById('hlslToggle');
 const statusBox = document.getElementById('status');
 const message = document.getElementById('message');
@@ -210,6 +193,7 @@ window.akashicSetBackground = (light) => {
   if (!!light === backgroundLight) return;
   backgroundLight = !!light;
   applyBackground();
+  if (hlslOn) requestHlsl(false);
 };
 
 window.akashicBackground = () => backgroundLight;
@@ -276,24 +260,33 @@ gizmoScene.add(new THREE.Mesh(
 
 let gizmoVisible = true;
 
+const gizmoCanvas = document.getElementById('gizmoView');
+const gizmoRenderer = new THREE.WebGLRenderer({ canvas: gizmoCanvas, antialias: true, alpha: true });
+gizmoRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+gizmoRenderer.setSize(108, 108, false);
+gizmoRenderer.setClearAlpha(0);
+
+const gizmoProbe = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
+
+function activeGizmoQuaternion() {
+  if (!hlslOn) return camera.quaternion;
+
+  const { dir } = hlslBasis();
+  const distance = hlslCamera.distance || 1;
+  const target = hlslCamera.target || { x: 0, y: 0, z: 0 };
+
+  gizmoProbe.position.set(-(target.x + dir.x * distance), target.y + dir.y * distance, target.z + dir.z * distance);
+  gizmoProbe.up.set(0, 1, 0);
+  gizmoProbe.lookAt(-target.x, target.y, target.z);
+  return gizmoProbe.quaternion;
+}
+
 function drawGizmo() {
+  gizmoCanvas.style.display = gizmoVisible ? 'block' : 'none';
   if (!gizmoVisible) return;
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  const size = Math.max(72, Math.round(Math.min(width, height) * 0.17));
-  const margin = 16;
 
-  gizmoScene.quaternion.copy(camera.quaternion).invert();
-
-  renderer.autoClear = false;
-  renderer.clearDepth();
-  renderer.setScissorTest(true);
-  renderer.setViewport(width - size - margin, height - size - margin, size, size);
-  renderer.setScissor(width - size - margin, height - size - margin, size, size);
-  renderer.render(gizmoScene, gizmoCamera);
-  renderer.setScissorTest(false);
-  renderer.setViewport(0, 0, width, height);
-  renderer.autoClear = true;
+  gizmoScene.quaternion.copy(activeGizmoQuaternion()).invert();
+  gizmoRenderer.render(gizmoScene, gizmoCamera);
 }
 
 const gradient = (() => {
@@ -332,8 +325,15 @@ window.akashicFocus = (id) => {
 };
 
 window.akashicResetView = () => {
+  if (hlslOn) {
+    resetHlslCamera();
+    return;
+  }
+
   if (model) frameObject(model);
   controls.update();
+  renderer.render(scene, camera);
+  drawGizmo();
 };
 
 window.akashicSetFlat = (flat) => {
@@ -376,33 +376,57 @@ window.akashicSetFlat = (flat) => {
 let hlslOn = false;
 let hlslBusy = false;
 let hlslQueued = false;
-let hlslMode = 'textured';
-let hlslGizmoOn = true;
+let viewMode = 'textured';
 let baseSummary = '';
 let hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: '' };
 
-const hlslGizmo = document.getElementById('hlslGizmo');
+const viewModes = document.getElementById('viewModes');
+const viewGizmo = document.getElementById('viewGizmo');
 const modeLabels = { textured: '贴图', clay: '白膜', wireframe: '网格' };
-const modeButtons = [...hlslModes.querySelectorAll('button[data-mode]')];
+const modeButtons = [...viewModes.querySelectorAll('button[data-mode]')];
 
-function setHlslMode(mode) {
-  hlslMode = mode;
+const clayMaterial = new THREE.MeshStandardMaterial({ color: 0xb7c0cc, roughness: 0.62, metalness: 0.02 });
+const wireMaterial = new THREE.MeshBasicMaterial({ color: 0x9fb6d8, wireframe: true });
+const originalMaterials = new Map();
+
+function applyGlbMode(mode) {
+  if (!model) return;
+  model.traverse((object) => {
+    if (object.userData.outline) {
+      object.visible = mode === 'textured';
+      return;
+    }
+
+    if (!object.isMesh) return;
+    if (!originalMaterials.has(object)) originalMaterials.set(object, object.material);
+    object.material = mode === 'clay' ? clayMaterial : mode === 'wireframe' ? wireMaterial : originalMaterials.get(object);
+  });
+  renderer.render(scene, camera);
+  drawGizmo();
+}
+
+function setViewMode(mode) {
+  viewMode = mode;
   for (const button of modeButtons) {
     button.classList.toggle('on', button.dataset.mode === mode);
   }
-  if (hlslOn) requestHlsl(false);
+
+  if (hlslOn) {
+    requestHlsl(false);
+  } else {
+    applyGlbMode(mode);
+  }
 }
 
 for (const button of modeButtons) {
-  button.addEventListener('click', () => setHlslMode(button.dataset.mode));
+  button.addEventListener('click', () => setViewMode(button.dataset.mode));
 }
 
-hlslGizmo.classList.toggle('on', hlslGizmoOn);
-hlslGizmo.addEventListener('click', () => {
-  hlslGizmoOn = !hlslGizmoOn;
-  hlslGizmo.classList.toggle('on', hlslGizmoOn);
-  gizmoVisible = hlslGizmoOn;
-  if (hlslOn) requestHlsl(false);
+viewGizmo.classList.toggle('on', gizmoVisible);
+viewGizmo.addEventListener('click', () => {
+  gizmoVisible = !gizmoVisible;
+  viewGizmo.classList.toggle('on', gizmoVisible);
+  drawGizmo();
 });
 
 window.akashicSetHlsl = (on) => {
@@ -414,22 +438,23 @@ window.akashicSetHlsl = (on) => {
   hint.style.marginLeft = hlslOn ? '0' : 'auto';
   hint.style.marginRight = hlslOn ? 'auto' : '0';
   controls.enabled = !hlslOn;
-  hint.textContent = hlslOn ? '滚轮缩放 · 拖拽平移 · 双击复位' : '左键旋转 · 右键平移 · 滚轮缩放';
+  hint.textContent = '左键旋转 · 右键平移 · 滚轮缩放 · 双击复位';
   if (hlslOn) {
     baseSummary = summary.textContent;
-    setStatus('正在用 D3D11 渲染四视图…');
+    setStatus('正在用 D3D11 渲染…');
     requestHlsl(true);
   } else {
     summary.textContent = baseSummary;
     hideStatus();
+    applyGlbMode(viewMode);
   }
 };
 
-window.akashicHlslState = () => ({ enabled: hlslOn, busy: hlslBusy, mode: hlslMode });
+window.akashicHlslState = () => ({ enabled: hlslOn, busy: hlslBusy, mode: viewMode });
 
 window.akashicHlslInfo = () => ({
-  enabled: hlslOn, busy: hlslBusy, mode: hlslMode,
-  gizmo: hlslGizmoOn, light: backgroundLight,
+  enabled: hlslOn, busy: hlslBusy, mode: viewMode,
+  gizmo: gizmoVisible, light: backgroundLight,
   draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
   detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
 });
@@ -441,84 +466,164 @@ if (params.get('embed') === '1') {
 hlslToggle.addEventListener('click', () => window.akashicSetHlsl(!hlslOn));
 bgToggle.addEventListener('click', () => window.akashicSetBackground(!backgroundLight));
 
-let hlslZoom = 1;
-let hlslPanX = 0;
-let hlslPanY = 0;
+const hlslCanvas = document.getElementById('hlslCanvas');
+const hlslStats = document.getElementById('hlslStats');
+const hlslCtx = hlslCanvas.getContext('2d', { alpha: false });
+
+const HLSL_DEFAULT_YAW = -0.7033;
+const HLSL_DEFAULT_PITCH = 0.3915;
+const HLSL_FOV = 38;
+
+const hlslCamera = { yaw: HLSL_DEFAULT_YAW, pitch: HLSL_DEFAULT_PITCH, distance: 0, target: null };
+
 let hlslDragging = false;
+let hlslDragButton = -1;
 let hlslDragX = 0;
 let hlslDragY = 0;
+let hlslFpsAt = 0;
+let hlslFpsFrames = 0;
+let hlslFps = 0;
 
-function applyHlslTransform() {
-  hlslFrame.style.transform =
-    `translate(${hlslPanX}px, ${hlslPanY}px) scale(${hlslZoom})`;
-  hlslZoomLabel.textContent = `缩放 ${Math.round(hlslZoom * 100)}%`;
-  hlslBox.style.cursor = hlslZoom > 1.001 ? 'grab' : 'default';
-  for (const label of hlslBox.querySelectorAll('.hlslLabel')) {
-    label.style.opacity = hlslZoom > 1.001 ? '0' : '1';
-  }
+function resetHlslCamera() {
+  hlslCamera.yaw = HLSL_DEFAULT_YAW;
+  hlslCamera.pitch = HLSL_DEFAULT_PITCH;
+  hlslCamera.distance = 0;
+  hlslCamera.target = null;
+  if (hlslOn) requestHlsl(false);
 }
 
-function resetHlslZoom() {
-  hlslZoom = 1;
-  hlslPanX = 0;
-  hlslPanY = 0;
-  applyHlslTransform();
+function hlslBasis() {
+  const cosPitch = Math.cos(hlslCamera.pitch);
+  const dir = {
+    x: Math.sin(hlslCamera.yaw) * cosPitch,
+    y: Math.sin(hlslCamera.pitch),
+    z: Math.cos(hlslCamera.yaw) * cosPitch,
+  };
+  const right = { x: -dir.z, y: 0, z: dir.x };
+  const length = Math.hypot(right.x, right.z) || 1;
+  right.x /= length;
+  right.z /= length;
+  return {
+    dir,
+    right,
+    up: {
+      x: right.y * dir.z - right.z * dir.y,
+      y: right.z * dir.x - right.x * dir.z,
+      z: right.x * dir.y - right.y * dir.x,
+    },
+  };
 }
 
-hlslBox.addEventListener('wheel', (event) => {
+function hlslOrbit(dx, dy) {
+  const k = 0.0075;
+  hlslCamera.yaw -= dx * k;
+  hlslCamera.pitch = Math.max(-1.5, Math.min(1.5, hlslCamera.pitch + dy * k));
+}
+
+function hlslPan(dx, dy) {
+  if (!hlslCamera.target) return;
+  const { right, up } = hlslBasis();
+  const fov = HLSL_FOV * Math.PI / 180;
+  const perPixel = 2 * hlslCamera.distance * Math.tan(fov / 2) / Math.max(1, hlslCanvas.clientHeight);
+  const shiftX = (-right.x * dx + up.x * dy) * perPixel;
+  const shiftY = (-right.y * dx + up.y * dy) * perPixel;
+  const shiftZ = (-right.z * dx + up.z * dy) * perPixel;
+  hlslCamera.target.x += shiftX;
+  hlslCamera.target.y += shiftY;
+  hlslCamera.target.z += shiftZ;
+}
+
+function hlslDolly(deltaY) {
+  if (!hlslCamera.distance) return;
+  hlslCamera.distance = Math.max(0.001, Math.min(2000, hlslCamera.distance * Math.exp(deltaY * 0.0005)));
+}
+
+hlslCanvas.addEventListener('pointerdown', (event) => {
   if (!hlslOn) return;
-  event.preventDefault();
-  const step = event.deltaY < 0 ? 1.15 : 1 / 1.15;
-  let next = hlslZoom * step;
-  if (next <= 1.02) next = 1;
-  hlslZoom = Math.min(8, Math.max(1, next));
-  if (hlslZoom === 1) {
-    hlslPanX = 0;
-    hlslPanY = 0;
-  }
-  applyHlslTransform();
-}, { passive: false });
-
-hlslBox.addEventListener('pointerdown', (event) => {
-  if (!hlslOn || hlslZoom <= 1.001) return;
-  if (event.target.closest('#hlslModes')) return;
   hlslDragging = true;
-  hlslDragX = event.clientX - hlslPanX;
-  hlslDragY = event.clientY - hlslPanY;
-  hlslBox.setPointerCapture(event.pointerId);
-  hlslBox.style.cursor = 'grabbing';
+  hlslDragButton = event.button;
+  hlslDragX = event.clientX;
+  hlslDragY = event.clientY;
+  hlslCanvas.setPointerCapture?.(event.pointerId);
+  hlslCanvas.classList.add('dragging');
+  event.preventDefault();
 });
 
-hlslBox.addEventListener('pointermove', (event) => {
-  if (!hlslDragging) return;
-  hlslPanX = event.clientX - hlslDragX;
-  hlslPanY = event.clientY - hlslDragY;
-  applyHlslTransform();
+hlslCanvas.addEventListener('pointermove', (event) => {
+  if (!hlslDragging || !hlslOn) return;
+  const dx = event.clientX - hlslDragX;
+  const dy = event.clientY - hlslDragY;
+  if (!dx && !dy) return;
+  hlslDragX = event.clientX;
+  hlslDragY = event.clientY;
+
+  if (hlslDragButton === 0 && !event.shiftKey) hlslOrbit(dx, dy);
+  else hlslPan(dx, dy);
+
+  requestHlsl(false);
 });
 
 function endHlslDrag(event) {
   if (!hlslDragging) return;
   hlslDragging = false;
-  if (hlslBox.hasPointerCapture?.(event.pointerId)) {
-    hlslBox.releasePointerCapture(event.pointerId);
-  }
-  applyHlslTransform();
+  hlslDragButton = -1;
+  if (hlslCanvas.hasPointerCapture?.(event.pointerId)) hlslCanvas.releasePointerCapture(event.pointerId);
+  hlslCanvas.classList.remove('dragging');
+  requestHlsl(false);
 }
 
-hlslBox.addEventListener('pointerup', endHlslDrag);
-hlslBox.addEventListener('pointercancel', endHlslDrag);
-hlslBox.addEventListener('dblclick', resetHlslZoom);
+hlslCanvas.addEventListener('pointerup', endHlslDrag);
+hlslCanvas.addEventListener('pointercancel', endHlslDrag);
+hlslCanvas.addEventListener('dblclick', resetHlslCamera);
+hlslCanvas.addEventListener('contextmenu', (event) => {
+  if (hlslOn) event.preventDefault();
+});
+hlslCanvas.addEventListener('wheel', (event) => {
+  if (!hlslOn) return;
+  event.preventDefault();
+  hlslDolly(event.deltaY);
+  requestHlsl(false);
+}, { passive: false });
+
+function hlslFrameSize() {
+  const rect = hlslCanvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(96, Math.round((rect.width || window.innerWidth) * dpr));
+  const height = Math.max(96, Math.round((rect.height || window.innerHeight) * dpr));
+  const scale = Math.min(1, Math.sqrt(2600000 / (width * height)));
+  return { width: Math.max(96, Math.round(width * scale)), height: Math.max(96, Math.round(height * scale)) };
+}
+
+async function drawHlslFrame(pixels, width, height) {
+  try {
+    const bitmap = await createImageBitmap(new ImageData(pixels, width, height));
+    hlslCtx.drawImage(bitmap, 0, 0, hlslCanvas.width, hlslCanvas.height);
+    bitmap.close?.();
+  } catch {
+    const scratch = new OffscreenCanvas(width, height);
+    scratch.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
+    hlslCtx.drawImage(scratch, 0, 0, hlslCanvas.width, hlslCanvas.height);
+  }
+
+  const now = performance.now();
+  hlslFpsFrames++;
+  if (now - hlslFpsAt > 500) {
+    hlslFps = Math.round(hlslFpsFrames * 1000 / (now - hlslFpsAt));
+    hlslFpsAt = now;
+    hlslFpsFrames = 0;
+  }
+}
 
 async function requestHlsl(showStatus) {
   if (!hlslOn || !ready) return;
   if (hlslBusy) { hlslQueued = true; return; }
 
   hlslBusy = true;
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const viewport = Math.min(window.innerWidth, window.innerHeight);
-  const pane = Math.min(2048, Math.max(480, Math.round(viewport * dpr)));
-  const gap = Math.max(2, Math.round(pane / 160));
-  const size = Math.min(4096, pane * 2 + gap);
+  const size = hlslFrameSize();
+  if (hlslCanvas.width !== size.width || hlslCanvas.height !== size.height) {
+    hlslCanvas.width = size.width;
+    hlslCanvas.height = size.height;
+  }
 
   try {
     const response = await fetch('/api/preview/render', {
@@ -526,9 +631,23 @@ async function requestHlsl(showStatus) {
       headers: { 'Content-Type': 'application/json', 'X-Akashic-Token': token },
       cache: 'no-store',
       body: JSON.stringify({
-        sessionId: build, width: size, height: size,
-        view: 'quad', mode: hlslMode, outline: true, gizmo: hlslGizmoOn,
-        lightBackground: backgroundLight
+        sessionId: build,
+        width: size.width,
+        height: size.height,
+        view: 'orbit',
+        mode: viewMode,
+        outline: true,
+        gizmo: false,
+        lightBackground: backgroundLight,
+        raw: true,
+        yaw: hlslCamera.yaw,
+        pitch: hlslCamera.pitch,
+        fov: HLSL_FOV,
+        distance: hlslCamera.distance,
+        hasTarget: !!hlslCamera.target,
+        targetX: hlslCamera.target ? hlslCamera.target.x : 0,
+        targetY: hlslCamera.target ? hlslCamera.target.y : 0,
+        targetZ: hlslCamera.target ? hlslCamera.target.z : 0
       })
     });
 
@@ -539,21 +658,37 @@ async function requestHlsl(showStatus) {
       throw new Error(messageText);
     }
 
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    hlslFrame.onload = () => {
-      URL.revokeObjectURL(url);
-      resetHlslZoom();
-    };
-    hlslFrame.src = url;
+    const buffer = await response.arrayBuffer();
+    const frameWidth = Number(response.headers.get('X-Akashic-Frame-Width')) || size.width;
+    const frameHeight = Number(response.headers.get('X-Akashic-Frame-Height')) || size.height;
+
+    const cameraHeader = response.headers.get('X-Akashic-Camera');
+    if (cameraHeader && !hlslCamera.target) {
+      const parts = cameraHeader.split(';').map(Number);
+      if (parts.length >= 7 && parts.every(Number.isFinite)) {
+        hlslCamera.yaw = parts[0];
+        hlslCamera.pitch = parts[1];
+        hlslCamera.distance = parts[2];
+        hlslCamera.target = { x: parts[3], y: parts[4], z: parts[5] };
+      }
+    }
+
+    await drawHlslFrame(new Uint8ClampedArray(buffer), frameWidth, frameHeight);
+    drawGizmo();
     if (showStatus) hideStatus();
+
     const draws = response.headers.get('X-Akashic-Draws') || '?';
     const fallbacks = response.headers.get('X-Akashic-Fallbacks') || '0';
+    const renderMs = response.headers.get('X-Akashic-Render-Ms') || '';
+    const queueMs = Number(response.headers.get('X-Akashic-Queue-Ms') || '0');
     const detailRaw = response.headers.get('X-Akashic-Fallback-Detail') || '';
     let detail = '';
     try { detail = decodeURIComponent(detailRaw); } catch { detail = detailRaw; }
 
-    const head = `D3D11 四视图 · ${modeLabels[hlslMode] || hlslMode} · ${draws} 次绘制`;
+    const label = modeLabels[viewMode] || viewMode;
+    const timing = renderMs ? ` · ${renderMs} ms${queueMs > 1 ? ' +' + queueMs.toFixed(0) + ' ms 排队' : ''}` : '';
+    const rate = hlslFps > 0 ? ` · ${hlslFps} fps` : '';
+    const head = `D3D11 实时 · ${label} · ${draws} 次绘制${timing}${rate}`;
     const shown = detail ? detail.split(' | ').slice(0, 2) : [];
     const text = fallbacks === '0'
       ? `${head} · 全部材质都跑的是真实着色器`
@@ -562,6 +697,7 @@ async function requestHlsl(showStatus) {
     hlslInfo = { draws, fallbacks, detail, summary: text, error: '' };
     summary.textContent = text;
     summary.title = detail;
+    hlslStats.textContent = `${label} · ${draws} 次绘制${timing}${rate}`;
   } catch (error) {
     hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: String(error?.message || error) };
     window.akashicSetHlsl(false);
@@ -643,6 +779,8 @@ async function boot() {
       ready = true;
       hideStatus();
       summary.textContent += ` · lilToon ${applied.liltoon} / toon ${applied.toon} / lit ${applied.lit}`;
+      viewModes.classList.add('on');
+      applyGlbMode(viewMode);
 
       if (sceneData.warnings && sceneData.warnings.length) {
         console.warn(sceneData.warnings.join('\n'));
@@ -886,11 +1024,13 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (hlslOn) requestHlsl(false);
 });
 
 renderer.setAnimationLoop(() => {
   controls.update();
   if (box.visible) box.update();
+  if (hlslOn) return;
   renderer.render(scene, camera);
   drawGizmo();
 });

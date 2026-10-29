@@ -22,17 +22,17 @@ public sealed class RenderOptions
 
     public int Height { get; set; } = 900;
 
-    public float Yaw { get; set; } = 0.65f;
+    public float Yaw { get; set; } = -0.7033f;
 
-    public float Pitch { get; set; } = 0.22f;
+    public float Pitch { get; set; } = 0.3915f;
 
     public float Distance { get; set; }
 
-    public float Fov { get; set; } = 30;
+    public float Fov { get; set; } = 38;
 
     public bool Outline { get; set; } = true;
 
-    public string View { get; set; } = "quad";
+    public string View { get; set; } = "orbit";
 
     public string Mode { get; set; } = "textured";
 
@@ -41,11 +41,27 @@ public sealed class RenderOptions
     public bool LightBackground { get; set; }
 
     public float Time { get; set; }
+
+    public bool Raw { get; set; }
+
+    public bool HasTarget { get; set; }
+
+    public float TargetX { get; set; }
+
+    public float TargetY { get; set; }
+
+    public float TargetZ { get; set; }
 }
 
 public sealed class RenderFrame
 {
     public byte[] Jpeg { get; set; } = [];
+
+    public byte[] Pixels { get; set; } = [];
+
+    public int Width { get; set; }
+
+    public int Height { get; set; }
 
     public int DrawCalls { get; set; }
 
@@ -57,8 +73,33 @@ public sealed class RenderFrame
 
     public Dictionary<string, int> FailureKinds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
+    public double RenderMs { get; set; }
+
+    public double QueueMs { get; set; }
+
+    public OrbitCameraSnapshot? Camera { get; set; }
+
     public string? Warning { get; set; }
 }
+
+public sealed class OrbitCameraSnapshot
+{
+    public float Yaw { get; set; }
+
+    public float Pitch { get; set; }
+
+    public float Distance { get; set; }
+
+    public float Fov { get; set; }
+
+    public float TargetX { get; set; }
+
+    public float TargetY { get; set; }
+
+    public float TargetZ { get; set; }
+}
+
+internal readonly record struct CameraState(Matrix4x4 View, Matrix4x4 Projection, Vector3 Eye);
 
 public sealed class RendererStatus
 {
@@ -179,44 +220,39 @@ public sealed class D3D11PreviewRenderer : IDisposable
             ? new Color4(0.93f, 0.94f, 0.96f, 1f)
             : new Color4(0.075f, 0.082f, 0.094f, 1f));
         var ticks = (float)(DateTime.UtcNow - _start).TotalSeconds;
-        var drawCalls = 0;
+        var aspect = (float)width / height;
 
-        if (string.Equals(options.View, "quad", StringComparison.OrdinalIgnoreCase) ||
+        CameraState camera;
+        OrbitCameraSnapshot? snapshot = null;
+        if (string.Equals(options.View, "orbit", StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrWhiteSpace(options.View))
         {
-            var gap = Math.Max(2, Math.Min(width, height) / 160);
-            var paneWidth = (width - gap) / 2;
-            var paneHeight = (height - gap) / 2;
-            var specs = new[] { Views.Front, Views.Left, Views.Top, Views.Iso };
-            var paneAspect = (float)paneWidth / Math.Max(1, paneHeight);
-            var sharedHeight = specs.Max(spec => FitView(scene, spec, paneAspect).halfHeight);
-
-            for (var i = 0; i < specs.Length; i++)
-            {
-                var x = i % 2 == 0 ? 0 : paneWidth + gap;
-                var y = i < 2 ? 0 : paneHeight + gap;
-                _context.RSSetViewport(new Viewport(x, y, paneWidth, paneHeight, 0, 1));
-                _context.ClearDepthStencilView(_depthView!, DepthStencilClearFlags.Depth, 1f, 0);
-                drawCalls += DrawView(scene, specs[i], paneWidth, paneHeight, ticks, sharedHeight);
-            }
+            var orbit = CreateOrbitCamera(scene, options, aspect);
+            camera = orbit.State;
+            snapshot = orbit.Snapshot;
         }
         else
         {
-            var spec = Views.Find(options.View);
-            _context.RSSetViewport(new Viewport(0, 0, width, height, 0, 1));
-            _context.ClearDepthStencilView(_depthView!, DepthStencilClearFlags.Depth, 1f, 0);
-            drawCalls += DrawView(scene, spec, width, height, ticks);
+            camera = CreateCamera(scene, Views.Find(options.View), aspect);
         }
 
+        _context.RSSetViewport(new Viewport(0, 0, width, height, 0, 1));
+        _context.ClearDepthStencilView(_depthView!, DepthStencilClearFlags.Depth, 1f, 0);
+        var drawCalls = DrawView(scene, camera, width, height, ticks);
+
         _context.Flush();
-        var jpeg = ReadBack(width, height);
+        var frame = ReadBack(width, height, options.Raw);
 
         return new RenderFrame
         {
-            Jpeg = jpeg,
+            Jpeg = frame.Jpeg,
+            Pixels = frame.Raw,
+            Width = width,
+            Height = height,
             DrawCalls = drawCalls,
             Materials = _session.Materials,
-            Fallbacks = _session.Fallbacks
+            Fallbacks = _session.Fallbacks,
+            Camera = snapshot
         };
     }
 
@@ -234,15 +270,13 @@ public sealed class D3D11PreviewRenderer : IDisposable
         return string.Join(";", parts);
     }
 
-    private int DrawView(HlslSceneData scene, ViewSpec spec, int width, int height, float ticks,
-        float? sharedHalfHeight = null)
+    private int DrawView(HlslSceneData scene, CameraState camera, int width, int height, float ticks)
     {
-        var camera = CreateCamera(scene, spec, (float)width / height, sharedHalfHeight);
         var items = _session!.Items
             .OrderBy(item => item.Source.Transparent ? 1 : 0)
             .ThenBy(item => item.Source.Transparent
-                ? -Vector3.Distance(camera.eye, item.Source.Center)
-                : Vector3.Distance(camera.eye, item.Source.Center))
+                ? -Vector3.Distance(camera.Eye, item.Source.Center)
+                : Vector3.Distance(camera.Eye, item.Source.Center))
             .ToList();
 
         var drawCalls = 0;
@@ -688,8 +722,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         return (target, halfHeight);
     }
 
-    private static (Matrix4x4 view, Matrix4x4 projection, Vector3 eye) CreateCamera(HlslSceneData scene,
-        ViewSpec spec, float aspect, float? forcedHalfHeight)
+    private static CameraState CreateCamera(HlslSceneData scene, ViewSpec spec, float aspect)
     {
         var radius = MathF.Max(scene.Radius, 0.05f);
         var distance = radius * 4f;
@@ -698,12 +731,62 @@ public sealed class D3D11PreviewRenderer : IDisposable
             MathF.Sin(spec.Pitch),
             MathF.Cos(spec.Yaw) * MathF.Cos(spec.Pitch));
         var (target, halfHeight) = FitView(scene, spec, aspect);
-        if (forcedHalfHeight is > 0) halfHeight = forcedHalfHeight.Value;
 
         var eye = target + direction * distance;
-        var view = LookAt(eye, target, spec.Up);
-        var projection = Orthographic(halfHeight, aspect, 0.01f, distance + radius * 4f);
-        return (view, projection, eye);
+        return new CameraState(LookAt(eye, target, spec.Up),
+            Orthographic(halfHeight, aspect, 0.01f, distance + radius * 4f), eye);
+    }
+
+    private static (CameraState State, OrbitCameraSnapshot Snapshot) CreateOrbitCamera(HlslSceneData scene,
+        RenderOptions options, float aspect)
+    {
+        var radius = MathF.Max(scene.Radius, 0.05f);
+        var fov = Math.Clamp(options.Fov <= 0 ? 38f : options.Fov, 8f, 80f);
+        var autoDistance = (radius * 1.8f + 0.15f) * 1.205f;
+        var distance = options.Distance > 0.0001f
+            ? Math.Clamp(options.Distance, radius * 0.02f, radius * 200f)
+            : autoDistance;
+
+        var target = options.HasTarget
+            ? new Vector3(options.TargetX, options.TargetY, options.TargetZ)
+            : scene.Center;
+
+        var direction = OrbitDirection(options.Yaw, options.Pitch);
+        var eye = target + direction * distance;
+        var near = MathF.Max(radius / 300f, distance * 0.002f);
+        var far = MathF.Max(100f, radius * 40f);
+
+        var snapshot = new OrbitCameraSnapshot
+        {
+            Yaw = options.Yaw,
+            Pitch = options.Pitch,
+            Distance = distance,
+            Fov = fov,
+            TargetX = target.X,
+            TargetY = target.Y,
+            TargetZ = target.Z
+        };
+
+        return (new CameraState(LookAt(eye, target, Vector3.UnitY),
+            Perspective(fov * MathF.PI / 180f, aspect, near, far), eye), snapshot);
+    }
+
+    private static Vector3 OrbitDirection(float yaw, float pitch)
+    {
+        var cosPitch = MathF.Cos(pitch);
+        return new Vector3(MathF.Sin(yaw) * cosPitch, MathF.Sin(pitch), MathF.Cos(yaw) * cosPitch);
+    }
+
+    private static Matrix4x4 Perspective(float fovY, float aspect, float near, float far)
+    {
+        var y = 1f / MathF.Tan(fovY * 0.5f);
+        var x = y / MathF.Max(aspect, 0.001f);
+        var range = near - far;
+        return new Matrix4x4(
+            x, 0, 0, 0,
+            0, y, 0, 0,
+            0, 0, far / range, -1,
+            0, 0, near * far / range, 0);
     }
 
     private static Matrix4x4 LookAt(Vector3 eye, Vector3 target, Vector3 up)
@@ -729,21 +812,21 @@ public sealed class D3D11PreviewRenderer : IDisposable
             0, 0, near / (near - far), 1);
     }
 
-    private static byte[] BuildEngine(Matrix4x4 world, Matrix4x4 inverse, (Matrix4x4 view, Matrix4x4 projection,
-        Vector3 eye) camera, int width, int height, float ticks)
+    private static byte[] BuildEngine(Matrix4x4 world, Matrix4x4 inverse, CameraState camera, int width, int height,
+        float ticks)
     {
         var data = new byte[880];
         var writer = new SpanWriter(data);
 
         WriteMatrix(ref writer, Matrix4x4.Transpose(world));
         WriteMatrix(ref writer, inverse);
-        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.view));
-        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.view * camera.projection));
-        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.projection));
-        WriteMatrix(ref writer, Matrix4x4.Transpose(world * camera.view * camera.projection));
+        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.View));
+        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.View * camera.Projection));
+        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.Projection));
+        WriteMatrix(ref writer, Matrix4x4.Transpose(world * camera.View * camera.Projection));
 
         var toLight = Vector3.Normalize(new Vector3(0.32f, 0.62f, 0.72f));
-        WriteVector(ref writer, new Vector4(camera.eye, 1));
+        WriteVector(ref writer, new Vector4(camera.Eye, 1));
         WriteVector(ref writer, new Vector4(toLight, 0));
         WriteVector(ref writer, new Vector4(1, 1, 1, 1));
         WriteVector(ref writer, new Vector4(toLight, 0));
@@ -769,8 +852,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
         WriteVector(ref writer, Vector4.Zero);
         WriteVector(ref writer, Vector4.Zero);
 
-        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.projection));
-        Matrix4x4.Invert(camera.projection, out var inverseProjection);
+        WriteMatrix(ref writer, Matrix4x4.Transpose(camera.Projection));
+        Matrix4x4.Invert(camera.Projection, out var inverseProjection);
         WriteMatrix(ref writer, Matrix4x4.Transpose(inverseProjection));
 
         return data;
@@ -813,7 +896,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _height = height;
     }
 
-    private byte[] ReadBack(int width, int height)
+    private (byte[] Jpeg, byte[] Raw) ReadBack(int width, int height, bool raw)
     {
         _context.CopyResource(_staging!, _color!);
         var mapped = _context.Map(_staging!, 0, MapMode.Read, Vortice.Direct3D11.MapFlags.None);
@@ -829,9 +912,11 @@ public sealed class D3D11PreviewRenderer : IDisposable
             for (var i = 0; i < rgba.Length; i += 4)
                 (rgba[i], rgba[i + 2]) = (rgba[i + 2], rgba[i]);
 
+            if (raw) return ([], rgba);
+
             using var stream = new MemoryStream();
             new ImageWriter().WriteJpg(rgba, width, height, StbImageWriteSharp.ColorComponents.RedGreenBlueAlpha, stream, 90);
-            return stream.ToArray();
+            return (stream.ToArray(), []);
         }
         finally
         {
