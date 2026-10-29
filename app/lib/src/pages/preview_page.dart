@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import '../host/host_client.dart';
+import '../state/hlsl_probe.dart';
 import '../ui/neu_dialog.dart';
 import '../ui/neu_kit.dart';
 import '../ui/neumorphic.dart';
@@ -46,11 +47,17 @@ class _PreviewPageState extends State<PreviewPage> {
   bool _building = false;
   bool _pickerVisible = false;
   bool _flat = false;
-  bool _hlsl = false;
   Map<String, dynamic>? _viewer;
-  Map<String, dynamic>? _renderInfo;
-  Timer? _renderPoll;
   String _sessionId = '';
+  late final HlslProbe _probe = HlslProbe(
+    evaluate: (source) async =>
+        await _web?.evaluateJavascript(source: source) as String?,
+    isPaused: () => _pickerVisible || !mounted,
+    onChange: () {
+      if (mounted) setState(() {});
+    },
+    onEnabled: _loadVariants,
+  );
   List<Map<String, dynamic>> _variants = const [];
   bool _variantsAvailable = false;
   Set<String> _materialKeywords = {};
@@ -67,7 +74,7 @@ class _PreviewPageState extends State<PreviewPage> {
 
   @override
   void dispose() {
-    _renderPoll?.cancel();
+    _probe.dispose();
     _search.dispose();
     super.dispose();
   }
@@ -139,8 +146,7 @@ class _PreviewPageState extends State<PreviewPage> {
     final host = widget.host;
     final path = '${asset['path']}';
 
-    _renderPoll?.cancel();
-    _renderPoll = null;
+    _probe.reset();
     setState(() {
       _building = true;
       _error = '';
@@ -150,8 +156,6 @@ class _PreviewPageState extends State<PreviewPage> {
       _pickerVisible = false;
       _selected = null;
       _flat = false;
-      _hlsl = false;
-      _renderInfo = null;
       _sessionId = '';
       _variants = const [];
       _variantsAvailable = false;
@@ -244,38 +248,7 @@ class _PreviewPageState extends State<PreviewPage> {
     return walk(((_scene?['nodes'] as List?) ?? const []));
   }
 
-  Future<void> _toggleHlsl() async {
-    final next = !_hlsl;
-    setState(() {
-      _hlsl = next;
-      if (next) _renderInfo = null;
-    });
-
-    await _web?.evaluateJavascript(
-      source: 'window.akashicSetHlsl && window.akashicSetHlsl($next)',
-    );
-
-    if (!next) {
-      _renderPoll?.cancel();
-      _renderPoll = null;
-      return;
-    }
-
-    await Future<void>.delayed(const Duration(milliseconds: 1500));
-    final state = await _web?.evaluateJavascript(
-      source: 'window.akashicHlslState ? JSON.stringify(window.akashicHlslState()) : ""',
-    );
-
-    if (!mounted) return;
-    if ('$state'.contains('"enabled":false')) {
-      setState(() => _hlsl = false);
-      return;
-    }
-
-    await _refreshRenderInfo();
-    _startRenderPoll();
-    await _loadVariants();
-  }
+  Future<void> _toggleHlsl() => _probe.toggle();
 
   Future<void> _loadVariants() async {
     if (_sessionId.isEmpty) return;
@@ -310,7 +283,7 @@ class _PreviewPageState extends State<PreviewPage> {
       source: 'window.akashicSetVariants && '
           'window.akashicSetVariants([$encoded], "$_colorSpace")',
     );
-    await _refreshRenderInfo();
+    await _probe.refresh();
   }
 
   void _toggleVariant(String keyword) {
@@ -339,28 +312,6 @@ class _PreviewPageState extends State<PreviewPage> {
       _colorSpace = 'gamma';
     });
     _applyVariants();
-  }
-
-  void _startRenderPoll() {
-    _renderPoll?.cancel();
-    _renderPoll = Timer.periodic(const Duration(milliseconds: 900), (_) {
-      _refreshRenderInfo();
-    });
-  }
-
-  Future<void> _refreshRenderInfo() async {
-    if (_pickerVisible) return;
-    final raw = await _web?.evaluateJavascript(
-      source: 'window.akashicHlslInfo ? JSON.stringify(window.akashicHlslInfo()) : ""',
-    );
-    if (!mounted || raw == null || '$raw'.isEmpty || '$raw' == 'null') return;
-
-    try {
-      final decoded = jsonDecode('$raw');
-      if (decoded is! Map) return;
-      final info = Map<String, dynamic>.from(decoded);
-      setState(() => _renderInfo = info);
-    } catch (_) {}
   }
 
   @override
@@ -468,8 +419,8 @@ class _PreviewPageState extends State<PreviewPage> {
           ],
           if (!_pickerVisible) ...[
             NeuActionButton(
-              label: _hlsl ? '返回近似' : 'HLSL 精确',
-              icon: _hlsl
+              label: _probe.enabled ? '返回近似' : 'HLSL 精确',
+              icon: _probe.enabled
                   ? Icons.threed_rotation_rounded
                   : Icons.precision_manufacturing_rounded,
               onTap: _scene == null ? null : _toggleHlsl,
@@ -478,7 +429,7 @@ class _PreviewPageState extends State<PreviewPage> {
             NeuActionButton(
               label: _flat ? '恢复光照' : '平光预览',
               icon: _flat ? Icons.light_mode_rounded : Icons.flash_off_rounded,
-              onTap: _scene == null || _hlsl
+              onTap: _scene == null || _probe.enabled
                   ? null
                   : () {
                       setState(() => _flat = !_flat);
@@ -996,7 +947,7 @@ class _PreviewPageState extends State<PreviewPage> {
                   return null;
                 },
               );
-              _startRenderPoll();
+              _probe.start();
             },
             onLoadStop: (controller, url) {
               if (_flat) {
@@ -1132,7 +1083,7 @@ class _PreviewPageState extends State<PreviewPage> {
   }
 
   Widget _renderPanel(NeuTokens t) {
-    final info = _renderInfo;
+    final info = _probe.info;
     final nodes = ((_scene?['nodes'] as List?) ?? const []).length;
     final meshes = '${_scene?['meshCount'] ?? 0}';
     final materials = '${_scene?['materialCount'] ?? 0}';
@@ -1162,7 +1113,7 @@ class _PreviewPageState extends State<PreviewPage> {
               ),
             ),
             const Spacer(),
-            NeuPill(_hlsl ? 'HLSL' : '实时 3D'),
+            NeuPill(_probe.enabled ? 'HLSL' : '实时 3D'),
           ],
         ),
         const SizedBox(height: 9),
@@ -1173,7 +1124,7 @@ class _PreviewPageState extends State<PreviewPage> {
             '打开一个 prefab 后，这里会显示离屏渲染的统计数据。',
             style: TextStyle(fontSize: 11, color: t.inkTertiary),
           ),
-        ] else if (!_hlsl) ...[
+        ] else if (!_probe.enabled) ...[
           const SizedBox(height: 4),
           _infoRow(t, '渲染', 'Three.js 近似（PBR / 卡通）'),
           _infoRow(t, '真实着色器', '打开右上角「HLSL 精确」开启'),
