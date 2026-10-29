@@ -69,6 +69,8 @@ public static partial class PreviewEndpoints
                 var frame = await hlsl.RenderAsync(options, ct);
                 context.Response.Headers["X-Akashic-Draws"] = frame.DrawCalls.ToString();
                 context.Response.Headers["X-Akashic-Fallbacks"] = frame.Fallbacks.ToString();
+                foreach (var (kind, count) in frame.FailureKinds)
+                    context.Response.Headers["X-Akashic-Reject-" + kind] = count.ToString();
                 if (frame.FallbackNotes.Count > 0)
                 {
                     context.Response.Headers["X-Akashic-Fallback-Detail"] =

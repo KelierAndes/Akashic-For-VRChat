@@ -55,6 +55,8 @@ public sealed class RenderFrame
 
     public List<string> FallbackNotes { get; set; } = [];
 
+    public Dictionary<string, int> FailureKinds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     public string? Warning { get; set; }
 }
 

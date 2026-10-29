@@ -110,6 +110,8 @@ public sealed class CompiledShader
 
     public string Error { get; set; } = string.Empty;
 
+    public string FailureKind { get; set; } = string.Empty;
+
     public List<CompiledPass> Passes { get; set; } = [];
 
     public Dictionary<string, float[]> PropertyDefaults { get; set; } = new(StringComparer.OrdinalIgnoreCase);

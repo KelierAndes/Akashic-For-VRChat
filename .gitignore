@@ -7,3 +7,6 @@ dist/
 ## Local logs
 crash.log
 *.user
+
+## NVIDIA 驱动在渲染时写出的 UMD 日志
+NVIDIA Corporation/

@@ -287,6 +287,8 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 
 ### Prefab 预览
 
+> 这一条链路的**待办**与取舍写在 `docs/preview-improvement-plan.md`（输入护栏、回归基线、实时化、采样质量等分档）；本小节只记「已经怎么实现、为什么这样写」。完成一项后把编号与实测数字回写到这里。
+
 * 预览管线：`PackageContentCache` 把 `.unitypackage` 的 tar.gz 里需要的资产（prefab/mat/shader/fbx/贴图/脚本/package.json）按 `pathname` 落盘到 `%LOCALAPPDATA%\Akashic\preview\packages\<hash>\`；`UnityMetaIndex` 扫 `.meta` 建 GUID→路径索引并解析 FBX 的 `internalIDToNameTable`；`PrefabParser` 用块头正则 + YamlDotNet 还原 GameObject/Transform/组件/嵌套 prefab；`GlbBuilder` 用 Assimp 找 FBX 子网格、SharpGLTF 输出带贴图的 GLB。
 * 场景 JSON 里带层级、局部变换、网格引用、材质槽位与组件字段；Flutter 左侧树、右侧组件面板直接消费它。三列布局在 `app/lib/src/pages/preview_page.dart`。
 * **材质降级缓存**：每个 `.mat` 解析出的 fallback 描述（主贴图/颜色、阴影色、法线、MatCap、自发光、描边、透明/双面、纹理 ST、关键字、管线）以「路径 + 大小 + mtime」为键存进 SQLite 表 `preview_materials`（`material-vN` 前缀），同一材质只解析一次；GLB 与 scene.json 仍按 `build-vN` 缓存。实测 Nijiiro 第二次构建 36 ms。
@@ -346,7 +348,7 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * Shader 查找：先按内容包内的 `.meta` GUID 解析；找不到时查 `%LOCALAPPDATA%\Akashic\settings.json` 里已登记工程的 `Packages` 与 `Library/PackageCache`，只扫描包根、`Shader`、`Shaders`、`Assets`、`Runtime` 目录里的 `*.shader.meta`。因此素材包只带 `.mat`、lilToon 来自工程包的常见情况也能拿到真实 Shader；Nijiiro 的解析时间从 11.5 s 降到 95 ms。
 * `ShaderLabExtractor` 按花括号/字符串/注释感知扫描 `Properties`、`SubShader`、`Pass`，识别 `CGINCLUDE`/`HLSLINCLUDE` 与 `HLSLPROGRAM`/`CGPROGRAM`，解析 `UsePass "Shader/Pass"`（lilToon 的 `lts*.shader` 全是 UsePass 外壳），并保留 Pass 的 `Cull/ZWrite/ZTest/Blend/BlendOp/ColorMask/Offset/AlphaToMask` 表达式与 Shader 属性默认值。
 * 每个 Pass 生成「UnityShim.hlsl + 文件级 include 块 + SubShader include 块 + Pass 程序」的单一 HLSL 文件；`UnityShim.hlsl` 与 Unity 内置 include 空桩作为 Core 内嵌资源释放到 `preview/hlsl/shim-vN`。Shim 提供精度类型、`appdata_*`、`UnityObjectToClipPos`/`TransformObjectToHClip`、纹理/采样器宏、`_Time`/光照/阴影兜底，以及 `ExternalEnginePerFrame : register(b0)`；材质属性由编译器自动归入 `$Globals`（反射拿到 b1 与每个变量的字节偏移）。
-* 编译由随包的 `src/Akashic.Host/tools/fxc/fxc.exe` + `d3dcompiler_47.dll` 完成（`/Gec` 兼容 `sampler2D` + `tex2D`），带 `DIRECTIONAL` 与材质 `m_ValidKeywords`/`m_ShaderKeywords` 定义；`.cso` 与反射缓存在 `preview/hlsl/hlsl-vN/shaders/`，键含 Shader 路径/mtime、关键字、是否包含描边 Pass 与 shim 版本。`Vortice.D3DCompiler.Reflect` 读回常量缓冲、资源槽与输入签名。
+* 编译由随包的 `src/Akashic.Host/tools/fxc/fxc.exe` + `d3dcompiler_47.dll` 完成（`/Gec` 兼容 `sampler2D` + `tex2D`），带 `DIRECTIONAL` 与材质 `m_ValidKeywords`/`m_ShaderKeywords` 定义；`.cso` 与反射缓存在 `preview/hlsl/<hlsl-vN>/<key>/`（`key` 由 `ShaderCacheKey.For` 生成，含 Shader 路径/mtime、关键字、是否包含描边 Pass 与 shim 版本；编译失败的那份另存 `<key>-fb` 并带 `failureKind`）。`Vortice.D3DCompiler.Reflect` 读回常量缓冲、资源槽与输入签名。
 * HLSL 渲染器不走 Three.js 的 `model.glb`，而是用 Assimp 直接读包内原始 `.fbx`（`Triangulate|GenerateNormals|JoinIdenticalVertices|RemoveRedundantMaterials|ValidateDataStructure`），贴图按 Assimp 材质槽的相对路径从 FBX 同目录解析，所以 Unity 里被脚本改过的导入设置不会干扰精确模式；模型 prefab 与 Unity 内置网格由 `BuiltInGeometry` 现生成。顶点固定 128 字节交错（POSITION/NORMAL/TANGENT/TEXCOORD0..3/COLOR，UV 的 V 翻转），按 VS 输入签名建 InputLayout。引擎矩阵以 `Matrix4x4.Transpose` 上传，配合 HLSL 的 `mul(M, v)` 行向量约定；相机是右手系 LookAt + D3D `[0,1]` 深度正交投影，`FrontCounterClockwise = true`。每帧按材质上传 `$Globals`、绑定贴图与采样器，按材质浮点解析 Cull/ZWrite/ZTest/Blend（D3D11 不允许把 `SrcColor` 类因子用于 alpha，需换成 Alpha 版本），透明材质排在最后。
 * 白膜/网格是两条独立的调试 Shader（`GetDebugAsync`，键 `debug-clay`/`debug-wireframe`，靠 `AKASHIC_CLAY`/`AKASHIC_WIREFRAME` 宏区分）：白膜跳过描边 Pass、强制 `Cull Back + ZWrite + 不混合`，网格用 `FillMode.Wireframe` 且必须 `Cull None` 才看得到背面线框。
 * 两个必须记住的坑：
@@ -382,6 +384,13 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * **版本号必须回收，不能只递增**：`VersionedUnder(root, section, version)` 在创建 `<section>/<version>` 的同时删掉同族的旧版本目录。**按「族」判断，不按整名**——族是版本号里最后一个 `-v` 之前的部分，所以 `hlsl` 容器下的 `hlsl-v2` 与 `shim-v5` 互不误伤；如果按整名比较，`shim-vN` 会在每次升 `hlsl-vN` 时被连带删掉，内置 include 桩全部要重编。这条是踩过才知道的。
 * **预览缓存有总量上限，且上限可设**（`AppSettings.previewCacheQuotaBytes`，默认 8 GB，界面给 2/4/8/16/32 GB，`PreviewCachePaths` 再钳到 2–128 GB）：侧车启动时 `Program.cs` 从 `settings.json` 读出目录与上限一起交给 `PreviewCachePaths.Configure`，改目录不再把上限打回默认。每次解包后调 `EnforceQuota()`，按 `<section>/<version>/<leaf>` 粒度、以目录写入时间从旧到新删除，直到落到配额以内；参与回收的只有 `packages/builds/archives/textures` 四段，`hlsl` 的编译缓存不在其中（重编一次要几十秒，比省几百 MB 贵）。配额只在**超过**上限时才动手，所以正常用不到；在设置页调小上限会立刻按新配额回收一次，界面上的「当前占用」跟着变。
 * 为什么这两条是硬要求：`extract-v5` 把包内**全部**资产落盘（为了列全资产树），SUIMONO 一个包就几十 MB；旧版本目录不清会一直堆（实测 `packages/` 堆到 11 GB / 87 个目录），直接把 E: 盘写满，材质球接口返回 422「磁盘空间不足」——看着像代码坏了，其实是没地方写。
+* **不可信 shader 源码有三道闸门**（素材包的 `.shader` 是第三方作者写的文本，等于别人决定的文件会被打开读入）：
+  1. **体积**：单个 `.shader` 超过 2 MB 直接判「着色器源码过大」走 fallback（`ShaderLabExtractor.MaxShaderBytes`）；拼好的单个 Pass 源超过 4 MB 只跳过那个 Pass，不整体失败。上限不是安全阈值而是「正常 shader 没有这么大」的判据——lilToon 全家最大的一支不到 300 KB。
+  2. **include 沙箱**：`ShaderIncludeResolver` 在喂 fxc 之前自己把 `#include "x"` 就地展开，搜索顺序是 shader 目录 → 包内容根 → shim 根 → UnityStubs，**含 `..` 段或绝对路径一律拒绝**（不打开文件，只记一条 `rejected` 并让这个 Pass 失败）；解析出来的全路径还必须落在允许根内。于是 fxc 只看到一个自包含文件，`/I` 只留 shim 根，`contentRoot` 与「shader 目录的父目录」这两个宽根已经去掉。代价是少数靠 `../` 跨目录取 include 的包会退化到 fallback——它们本来就在 Unity 工程内布局，素材包里极少见。
+  3. **超时分级**：单 Pass 60 秒、同一 shader 累计 180 秒后整条放弃，写进 `-fb` 的 meta。原来固定 90 秒 × 全局串行，一个病态 shader 能把所有预览拖住。
+* **编译不再全局串行**：`KeyedSemaphore` 按 shader 路径分键（同一 shader 串行、不同 shader 并行），全局上限 `min(4, CPU/2)`。先把内存缓存换成 `ConcurrentDictionary`，否则并行下会撞字典。**前提是 A1 已经收紧**：没有源码上限和 include 沙箱时，4 个死循环 shader 能同时吃满 4 个核。
+* **失败原因分类型而不是只有一句话**：`CompiledShader.FailureKind` 取 `size`/`include`/`timeout`/`compile`/`unsupported`，随 fallback 一起写进 `meta.json`，渲染时按类型计数进响应头 `X-Akashic-Reject-<kind>`，与既有的 `X-Akashic-Fallbacks`/`-Detail` 并列。排查「为什么这颗球用了近似材质」不用翻日志。
+* **预览链路的回归基线**：`tests/Akashic.Tests`（xUnit）覆盖 `ShaderLabExtractor`（含体积闸门、URP/Surface 判定、Outline 识别）、`ShaderIncludeResolver`（嵌套展开、越界/绝对路径拒绝、缺失保留、循环与深度上限）、关键字白名单与缓存键稳定性、`PreviewCachePaths` 的族回收与配额钳制。`scripts/test-all.ps1` 把 `dotnet test` 与 `flutter test` 串成一条命令，发版前必须全绿。这批用例第一天就抓到一个真 bug：`PropertyRegex` 的 `[^)]+` 吞不下 `Range(0,1)` 这种带括号的类型，`_Glossiness` 之类的属性一直没被解析出来，属性默认值因此缺失。
 * 侧车日志：`Program.cs` 里 `ClearProviders()` 是必须的（stdout 要留给握手 JSON），但必须紧跟着 `AddProvider(SidecarFileLoggerProvider)` 落到 `%LOCALAPPDATA%\Akashic\logs\host.log`（2 MB 滚动一份备份），否则线上问题完全没有现场。异常由 `UseExceptionHandler` 统一转成带 `detail` 的 Problem JSON——不加它，未捕获异常在 Production 下是**空 body 的 500**，界面只能显示一句笼统失败。
 
 ### 备份与还原

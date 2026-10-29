@@ -72,6 +72,8 @@ public sealed class ShaderLabProgram
 
     public string UnsupportedReason { get; set; } = string.Empty;
 
+    public string FailureKind { get; set; } = string.Empty;
+
     public List<ShaderLabProperty> Properties { get; set; } = [];
 
     public List<ShaderLabPass> Passes { get; set; } = [];
@@ -81,11 +83,15 @@ public sealed class ShaderLabProgram
 
 public static class ShaderLabExtractor
 {
+    public const int MaxShaderBytes = 2 * 1024 * 1024;
+
+    private const int MaxPassChars = 4 * 1024 * 1024;
+
     private static readonly Regex ShaderRegex = new(
         @"\bShader\s+""(?<name>[^""]+)""\s*\{", RegexOptions.Compiled);
 
     private static readonly Regex PropertyRegex = new(
-        @"^\s*(?<flags>(?:\[[^\]]*\]\s*)*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*""[^""]*""\s*,\s*(?<type>[^)]+)\)\s*=\s*(?<default>.+?)\s*$",
+        @"^\s*(?<flags>(?:\[[^\]]*\]\s*)*)(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\(\s*""[^""]*""\s*,\s*(?<type>(?:[^()]|\([^()]*\))+)\)\s*=\s*(?<default>.+?)\s*$",
         RegexOptions.Compiled | RegexOptions.Multiline);
 
     private static readonly Regex TagRegex = new(
@@ -118,11 +124,25 @@ public static class ShaderLabExtractor
     {
         var program = new ShaderLabProgram { Path = path };
         string text;
+
         try
         {
+            var info = new FileInfo(path);
+            if (info.Exists && info.Length > MaxShaderBytes)
+            {
+                program.UnsupportedReason = "着色器源码过大（超过 2 MB）。";
+                program.FailureKind = "size";
+                return program;
+            }
+
             text = File.ReadAllText(path);
         }
         catch (IOException)
+        {
+            program.UnsupportedReason = "着色器文件读取失败。";
+            return program;
+        }
+        catch (UnauthorizedAccessException)
         {
             program.UnsupportedReason = "着色器文件读取失败。";
             return program;
@@ -187,7 +207,7 @@ public static class ShaderLabExtractor
             foreach (var (passStart, passEnd) in passes)
             {
                 var pass = ParsePass(text, clean, passStart, passEnd, passIndex, topIncludes.ToString(),
-                    subIncludes.ToString());
+                    subIncludes.ToString(), program);
                 if (pass is null) continue;
 
                 pass.Index = passIndex++;
@@ -216,17 +236,21 @@ public static class ShaderLabExtractor
                                    parsed.Any(pass => pass.LightMode is "ForwardBase" or "Always" or "");
             if (!program.SupportsHlsl)
             {
-                program.UnsupportedReason = program.Pipeline == "urp"
-                    ? "URP 着色器暂不支持 HLSL 精确渲染。"
-                    : "没有可用的前向渲染 Pass。";
+                program.UnsupportedReason = program.Warnings.Count > 0
+                    ? program.Warnings[0]
+                    : program.Pipeline == "urp"
+                        ? "URP 着色器暂不支持 HLSL 精确渲染。"
+                        : "没有可用的前向渲染 Pass。";
             }
 
             return program;
         }
 
-        program.UnsupportedReason = text.Contains("#pragma surface", StringComparison.OrdinalIgnoreCase)
-            ? "Surface Shader 的 Pass 由 Unity 生成，没有可复用的源码。"
-            : "没有可渲染的 Pass。";
+        program.UnsupportedReason = program.Warnings.Count > 0
+            ? program.Warnings[0]
+            : text.Contains("#pragma surface", StringComparison.OrdinalIgnoreCase)
+                ? "Surface Shader 的 Pass 由 Unity 生成，没有可复用的源码。"
+                : "没有可渲染的 Pass。";
         return program;
     }
 
@@ -316,7 +340,7 @@ public static class ShaderLabExtractor
     }
 
     private static ShaderLabPass? ParsePass(string text, string clean, int start, int end, int index,
-        string topIncludes, string subIncludes)
+        string topIncludes, string subIncludes, ShaderLabProgram program)
     {
         var body = text[start..end];
         var nameMatch = Regex.Match(body, @"\bName\s+""(?<name>[^""]+)""");
@@ -378,6 +402,14 @@ public static class ShaderLabExtractor
         source.AppendLine(topIncludes);
         source.AppendLine(subIncludes);
         source.AppendLine(StripPragmas(rawProgram));
+
+        if (source.Length > MaxPassChars)
+        {
+            program.Warnings.Add($"Pass {name} 源码过大（超过 4 MB），已跳过。");
+            program.FailureKind = "size";
+            return null;
+        }
+
         pass.Source = source.ToString();
 
         return pass;

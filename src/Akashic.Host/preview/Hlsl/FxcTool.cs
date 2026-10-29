@@ -37,8 +37,9 @@ public sealed class FxcTool
         return null;
     }
 
-    public async Task<(bool Ok, string Log)> CompileAsync(string sourcePath, string entry, string profile,
-        string outputPath, IEnumerable<string> includes, IEnumerable<string> defines, CancellationToken ct)
+    public async Task<(bool Ok, bool TimedOut, string Log)> CompileAsync(string sourcePath, string entry,
+        string profile, string outputPath, IEnumerable<string> includes, IEnumerable<string> defines,
+        TimeSpan timeout, CancellationToken ct)
     {
         var arguments = new List<string>
         {
@@ -68,16 +69,16 @@ public sealed class FxcTool
         try
         {
             using var process = Process.Start(start);
-            if (process is null) return (false, "无法启动 fxc。");
+            if (process is null) return (false, false, "无法启动 fxc。");
 
             var output = process.StandardOutput.ReadToEndAsync(ct);
             var error = process.StandardError.ReadToEndAsync(ct);
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(90));
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutSource.CancelAfter(timeout);
 
             try
             {
-                await process.WaitForExitAsync(timeout.Token);
+                await process.WaitForExitAsync(timeoutSource.Token);
             }
             catch (OperationCanceledException)
             {
@@ -89,16 +90,16 @@ public sealed class FxcTool
                 {
                 }
 
-                return (false, "着色器编译超时。");
+                return (false, !ct.IsCancellationRequested, "着色器编译超时。");
             }
 
             var log = (await output + await error).Trim();
             var ok = process.ExitCode == 0 && File.Exists(outputPath);
-            return (ok, log);
+            return (ok, false, log);
         }
         catch (Exception ex) when (ex is IOException or InvalidOperationException)
         {
-            return (false, ex.Message);
+            return (false, false, ex.Message);
         }
     }
 }

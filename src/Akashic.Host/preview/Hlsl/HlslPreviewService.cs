@@ -78,6 +78,7 @@ public sealed class HlslPreviewService : IDisposable
         var fallbackCutout = await _compiler.GetFallbackAsync(true, ct);
         var fallbackUnlit = await _compiler.GetFallbackAsync(false, ct, unlit: true);
         var notes = new List<string>();
+        var failureKinds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var material in scene.Materials)
         {
@@ -114,6 +115,8 @@ public sealed class HlslPreviewService : IDisposable
             if (shader is null || !shader.Ok)
             {
                 notes.Add($"{material.Name} · {DescribeFallback(material, shader)}");
+                var kind = shader?.FailureKind ?? string.Empty;
+                if (kind.Length > 0) failureKinds[kind] = failureKinds.GetValueOrDefault(kind) + 1;
                 shader = material.Kind == "unlit"
                     ? fallbackUnlit
                     : string.Equals(material.AlphaMode, "mask", StringComparison.OrdinalIgnoreCase)
@@ -129,6 +132,7 @@ public sealed class HlslPreviewService : IDisposable
         {
             var frame = await Task.Run(() => _renderer!.Render(scene, shaders, fallbackOpaque, options), ct);
             frame.FallbackNotes = notes.Distinct().ToList();
+            frame.FailureKinds = failureKinds;
             return frame;
         }
         finally
