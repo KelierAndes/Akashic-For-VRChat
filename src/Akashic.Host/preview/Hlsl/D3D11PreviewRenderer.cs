@@ -69,6 +69,14 @@ public sealed class RenderFrame
 
     public int Fallbacks { get; set; }
 
+    public int Textures { get; set; }
+
+    public long TextureBytes { get; set; }
+
+    public int TextureDecodeFailures { get; set; }
+
+    public int SampleCount { get; set; }
+
     public List<string> FallbackNotes { get; set; } = [];
 
     public Dictionary<string, int> FailureKinds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -117,8 +125,10 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11Buffer _engine;
-    private readonly ID3D11SamplerState _linearWrap;
-    private readonly ID3D11SamplerState _linearClamp;
+    private readonly ID3D11SamplerState _wrapSampler;
+    private readonly ID3D11SamplerState _clampSampler;
+    private readonly int _maxAnisotropy;
+    private readonly int _sampleCount;
     private readonly ID3D11Texture2D _defaultWhite;
     private readonly ID3D11Texture2D _defaultNormal;
     private readonly ID3D11Texture2D _defaultBlack;
@@ -136,9 +146,13 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private ID3D11RenderTargetView? _colorView;
     private ID3D11Texture2D? _depth;
     private ID3D11DepthStencilView? _depthView;
+    private ID3D11Texture2D? _colorMsaa;
+    private ID3D11Texture2D? _depthMsaa;
     private ID3D11Texture2D? _staging;
     private int _width;
     private int _height;
+    private readonly Dictionary<string, long> _textureBytes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _decodeFailures = new(StringComparer.OrdinalIgnoreCase);
     private string _sessionKey = string.Empty;
     private bool _inverseWarned;
     private readonly DateTime _start = DateTime.UtcNow;
@@ -148,17 +162,32 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _device = device;
         _context = device.ImmediateContext;
         Adapter = adapter;
+        var warp = adapter.Equals("WARP", StringComparison.OrdinalIgnoreCase);
+        _maxAnisotropy = warp ? 1 : 8;
+        _sampleCount = warp ? 1 : 4;
 
         _engine = CreateDynamicBuffer(880);
-        _linearWrap = _device.CreateSamplerState(new SamplerDescription(Filter.MinMagMipLinear,
-            TextureAddressMode.Wrap, 0, 1, ComparisonFunction.Never, 0, float.MaxValue));
-        _linearClamp = _device.CreateSamplerState(new SamplerDescription(Filter.MinMagMipLinear,
-            TextureAddressMode.Clamp, 0, 1, ComparisonFunction.Never, 0, float.MaxValue));
+        _wrapSampler = CreateSampler(TextureAddressMode.Wrap);
+        _clampSampler = CreateSampler(TextureAddressMode.Clamp);
 
         _defaultWhite = CreateTexture([255, 255, 255, 255], out _whiteView);
         _defaultNormal = CreateTexture([128, 128, 255, 255], out _normalView);
         _defaultBlack = CreateTexture([0, 0, 0, 255], out _blackView);
     }
+
+    private ID3D11SamplerState CreateSampler(TextureAddressMode address) =>
+        _device.CreateSamplerState(new SamplerDescription
+        {
+            Filter = _maxAnisotropy > 1 ? Filter.Anisotropic : Filter.MinMagMipLinear,
+            AddressU = address,
+            AddressV = address,
+            AddressW = address,
+            MipLODBias = 0,
+            MaxAnisotropy = (uint)_maxAnisotropy,
+            ComparisonFunc = ComparisonFunction.Never,
+            MinLOD = 0,
+            MaxLOD = float.MaxValue
+        });
 
     public string Adapter { get; }
 
@@ -239,9 +268,12 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _context.RSSetViewport(new Viewport(0, 0, width, height, 0, 1));
         _context.ClearDepthStencilView(_depthView!, DepthStencilClearFlags.Depth, 1f, 0);
         var drawCalls = DrawView(scene, camera, width, height, ticks);
+        if (_colorMsaa is not null)
+            _context.ResolveSubresource(_color!, 0, _colorMsaa, 0, Format.B8G8R8A8_UNorm);
 
         _context.Flush();
         var frame = ReadBack(width, height, options.Raw);
+        var (textures, textureBytes, textureFailures) = SessionTextures();
 
         return new RenderFrame
         {
@@ -252,8 +284,35 @@ public sealed class D3D11PreviewRenderer : IDisposable
             DrawCalls = drawCalls,
             Materials = _session.Materials,
             Fallbacks = _session.Fallbacks,
-            Camera = snapshot
+            Camera = snapshot,
+            Textures = textures,
+            TextureBytes = textureBytes,
+            TextureDecodeFailures = textureFailures,
+            SampleCount = _sampleCount
         };
+    }
+
+    private (int Textures, long Bytes, int Failures) SessionTextures()
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var failures = 0;
+        long bytes = 0;
+
+        foreach (var item in _session!.Items)
+        foreach (var pass in item.Material.Passes)
+        foreach (var texture in pass.Textures)
+        {
+            if (texture.Path.Length == 0 || !seen.Add(texture.Path)) continue;
+            if (_decodeFailures.Contains(texture.Path))
+            {
+                failures++;
+                continue;
+            }
+
+            if (_textureBytes.TryGetValue(texture.Path, out var value)) bytes += value;
+        }
+
+        return (seen.Count - failures, bytes, failures);
     }
 
     private static string ShaderSignature(HlslSceneData scene,
@@ -330,7 +389,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
                 foreach (var sampler in binding.Samplers)
                 {
-                    var state = sampler.Clamp ? _linearClamp : _linearWrap;
+                    var state = sampler.Clamp ? _clampSampler : _wrapSampler;
                     if (sampler.Stage) _context.VSSetSampler(sampler.Slot, state);
                     else _context.PSSetSampler(sampler.Slot, state);
                 }
@@ -513,22 +572,73 @@ public sealed class D3D11PreviewRenderer : IDisposable
         if (_textureCache.TryGetValue(path, out var cached)) return cached;
 
         ID3D11ShaderResourceView view;
+        long bytes;
         try
         {
             using var stream = File.OpenRead(path);
             var image = ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
-            using var texture = _device.CreateTexture2D(image.Data, Format.R8G8B8A8_UNorm,
-                (uint)image.Width, (uint)image.Height, 1, 1, BindFlags.ShaderResource,
-                ResourceOptionFlags.None, ResourceUsage.Default, CpuAccessFlags.None);
-            view = _device.CreateShaderResourceView(texture, null);
+            var level0 = (long)image.Width * image.Height * 4;
+
+            try
+            {
+                view = UploadMipped(image);
+                bytes = level0 + level0 / 3;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException)
+            {
+                view = UploadSingleLevel(image);
+                bytes = level0;
+            }
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
         {
             view = _whiteView;
+            bytes = 0;
+            _decodeFailures.Add(path);
         }
 
+        _textureBytes[path] = bytes;
         _textureCache[path] = view;
         return view;
+    }
+
+    private ID3D11ShaderResourceView UploadMipped(ImageResult image)
+    {
+        var texture = _device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)image.Width,
+            Height = (uint)image.Height,
+            MipLevels = 0,
+            ArraySize = 1,
+            Format = Format.R8G8B8A8_UNorm,
+            SampleDescription = new SampleDescription(1, 0),
+            BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
+            Usage = ResourceUsage.Default,
+            CPUAccessFlags = CpuAccessFlags.None,
+            MiscFlags = ResourceOptionFlags.GenerateMips
+        });
+
+        ID3D11ShaderResourceView view;
+        try
+        {
+            view = _device.CreateShaderResourceView(texture, null);
+            _context.UpdateSubresource(image.Data, texture, 0, (uint)image.Width * 4, 0);
+            _context.GenerateMips(view);
+        }
+        finally
+        {
+            texture.Dispose();
+        }
+
+        return view;
+    }
+
+    private ID3D11ShaderResourceView UploadSingleLevel(ImageResult image)
+    {
+        using var texture = _device.CreateTexture2D(image.Data, Format.R8G8B8A8_UNorm,
+            (uint)image.Width, (uint)image.Height, 1, 1, BindFlags.ShaderResource,
+            ResourceOptionFlags.None, ResourceUsage.Default, CpuAccessFlags.None);
+        return _device.CreateShaderResourceView(texture, null);
     }
 
     private List<TextureBinding> ResolveTextures(CompiledPass pass, PreviewMaterial? material)
@@ -547,14 +657,18 @@ public sealed class D3D11PreviewRenderer : IDisposable
                     !string.Equals(resource.Dimension, "Texture2D", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                var view = ResolveTexture(resource.Name, material);
-                result.Add(new TextureBinding { Slot = resource.BindPoint, View = view, Stage = stage, Name = resource.Name });
+                var view = ResolveTexture(resource.Name, material, out var used);
+                result.Add(new TextureBinding
+                {
+                    Slot = resource.BindPoint, View = view, Stage = stage, Name = resource.Name, Path = used
+                });
             }
         }
     }
 
-    private ID3D11ShaderResourceView ResolveTexture(string name, PreviewMaterial? material)
+    private ID3D11ShaderResourceView ResolveTexture(string name, PreviewMaterial? material, out string used)
     {
+        used = string.Empty;
         var path = string.Empty;
         if (material is not null)
         {
@@ -571,7 +685,11 @@ public sealed class D3D11PreviewRenderer : IDisposable
                 path = material.MatCapTexture;
         }
 
-        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return LoadTexture(path);
+        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        {
+            used = path;
+            return LoadTexture(path);
+        }
 
         if (name.Contains("Bump", StringComparison.OrdinalIgnoreCase) ||
             name.Contains("Normal", StringComparison.OrdinalIgnoreCase))
@@ -881,20 +999,53 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _depthView?.Dispose();
         _color?.Dispose();
         _depth?.Dispose();
+        _colorMsaa?.Dispose();
+        _depthMsaa?.Dispose();
         _staging?.Dispose();
+        _colorMsaa = null;
+        _depthMsaa = null;
 
-        _color = _device.CreateTexture2D(Format.B8G8R8A8_UNorm, (uint)width, (uint)height, 1, 1, null,
-            BindFlags.RenderTarget, ResourceOptionFlags.None, ResourceUsage.Default, CpuAccessFlags.None);
-        _colorView = _device.CreateRenderTargetView(_color, null);
-        _depth = _device.CreateTexture2D(Format.D24_UNorm_S8_UInt, (uint)width, (uint)height, 1, 1, null,
-            BindFlags.DepthStencil, ResourceOptionFlags.None, ResourceUsage.Default, CpuAccessFlags.None);
-        _depthView = _device.CreateDepthStencilView(_depth, null);
-        _staging = _device.CreateTexture2D(Format.B8G8R8A8_UNorm, (uint)width, (uint)height, 1, 1, null,
-            BindFlags.None, ResourceOptionFlags.None, ResourceUsage.Staging, CpuAccessFlags.Read);
+        _color = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.RenderTarget,
+            ResourceUsage.Default, CpuAccessFlags.None, 1);
+        if (_sampleCount > 1)
+        {
+            _colorMsaa = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.RenderTarget,
+                ResourceUsage.Default, CpuAccessFlags.None, _sampleCount);
+            _depthMsaa = CreateTarget(Format.D24_UNorm_S8_UInt, width, height, BindFlags.DepthStencil,
+                ResourceUsage.Default, CpuAccessFlags.None, _sampleCount);
+            _colorView = _device.CreateRenderTargetView(_colorMsaa, null);
+            _depthView = _device.CreateDepthStencilView(_depthMsaa, null);
+        }
+        else
+        {
+            _depth = CreateTarget(Format.D24_UNorm_S8_UInt, width, height, BindFlags.DepthStencil,
+                ResourceUsage.Default, CpuAccessFlags.None, 1);
+            _colorView = _device.CreateRenderTargetView(_color, null);
+            _depthView = _device.CreateDepthStencilView(_depth, null);
+        }
+
+        _staging = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.None,
+            ResourceUsage.Staging, CpuAccessFlags.Read, 1);
 
         _width = width;
         _height = height;
     }
+
+    private ID3D11Texture2D CreateTarget(Format format, int width, int height, BindFlags bind,
+        ResourceUsage usage, CpuAccessFlags cpu, int samples) =>
+        _device.CreateTexture2D(new Texture2DDescription
+        {
+            Width = (uint)width,
+            Height = (uint)height,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = format,
+            SampleDescription = new SampleDescription((uint)samples, 0),
+            BindFlags = bind,
+            Usage = usage,
+            CPUAccessFlags = cpu,
+            MiscFlags = ResourceOptionFlags.None
+        });
 
     private (byte[] Jpeg, byte[] Raw) ReadBack(int width, int height, bool raw)
     {
@@ -1174,10 +1325,12 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _depthView?.Dispose();
         _color?.Dispose();
         _depth?.Dispose();
+        _colorMsaa?.Dispose();
+        _depthMsaa?.Dispose();
         _staging?.Dispose();
         _engine.Dispose();
-        _linearWrap.Dispose();
-        _linearClamp.Dispose();
+        _wrapSampler.Dispose();
+        _clampSampler.Dispose();
         _whiteView.Dispose();
         _normalView.Dispose();
         _blackView.Dispose();
@@ -1276,6 +1429,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private sealed class TextureBinding
     {
         public string Name { get; set; } = string.Empty;
+
+        public string Path { get; set; } = string.Empty;
 
         public uint Slot { get; set; }
 

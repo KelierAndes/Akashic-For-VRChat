@@ -1115,6 +1115,8 @@ class _PreviewPageState extends State<PreviewPage> {
         ] else ...[
           _infoRow(t, '模式', mode),
           _infoRow(t, '绘制', '${info['draws']} 次'),
+          _infoRow(t, '抗锯齿', _aaLabel('${info['msaa'] ?? ''}')),
+          _infoRow(t, '贴图', _textureLabel('${info['textures'] ?? ''}')),
           _infoRow(
             t,
             '材质',
@@ -1142,6 +1144,19 @@ class _PreviewPageState extends State<PreviewPage> {
         ],
       ],
     );
+  }
+
+  static String _aaLabel(String msaa) {
+    final samples = int.tryParse(msaa) ?? 0;
+    return samples > 1 ? '$samples× MSAA + mip 贴图' : '软件渲染，未启用 MSAA';
+  }
+
+  static String _textureLabel(String raw) {
+    final parts = raw.split('|');
+    if (parts.length != 3) return '—';
+    final failures = int.tryParse(parts[2]) ?? 0;
+    final text = '${parts[0]} 张 · 约 ${parts[1]} MB';
+    return failures > 0 ? '$text · $failures 张无法解码' : text;
   }
 
   Widget _infoRow(NeuTokens t, String label, String value) => Padding(

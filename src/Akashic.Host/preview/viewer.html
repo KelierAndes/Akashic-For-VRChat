@@ -455,7 +455,7 @@ let hlslBusy = false;
 let hlslQueued = false;
 let viewMode = 'textured';
 let baseSummary = '';
-let hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: '' };
+let hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: '', textures: '', msaa: '' };
 
 const viewModes = document.getElementById('viewModes');
 const viewGizmo = document.getElementById('viewGizmo');
@@ -531,6 +531,7 @@ window.akashicHlslInfo = () => {
       enabled: true, busy: hlslBusy, mode: viewMode,
       gizmo: gizmoVisible, light: backgroundLight,
       draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
+      textures: hlslInfo.textures, msaa: hlslInfo.msaa,
       detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
     };
   }
@@ -757,6 +758,11 @@ async function requestHlsl(showStatus) {
     const fallbacks = response.headers.get('X-Akashic-Fallbacks') || '0';
     const renderMs = response.headers.get('X-Akashic-Render-Ms') || '';
     const queueMs = Number(response.headers.get('X-Akashic-Queue-Ms') || '0');
+    const textureParts = (response.headers.get('X-Akashic-Textures') || '').split('|');
+    const msaa = response.headers.get('X-Akashic-Msaa') || '';
+    const textureLabel = textureParts.length === 3 ? ` · 贴图 ${textureParts[0]} 张 ${textureParts[1]} MB` : '';
+    const decodeLabel = textureParts[2] && textureParts[2] !== '0' ? ` · ${textureParts[2]} 张无法解码` : '';
+    const aaLabel = Number(msaa) > 1 ? ` · MSAA ${msaa}×` : '';
     const detailRaw = response.headers.get('X-Akashic-Fallback-Detail') || '';
     let detail = '';
     try { detail = decodeURIComponent(detailRaw); } catch { detail = detailRaw; }
@@ -764,15 +770,19 @@ async function requestHlsl(showStatus) {
     const label = modeLabels[viewMode] || viewMode;
     const timing = renderMs ? ` · ${renderMs} ms${queueMs > 1 ? ' +' + queueMs.toFixed(0) + ' ms 排队' : ''}` : '';
     const rate = hlslFps > 0 ? ` · ${hlslFps} fps` : '';
-    const head = `D3D11 实时 · ${label} · ${draws} 次绘制${timing}${rate}`;
+    const head = `D3D11 实时 · ${label} · ${draws} 次绘制${aaLabel}${textureLabel}${decodeLabel}${timing}${rate}`;
     const shown = detail ? detail.split(' | ').slice(0, 2) : [];
     const text = fallbacks === '0'
       ? `${head} · 全部材质都跑的是真实着色器`
       : `${head} · ${fallbacks} 个回退材质${shown.length ? '：' + shown.join(' | ') : ''}`;
 
-    hlslInfo = { draws, fallbacks, detail, summary: text, error: '' };
+    hlslInfo = {
+      draws, fallbacks, detail, summary: text, error: '',
+      textures: response.headers.get('X-Akashic-Textures') || '',
+      msaa
+    };
   } catch (error) {
-    hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: String(error?.message || error) };
+    hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: String(error?.message || error), textures: '', msaa: '' };
     window.akashicSetHlsl(false);
     setStatus('HLSL 渲染失败：' + (error?.message || error), true);
     setTimeout(() => { statusBox.classList.add('hide'); }, 4500);

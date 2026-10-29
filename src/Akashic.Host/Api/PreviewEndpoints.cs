@@ -78,6 +78,9 @@ public static partial class PreviewEndpoints
                     frame.QueueMs.ToString("F1", CultureInfo.InvariantCulture);
                 context.Response.Headers["X-Akashic-Frame-Width"] = frame.Width.ToString();
                 context.Response.Headers["X-Akashic-Frame-Height"] = frame.Height.ToString();
+                context.Response.Headers["X-Akashic-Textures"] =
+                    $"{frame.Textures}|{frame.TextureBytes / (1024 * 1024)}|{frame.TextureDecodeFailures}";
+                context.Response.Headers["X-Akashic-Msaa"] = frame.SampleCount.ToString();
                 if (frame.Camera is { } camera)
                 {
                     context.Response.Headers["X-Akashic-Camera"] = string.Join(";", new[]

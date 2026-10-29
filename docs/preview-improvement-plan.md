@@ -73,7 +73,8 @@ VRCAL 只有一条路径（three.js WebGL 看原始模型文件），它不做 p
 | A2 | 进行中（2026-10-27） | 第 1、2、6 步已落地：`tests/Akashic.Tests` 29 个用例（提取器 / include 解析 / 关键字 / 缓存键 / 缓存族与配额）、`scripts/test-all.ps1`；第 3 步黄金图与第 5 步全库回归脚本待做 |
 | B4 | 已完成（2026-10-27） | `KeyedSemaphore`，同 shader 串行、跨 shader 并行，上限 `min(4, CPU/2)`；内存缓存换 `ConcurrentDictionary`。未实测批量预热墙钟时间（缺第 5 步的回归脚本） |
 | B1 | 已完成（2026-10-29，档③并直接做到全尺寸单视图） | 四视图方案删除：侧车按 `view:"orbit"` 出透视单视图、回原始 RGBA（`X-Akashic-Camera` 让视窗接管机位），视窗用 canvas + 轨道相机做按需渲染（拖动 2–10 ms/帧，静止不发请求）。**未做**：档②的零拷贝帧缓冲（WebView2 仍走本地 HTTP），以及渲染/排队埋点的批量实测 |
-| B2 / B3 / C1 / C2 / C3 / C4 / C5 | 未开始 | 见 §六 批次 2、3 |
+| B2 | 部分完成（2026-10-29） | 第 ②③ 步落地：mip 链（`GenerateMips`）+ 各向异性采样 + 4× MSAA（WARP 下关）。斜视角轮廓走样能量 148.4→81.1（−45%）、正视角 134.4→93.1，单帧 4.1→6.5 ms，贴图显存 151→201 MB（mip +33%）。**偏差**：第 ① 步 BC/DDS 直传没做——实测 12 个工程 4200+ 张贴图里 `.dds` 只有 1 个，本节「绝大多数是 DDS」的前提不成立；数字与结论见 `DEVELOPMENT.md` 的 Prefab 预览小节 |
+| B3 / C1 / C2 / C3 / C4 / C5 | 未开始 | 见 §六 批次 2、3 |
 
 ---
 
@@ -141,6 +142,8 @@ VRCAL 只有一条路径（three.js WebGL 看原始模型文件），它不做 p
 **现状**（乙类行号，`D3D11PreviewRenderer.cs`）贴图是 StbImageSharp CPU 解码成 RGBA8 后按 `R8G8B8A8_UNorm` 上 GPU，1 级 mip；采样器只有 LinearWrap / LinearClamp 两个，靠名字含 `clamp` 选；`MultisampleEnable=false`，单采样 BGRA8 RT + D24S8。
 
 **影响** VRChat 素材的贴图绝大多数是 BC7/BC1 的 DDS，CPU 展开成 RGBA8 意味着显存占用是压缩格式的 4–8 倍，且**没有 mip 链 → 斜视角严重走样**，这两条叠加是「HLSL 图和 Unity 里比明显更噪/更闪」的主因，比 shader 差异更大。
+
+> **这条判断的实测更正（2026-10-29）**：「贴图绝大多数是 DDS」不成立。12 个工程 `Assets` 目录里 4200+ 张贴图的分布是 PNG 3681 / JPG 469 / EXR 96 / HDR 67 / TGA 67 / PSD 60 / TIF 29 / **DDS 1**，Asset Store 缓存与 Booth 目录里 `.dds` 为 0。所以本条的真实收益全在 mip 链与 MSAA（走样），压缩纹理直传既省不到显存、还要为 0.02% 的资产引入 unsafe 指针路径 —— 已按实测放弃，只保留「`.dds`/`.exr` 解码失败会白图并计入『N 张无法解码』」这个可观测兜底。
 
 **方案** 三小步：①按 DDS 头把 BC1/BC3/BC4/BC5/BC7 直接建成对应 `DXGI_FORMAT` 纹理并用 `Texture2D.FromMemory` 类的现成路径（Vortice 已依赖，或直接自写 BC 头解析），CPU 解码只留 PNG/JPG/TGA 兜底；②`GenerateMips` + 采样器加 `Filter.MinMagMipLinear` 与 AddressU/V 的 mirror/clamp 判定（Unity 的 wrap mode 在 `.mat` 里没有，取 shader 语义默认即可）；③RT 做成可选 MSAA 4×（提供开关，低端卡或 WARP 下关）。
 
