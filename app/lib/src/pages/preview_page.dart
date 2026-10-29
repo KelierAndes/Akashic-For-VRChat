@@ -215,6 +215,20 @@ class _PreviewPageState extends State<PreviewPage> {
     _web?.evaluateJavascript(source: "window.akashicFocus('$id')");
   }
 
+  Map<String, dynamic>? _findNode(String id) {
+    Map<String, dynamic>? walk(List nodes) {
+      for (final entry in nodes) {
+        final node = Map<String, dynamic>.from(entry as Map);
+        if ('${node['id']}' == id) return node;
+        final found = walk(((node['children'] as List?) ?? const []));
+        if (found != null) return found;
+      }
+      return null;
+    }
+
+    return walk(((_scene?['nodes'] as List?) ?? const []));
+  }
+
   Future<void> _toggleHlsl() async {
     final next = !_hlsl;
     setState(() {
@@ -244,6 +258,10 @@ class _PreviewPageState extends State<PreviewPage> {
     }
 
     await _refreshRenderInfo();
+    _startRenderPoll();
+  }
+
+  void _startRenderPoll() {
     _renderPoll?.cancel();
     _renderPoll = Timer.periodic(const Duration(milliseconds: 900), (_) {
       _refreshRenderInfo();
@@ -260,7 +278,6 @@ class _PreviewPageState extends State<PreviewPage> {
       final decoded = jsonDecode('$raw');
       if (decoded is! Map) return;
       final info = Map<String, dynamic>.from(decoded);
-      if (info['enabled'] != true) return;
       setState(() => _renderInfo = info);
     } catch (_) {}
   }
@@ -887,7 +904,19 @@ class _PreviewPageState extends State<PreviewPage> {
               disableHorizontalScroll: true,
               disableVerticalScroll: true,
             ),
-            onWebViewCreated: (controller) => _web = controller,
+            onWebViewCreated: (controller) {
+              _web = controller;
+              controller.addJavaScriptHandler(
+                handlerName: 'akashicPick',
+                callback: (args) {
+                  final id = args.isNotEmpty ? '${args.first}' : '';
+                  final node = _findNode(id);
+                  if (node != null && mounted) setState(() => _selected = node);
+                  return null;
+                },
+              );
+              _startRenderPoll();
+            },
             onLoadStop: (controller, url) {
               if (_flat) {
                 controller.evaluateJavascript(
@@ -1064,11 +1093,9 @@ class _PreviewPageState extends State<PreviewPage> {
             style: TextStyle(fontSize: 11, color: t.inkTertiary),
           ),
         ] else if (!_hlsl) ...[
-          const SizedBox(height: 10),
-          Text(
-            'HLSL 未启用。打开右上角「HLSL 精确」后，这里会显示绘制次数、单帧耗时、回退材质与原因。',
-            style: TextStyle(fontSize: 11, height: 1.5, color: t.inkTertiary),
-          ),
+          const SizedBox(height: 4),
+          _infoRow(t, '渲染', 'Three.js 近似（PBR / 卡通）'),
+          _infoRow(t, '真实着色器', '打开右上角「HLSL 精确」开启'),
         ] else if (info == null) ...[
           const SizedBox(height: 10),
           Row(

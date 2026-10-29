@@ -656,9 +656,16 @@ class HostClient {
     String? entry,
     int size = 640,
     bool light = false,
-  }) =>
-      '${_previewUrl('material', resourceKey, path, entry)}&size=$size'
-      '${light ? '&light=1' : ''}';
+    double yaw = double.nan,
+    double pitch = double.nan,
+    double distance = 0,
+  }) {
+    final orbit = !yaw.isNaN && !pitch.isNaN;
+    return '${_previewUrl('material', resourceKey, path, entry)}&size=$size'
+        '${light ? '&light=1' : ''}'
+        '${orbit ? '&yaw=${yaw.toStringAsFixed(5)}&pitch=${pitch.toStringAsFixed(5)}'
+                  '&distance=${distance.toStringAsFixed(5)}' : ''}';
+  }
 
   String _previewUrl(
     String route,

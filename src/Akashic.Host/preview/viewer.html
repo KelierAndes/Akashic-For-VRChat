@@ -9,8 +9,12 @@
   #stage { position: fixed; inset: 0; }
   canvas { display: block; }
   #hud {
-    position: fixed; left: 12px; bottom: 10px; right: 12px;
-    display: flex; gap: 10px; align-items: center;
+    position: fixed; left: 12px; bottom: 10px;
+    font: 12px "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    color: #aeb6c2; pointer-events: none; z-index: 4;
+  }
+  #hint {
+    position: fixed; left: 12px; top: 10px;
     font: 12px "Segoe UI", "Microsoft YaHei UI", sans-serif;
     color: #aeb6c2; pointer-events: none; z-index: 4;
   }
@@ -37,11 +41,6 @@
     width: 100%; height: 100%; display: block; touch-action: none; cursor: grab;
   }
   #hlslCanvas.dragging { cursor: grabbing; }
-  #hlslStats {
-    position: absolute; right: 8px; bottom: 8px; padding: 3px 8px; border-radius: 6px;
-    pointer-events: none; background: rgba(16, 20, 26, 0.72); color: #c9d6ea;
-    font: 11px "Segoe UI", "Microsoft YaHei UI", sans-serif;
-  }
   #gizmoView {
     position: fixed; right: 16px; top: 96px; width: 108px; height: 108px;
     z-index: 5; pointer-events: none;
@@ -77,16 +76,11 @@
   }
   body.light #status.error { color: #ad3b3b; }
   body.light #hlslView { background: #edf0f4; }
-  body.light #hud { color: #5c6674; }
-  body.light #hud b { color: #2b313a; }
   body.light #hlslToggle, body.light #bgToggle {
     background: rgba(255, 255, 255, 0.92); color: #3a4350; border-color: #c6ced9;
   }
   body.light #viewModes button {
     background: rgba(255, 255, 255, 0.92); color: #3a4350; border-color: #c6ced9;
-  }
-  body.light #hlslStats {
-    background: rgba(255, 255, 255, 0.82); color: #3a4350;
   }
 </style>
 <script type="importmap">
@@ -97,7 +91,6 @@
 <div id="stage"></div>
 <div id="hlslView">
   <canvas id="hlslCanvas"></canvas>
-  <span id="hlslStats"></span>
 </div>
 <canvas id="gizmoView"></canvas>
 <div id="viewModes">
@@ -109,7 +102,7 @@
 <button id="hlslToggle" type="button">HLSL 精确渲染</button>
 <button id="bgToggle" type="button">底色：深色</button>
 <div id="status"><div id="spinner"></div><span id="message">正在准备 3D 视窗…</span></div>
-<div id="hud"><span id="summary"></span><span id="hint" style="margin-left:auto">左键旋转 · 右键平移 · 滚轮缩放</span></div>
+<div id="hint">左键选择 · 中键平移 · 右键旋转 · 滚轮缩放 · 双击聚焦</div>
 
 <script type="module">
 import * as THREE from 'three';
@@ -125,7 +118,6 @@ const bgToggle = document.getElementById('bgToggle');
 const hlslToggle = document.getElementById('hlslToggle');
 const statusBox = document.getElementById('status');
 const message = document.getElementById('message');
-const summary = document.getElementById('summary');
 const hint = document.getElementById('hint');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -147,6 +139,62 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
 controls.target.set(0, 0.5, 0);
+controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+
+const viewCamera = { yaw: -0.7033, pitch: 0.3915, distance: 0, target: null };
+
+function orbitDir(yaw, pitch) {
+  const cosPitch = Math.cos(pitch);
+  return { x: Math.sin(yaw) * cosPitch, y: Math.sin(pitch), z: Math.cos(yaw) * cosPitch };
+}
+
+function syncCameraFromThree() {
+  const eye = camera.position;
+  const target = controls.target;
+  const dx = eye.x - target.x;
+  const dy = eye.y - target.y;
+  const dz = eye.z - target.z;
+  const length = Math.hypot(dx, dy, dz) || 1;
+
+  viewCamera.target = { x: target.x, y: target.y, z: target.z };
+  viewCamera.distance = length;
+  viewCamera.yaw = Math.atan2(dx, dz);
+  viewCamera.pitch = Math.asin(Math.max(-1, Math.min(1, dy / length)));
+}
+
+function hlslOrbitParams() {
+  const target = viewCamera.target || { x: 0, y: 0.5, z: 0 };
+
+  return {
+    yaw: -viewCamera.yaw,
+    pitch: viewCamera.pitch,
+    distance: viewCamera.distance,
+    hasTarget: true,
+    targetX: -target.x,
+    targetY: target.y,
+    targetZ: target.z
+  };
+}
+
+function applyCameraToThree() {
+  const target = viewCamera.target || { x: 0, y: 0.5, z: 0 };
+  const dir = orbitDir(viewCamera.yaw, viewCamera.pitch);
+  const distance = viewCamera.distance || 1;
+
+  camera.position.set(target.x + dir.x * distance, target.y + dir.y * distance, target.z + dir.z * distance);
+  controls.target.set(target.x, target.y, target.z);
+  controls.update();
+}
+
+renderer.domElement.addEventListener('pointerup', (event) => {
+  if (hlslOn || event.button !== 0) return;
+  viewClick(event);
+});
+
+renderer.domElement.addEventListener('dblclick', (event) => {
+  if (hlslOn) return;
+  viewDoubleClick(event);
+});
 
 scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x30343c, 1.25));
 
@@ -269,15 +317,13 @@ gizmoRenderer.setClearAlpha(0);
 const gizmoProbe = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
 
 function activeGizmoQuaternion() {
-  if (!hlslOn) return camera.quaternion;
+  const dir = orbitDir(viewCamera.yaw, viewCamera.pitch);
+  const target = viewCamera.target || { x: 0, y: 0.5, z: 0 };
+  const distance = viewCamera.distance || 1;
 
-  const { dir } = hlslBasis();
-  const distance = hlslCamera.distance || 1;
-  const target = hlslCamera.target || { x: 0, y: 0, z: 0 };
-
-  gizmoProbe.position.set(-(target.x + dir.x * distance), target.y + dir.y * distance, target.z + dir.z * distance);
+  gizmoProbe.position.set(target.x + dir.x * distance, target.y + dir.y * distance, target.z + dir.z * distance);
   gizmoProbe.up.set(0, 1, 0);
-  gizmoProbe.lookAt(-target.x, target.y, target.z);
+  gizmoProbe.lookAt(target.x, target.y, target.z);
   return gizmoProbe.quaternion;
 }
 
@@ -315,26 +361,57 @@ window.akashicSelect = (id) => {
   } else {
     box.visible = false;
   }
+
+  if (!hlslOn) {
+    renderer.render(scene, camera);
+    drawGizmo();
+  }
 };
 
 window.akashicFocus = (id) => {
   window.akashicSelect(id);
   if (!selected) return;
   frameObject(selected);
-  controls.update();
+  if (hlslOn) requestHlsl(false);
 };
 
 window.akashicResetView = () => {
+  if (model) frameObject(model);
   if (hlslOn) {
-    resetHlslCamera();
+    requestHlsl(false);
     return;
   }
 
-  if (model) frameObject(model);
-  controls.update();
   renderer.render(scene, camera);
   drawGizmo();
 };
+
+const raycaster = new THREE.Raycaster();
+
+function pickNode(clientX, clientY) {
+  if (!model) return null;
+
+  const rect = renderer.domElement.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+
+  const ndc = new THREE.Vector2(
+    ((clientX - rect.left) / rect.width) * 2 - 1,
+    -((clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+
+  for (const hit of raycaster.intersectObject(model, true)) {
+    let node = hit.object;
+    while (node && !materialMeta.has(node.name)) node = node.parent;
+    if (node && node.name) return node.name;
+  }
+
+  return null;
+}
+
+function notifyPick(id) {
+  window.akashicSelect(id);
+  window.flutter_inappwebview?.callHandler?.('akashicPick', id);
+}
 
 window.akashicSetFlat = (flat) => {
   if (!model) return;
@@ -434,17 +511,13 @@ window.akashicSetHlsl = (on) => {
   hlslOn = !!on;
   hlslToggle.classList.toggle('on', hlslOn);
   hlslView.classList.toggle('on', hlslOn);
-  summary.style.display = hlslOn ? 'none' : '';
-  hint.style.marginLeft = hlslOn ? '0' : 'auto';
-  hint.style.marginRight = hlslOn ? 'auto' : '0';
   controls.enabled = !hlslOn;
-  hint.textContent = '左键旋转 · 右键平移 · 滚轮缩放 · 双击复位';
   if (hlslOn) {
-    baseSummary = summary.textContent;
+    syncCameraFromThree();
     setStatus('正在用 D3D11 渲染…');
     requestHlsl(true);
   } else {
-    summary.textContent = baseSummary;
+    applyCameraToThree();
     hideStatus();
     applyGlbMode(viewMode);
   }
@@ -452,12 +525,23 @@ window.akashicSetHlsl = (on) => {
 
 window.akashicHlslState = () => ({ enabled: hlslOn, busy: hlslBusy, mode: viewMode });
 
-window.akashicHlslInfo = () => ({
-  enabled: hlslOn, busy: hlslBusy, mode: viewMode,
-  gizmo: gizmoVisible, light: backgroundLight,
-  draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
-  detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
-});
+window.akashicHlslInfo = () => {
+  if (hlslOn) {
+    return {
+      enabled: true, busy: hlslBusy, mode: viewMode,
+      gizmo: gizmoVisible, light: backgroundLight,
+      draws: hlslInfo.draws, fallbacks: hlslInfo.fallbacks,
+      detail: hlslInfo.detail, summary: hlslInfo.summary, error: hlslInfo.error
+    };
+  }
+
+  return {
+    enabled: false, busy: false, mode: viewMode,
+    gizmo: gizmoVisible, light: backgroundLight,
+    draws: '', fallbacks: '', detail: '', error: '',
+    summary: `${baseSummary || '实时 3D'} · ${modeLabels[viewMode] || viewMode}`
+  };
+};
 
 if (params.get('embed') === '1') {
   hlslToggle.style.display = 'none';
@@ -467,14 +551,9 @@ hlslToggle.addEventListener('click', () => window.akashicSetHlsl(!hlslOn));
 bgToggle.addEventListener('click', () => window.akashicSetBackground(!backgroundLight));
 
 const hlslCanvas = document.getElementById('hlslCanvas');
-const hlslStats = document.getElementById('hlslStats');
 const hlslCtx = hlslCanvas.getContext('2d', { alpha: false });
 
-const HLSL_DEFAULT_YAW = -0.7033;
-const HLSL_DEFAULT_PITCH = 0.3915;
 const HLSL_FOV = 38;
-
-const hlslCamera = { yaw: HLSL_DEFAULT_YAW, pitch: HLSL_DEFAULT_PITCH, distance: 0, target: null };
 
 let hlslDragging = false;
 let hlslDragButton = -1;
@@ -484,58 +563,65 @@ let hlslFpsAt = 0;
 let hlslFpsFrames = 0;
 let hlslFps = 0;
 
-function resetHlslCamera() {
-  hlslCamera.yaw = HLSL_DEFAULT_YAW;
-  hlslCamera.pitch = HLSL_DEFAULT_PITCH;
-  hlslCamera.distance = 0;
-  hlslCamera.target = null;
-  if (hlslOn) requestHlsl(false);
-}
-
-function hlslBasis() {
-  const cosPitch = Math.cos(hlslCamera.pitch);
-  const dir = {
-    x: Math.sin(hlslCamera.yaw) * cosPitch,
-    y: Math.sin(hlslCamera.pitch),
-    z: Math.cos(hlslCamera.yaw) * cosPitch,
+function viewBasis() {
+  const cosPitch = Math.cos(viewCamera.pitch);
+  const dir = orbitDir(viewCamera.yaw, viewCamera.pitch);
+  const forward = { x: -dir.x, y: -dir.y, z: -dir.z };
+  const right = {
+    x: forward.y * 0 - forward.z * 1,
+    y: forward.z * 0 - forward.x * 0,
+    z: forward.x * 1 - forward.y * 0,
   };
-  const right = { x: -dir.z, y: 0, z: dir.x };
-  const length = Math.hypot(right.x, right.z) || 1;
+  const length = Math.hypot(right.x, right.y, right.z) || 1;
   right.x /= length;
+  right.y /= length;
   right.z /= length;
   return {
     dir,
     right,
     up: {
-      x: right.y * dir.z - right.z * dir.y,
-      y: right.z * dir.x - right.x * dir.z,
-      z: right.x * dir.y - right.y * dir.x,
+      x: right.y * forward.z - right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y - right.y * forward.x,
     },
   };
 }
 
-function hlslOrbit(dx, dy) {
+function viewOrbit(dx, dy) {
   const k = 0.0075;
-  hlslCamera.yaw -= dx * k;
-  hlslCamera.pitch = Math.max(-1.5, Math.min(1.5, hlslCamera.pitch + dy * k));
+  viewCamera.yaw -= dx * k;
+  viewCamera.pitch = Math.max(-1.5, Math.min(1.5, viewCamera.pitch + dy * k));
 }
 
-function hlslPan(dx, dy) {
-  if (!hlslCamera.target) return;
-  const { right, up } = hlslBasis();
+function viewPan(dx, dy) {
+  if (!viewCamera.target) return;
+  const { right, up } = viewBasis();
   const fov = HLSL_FOV * Math.PI / 180;
-  const perPixel = 2 * hlslCamera.distance * Math.tan(fov / 2) / Math.max(1, hlslCanvas.clientHeight);
-  const shiftX = (-right.x * dx + up.x * dy) * perPixel;
-  const shiftY = (-right.y * dx + up.y * dy) * perPixel;
-  const shiftZ = (-right.z * dx + up.z * dy) * perPixel;
-  hlslCamera.target.x += shiftX;
-  hlslCamera.target.y += shiftY;
-  hlslCamera.target.z += shiftZ;
+  const perPixel = 2 * viewCamera.distance * Math.tan(fov / 2) / Math.max(1, window.innerHeight);
+  viewCamera.target.x += (-right.x * dx + up.x * dy) * perPixel;
+  viewCamera.target.y += (-right.y * dx + up.y * dy) * perPixel;
+  viewCamera.target.z += (-right.z * dx + up.z * dy) * perPixel;
 }
 
-function hlslDolly(deltaY) {
-  if (!hlslCamera.distance) return;
-  hlslCamera.distance = Math.max(0.001, Math.min(2000, hlslCamera.distance * Math.exp(deltaY * 0.0005)));
+function viewDolly(deltaY) {
+  if (!viewCamera.distance) return;
+  viewCamera.distance = Math.max(0.001, Math.min(2000, viewCamera.distance * Math.exp(deltaY * 0.0005)));
+}
+
+function viewClick(event) {
+  const id = pickNode(event.clientX, event.clientY);
+  if (id) notifyPick(id);
+  else window.akashicSelect(null);
+}
+
+function viewDoubleClick(event) {
+  const id = pickNode(event.clientX, event.clientY);
+  if (id) {
+    window.akashicFocus(id);
+    return;
+  }
+
+  window.akashicResetView();
 }
 
 hlslCanvas.addEventListener('pointerdown', (event) => {
@@ -557,8 +643,9 @@ hlslCanvas.addEventListener('pointermove', (event) => {
   hlslDragX = event.clientX;
   hlslDragY = event.clientY;
 
-  if (hlslDragButton === 0 && !event.shiftKey) hlslOrbit(dx, dy);
-  else hlslPan(dx, dy);
+  if (hlslDragButton === 2) viewOrbit(dx, dy);
+  else if (hlslDragButton === 1 || (hlslDragButton === 0 && event.shiftKey)) viewPan(dx, dy);
+  else return;
 
   requestHlsl(false);
 });
@@ -572,16 +659,22 @@ function endHlslDrag(event) {
   requestHlsl(false);
 }
 
-hlslCanvas.addEventListener('pointerup', endHlslDrag);
+hlslCanvas.addEventListener('pointerup', (event) => {
+  const moved = hlslDragButton !== -1 &&
+      (Math.abs(event.clientX - hlslDragX) > 3 || Math.abs(event.clientY - hlslDragY) > 3);
+  endHlslDrag(event);
+  if (hlslOn && event.button === 0 && !moved) viewClick(event);
+});
+
 hlslCanvas.addEventListener('pointercancel', endHlslDrag);
-hlslCanvas.addEventListener('dblclick', resetHlslCamera);
+hlslCanvas.addEventListener('dblclick', viewDoubleClick);
 hlslCanvas.addEventListener('contextmenu', (event) => {
   if (hlslOn) event.preventDefault();
 });
 hlslCanvas.addEventListener('wheel', (event) => {
   if (!hlslOn) return;
   event.preventDefault();
-  hlslDolly(event.deltaY);
+  viewDolly(event.deltaY);
   requestHlsl(false);
 }, { passive: false });
 
@@ -640,14 +733,8 @@ async function requestHlsl(showStatus) {
         gizmo: false,
         lightBackground: backgroundLight,
         raw: true,
-        yaw: hlslCamera.yaw,
-        pitch: hlslCamera.pitch,
-        fov: HLSL_FOV,
-        distance: hlslCamera.distance,
-        hasTarget: !!hlslCamera.target,
-        targetX: hlslCamera.target ? hlslCamera.target.x : 0,
-        targetY: hlslCamera.target ? hlslCamera.target.y : 0,
-        targetZ: hlslCamera.target ? hlslCamera.target.z : 0
+        ...hlslOrbitParams(),
+        fov: HLSL_FOV
       })
     });
 
@@ -661,17 +748,6 @@ async function requestHlsl(showStatus) {
     const buffer = await response.arrayBuffer();
     const frameWidth = Number(response.headers.get('X-Akashic-Frame-Width')) || size.width;
     const frameHeight = Number(response.headers.get('X-Akashic-Frame-Height')) || size.height;
-
-    const cameraHeader = response.headers.get('X-Akashic-Camera');
-    if (cameraHeader && !hlslCamera.target) {
-      const parts = cameraHeader.split(';').map(Number);
-      if (parts.length >= 7 && parts.every(Number.isFinite)) {
-        hlslCamera.yaw = parts[0];
-        hlslCamera.pitch = parts[1];
-        hlslCamera.distance = parts[2];
-        hlslCamera.target = { x: parts[3], y: parts[4], z: parts[5] };
-      }
-    }
 
     await drawHlslFrame(new Uint8ClampedArray(buffer), frameWidth, frameHeight);
     drawGizmo();
@@ -695,9 +771,6 @@ async function requestHlsl(showStatus) {
       : `${head} · ${fallbacks} 个回退材质${shown.length ? '：' + shown.join(' | ') : ''}`;
 
     hlslInfo = { draws, fallbacks, detail, summary: text, error: '' };
-    summary.textContent = text;
-    summary.title = detail;
-    hlslStats.textContent = `${label} · ${draws} 次绘制${timing}${rate}`;
   } catch (error) {
     hlslInfo = { draws: '', fallbacks: '', detail: '', summary: '', error: String(error?.message || error) };
     window.akashicSetHlsl(false);
@@ -749,7 +822,7 @@ async function boot() {
       }
     }
 
-    summary.textContent = `${sceneData.name || 'Prefab'} · ${sceneData.nodeCount || 0} 节点 · ${sceneData.meshCount || 0} 网格`;
+    baseSummary = `${sceneData.name || 'Prefab'} · ${sceneData.nodeCount || 0} 节点 · ${sceneData.meshCount || 0} 网格`;
 
     const loader = new GLTFLoader();
     loader.load(`./builds/${build}/model.glb`, (gltf) => {
@@ -778,7 +851,7 @@ async function boot() {
       controls.update();
       ready = true;
       hideStatus();
-      summary.textContent += ` · lilToon ${applied.liltoon} / toon ${applied.toon} / lit ${applied.lit}`;
+      baseSummary += ` · lilToon ${applied.liltoon} / toon ${applied.toon} / lit ${applied.lit}`;
       viewModes.classList.add('on');
       applyGlbMode(viewMode);
 
@@ -1015,6 +1088,7 @@ function frameObject(object) {
   camera.near = Math.max(0.001, radius / 300);
   camera.far = Math.max(100, radius * 40);
   camera.updateProjectionMatrix();
+  syncCameraFromThree();
 
   const gridSize = Math.max(0.5, Math.ceil(radius * 4 * 100) / 100);
   grid.scale.setScalar(gridSize / 4);
@@ -1031,6 +1105,7 @@ renderer.setAnimationLoop(() => {
   controls.update();
   if (box.visible) box.update();
   if (hlslOn) return;
+  syncCameraFromThree();
   renderer.render(scene, camera);
   drawGizmo();
 });

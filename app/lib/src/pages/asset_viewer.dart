@@ -1,3 +1,6 @@
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
@@ -116,6 +119,15 @@ class _AssetViewerState extends State<AssetViewer> {
   bool _light = false;
   int _token = 0;
 
+  double _yaw = 0.7854;
+  double _pitch = 0.6155;
+  double _distance = 0;
+  bool _orbitPending = false;
+
+  bool get _isMedia => isMediaAsset(widget.asset);
+
+  bool get _isMaterialBall => '${widget.asset['kind']}' == 'material';
+
   @override
   void initState() {
     super.initState();
@@ -127,6 +139,9 @@ class _AssetViewerState extends State<AssetViewer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.asset['path'] != widget.asset['path'] ||
         oldWidget.resourceKey != widget.resourceKey) {
+      _yaw = 0.7854;
+      _pitch = 0.6155;
+      _distance = 0;
       _load();
     }
   }
@@ -135,7 +150,78 @@ class _AssetViewerState extends State<AssetViewer> {
 
   bool get _isImage => isImageAsset(widget.asset);
 
-  bool get _isMedia => isMediaAsset(widget.asset);
+  void _orbitBy(double dx, double dy) {
+    if (!_isMaterialBall) return;
+    setState(() {
+      _yaw += dx * 0.0085;
+      _pitch = (_pitch + dy * 0.0085).clamp(-1.5, 1.5);
+    });
+    _scheduleOrbitFetch();
+  }
+
+  void _dollyBy(double deltaY) {
+    if (!_isMaterialBall) return;
+    setState(() {
+      final current = _distance <= 0 ? 2.35 : _distance;
+      _distance = (current * math.exp(deltaY * 0.0008)).clamp(0.6, 12.0);
+    });
+    _scheduleOrbitFetch();
+  }
+
+  void _resetOrbit() {
+    setState(() {
+      _yaw = 0.7854;
+      _pitch = 0.6155;
+      _distance = 0;
+    });
+    _scheduleOrbitFetch();
+  }
+
+  void _scheduleOrbitFetch() {
+    if (_orbitPending) return;
+    _orbitPending = true;
+    Future.delayed(const Duration(milliseconds: 40), () {
+      _orbitPending = false;
+      if (mounted) _orbitRefresh();
+    });
+  }
+
+  Future<void> _orbitRefresh() async {
+    final token = ++_token;
+    final url = widget.host.previewMaterialUrl(
+      widget.resourceKey,
+      '${widget.asset['path']}',
+      entry: widget.entry,
+      light: _light,
+      yaw: _yaw,
+      pitch: _pitch,
+      distance: _distance,
+    );
+
+    final image = await widget.host.fetchPreviewImage(url);
+    if (!mounted || token != _token) return;
+
+    setState(() {
+      _error = image.message;
+      final bytes = image.bytes;
+      if (bytes != null) _image = MemoryImage(bytes);
+    });
+  }
+
+  Widget _stage(Widget child) {
+    if (!_isMaterialBall) return child;
+
+    return GestureDetector(
+      onPanUpdate: (details) => _orbitBy(details.delta.dx, details.delta.dy),
+      onDoubleTap: _resetOrbit,
+      child: Listener(
+        onPointerSignal: (event) {
+          if (event is PointerScrollEvent) _dollyBy(event.scrollDelta.dy);
+        },
+        child: child,
+      ),
+    );
+  }
 
   Future<void> _load() async {
     final token = ++_token;
@@ -167,6 +253,9 @@ class _AssetViewerState extends State<AssetViewer> {
               path,
               entry: widget.entry,
               light: _light,
+              yaw: _yaw,
+              pitch: _pitch,
+              distance: _distance,
             )
           : widget.host.previewFileUrl(
               widget.resourceKey,
@@ -315,15 +404,23 @@ class _AssetViewerState extends State<AssetViewer> {
     }
 
     if (_image != null) {
-      return Container(
-        decoration: BoxDecoration(
-          color: _light ? const Color(0xFFEDF0F4) : const Color(0xFF1B1E23),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        clipBehavior: Clip.antiAlias,
-        padding: const EdgeInsets.all(14),
-        child: Center(
-          child: Image(image: _image!, fit: BoxFit.contain),
+      return _stage(
+        Container(
+          decoration: BoxDecoration(
+            color: _light ? const Color(0xFFEDF0F4) : const Color(0xFF1B1E23),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          clipBehavior: Clip.antiAlias,
+          padding: const EdgeInsets.all(14),
+          child: Center(
+            child: _isMaterialBall
+                ? Image(
+                    image: _image!,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                  )
+                : Image(image: _image!, fit: BoxFit.contain),
+          ),
         ),
       );
     }

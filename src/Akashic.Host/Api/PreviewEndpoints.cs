@@ -233,6 +233,10 @@ public static partial class PreviewEndpoints
 
             var size = Math.Clamp(ParseInt(Query(context, "size"), 512), 128, 1536);
             var light = Query(context, "light") is "1" or "true";
+            var yaw = ParseFloat(Query(context, "yaw"), float.NaN);
+            var pitch = ParseFloat(Query(context, "pitch"), float.NaN);
+            var distance = ParseFloat(Query(context, "distance"), 0f);
+            var orbit = !float.IsNaN(yaw) && !float.IsNaN(pitch);
 
             try
             {
@@ -242,13 +246,16 @@ public static partial class PreviewEndpoints
                     SessionId = "material",
                     Width = size,
                     Height = size,
-                    View = "iso",
+                    View = orbit ? "orbit" : "iso",
+                    Yaw = orbit ? yaw : 0,
+                    Pitch = orbit ? pitch : 0,
+                    Distance = distance,
                     Mode = "textured",
                     Outline = false,
                     LightBackground = light
                 }, ct);
 
-                context.Response.Headers["Cache-Control"] = "public, max-age=600";
+                context.Response.Headers["Cache-Control"] = orbit ? "no-store" : "public, max-age=600";
                 return Results.Bytes(frame.Jpeg, "image/jpeg");
             }
             catch (Exception ex)
@@ -338,6 +345,11 @@ public static partial class PreviewEndpoints
 
     private static int ParseInt(string text, int fallback) =>
         int.TryParse(text, out var value) ? value : fallback;
+
+    private static float ParseFloat(string text, float fallback) =>
+        float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : fallback;
 
     private static string ContentTypeOf(string path) =>
         ContentTypes.TryGetValue(Path.GetExtension(path), out var type) ? type : "application/octet-stream";
