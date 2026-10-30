@@ -767,6 +767,21 @@ class HostClient {
   Future<Map<String, dynamic>> resourceMatchStatus() async =>
       await _send('GET', 'api/resources/match/status') as Map<String, dynamic>;
 
+  Future<List<dynamic>> pendingMatches() async =>
+      (await _send('GET', 'api/resources/pending') as List).cast<dynamic>();
+
+  Future<List<dynamic>> confirmPendingMatch(String key, String boothId) async =>
+      (await _send('POST', 'api/resources/pending/confirm', {
+        'key': key,
+        'boothId': boothId,
+      }) as List)
+          .cast<dynamic>();
+
+  Future<List<dynamic>> dismissPendingMatch(String key) async =>
+      (await _send('POST', 'api/resources/pending/dismiss', {'key': key})
+              as List)
+          .cast<dynamic>();
+
   Future<List<dynamic>> saveResourceMeta(Map<String, dynamic> update) async =>
       (await _send('POST', 'api/resources/meta', update) as List)
           .cast<dynamic>();

@@ -202,6 +202,19 @@ public class BoothService : IBoothService
     {
         if (!System.Text.RegularExpressions.Regex.IsMatch(itemId, @"^\d+$")) return null;
 
+        var jsonUrl = new Uri($"https://{BoothHost}/ja/items/{itemId}.json");
+
+        using (var jsonResponse = await SendAsync(_boothClient, jsonUrl, HttpCompletionOption.ResponseContentRead,
+                   sendCookies: true, ct, extraCookies: AdultCookie))
+        {
+            if (jsonResponse.IsSuccessStatusCode)
+            {
+                var json = await jsonResponse.Content.ReadAsStringAsync(ct);
+                var parsed = BoothHtml.ParseItemJson(json, itemId);
+                if (parsed is not null) return parsed;
+            }
+        }
+
         var url = new Uri($"https://{BoothHost}/ja/items/{itemId}");
         using var response = await SendAsync(_boothClient, url, HttpCompletionOption.ResponseContentRead,
             sendCookies: true, ct);

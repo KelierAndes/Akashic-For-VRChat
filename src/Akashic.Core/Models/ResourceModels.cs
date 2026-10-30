@@ -28,6 +28,9 @@ public class ResourceMetaEntry
     [JsonPropertyName("assetStoreName")]
     public string AssetStoreName { get; set; } = string.Empty;
 
+    [JsonPropertyName("manualMatch")]
+    public bool ManualMatch { get; set; }
+
     [JsonPropertyName("matchedAt")]
     public DateTime? MatchedAt { get; set; }
 
@@ -103,6 +106,8 @@ public class ResourceRow
 
     public bool IsManual { get; set; }
 
+    public bool ManualMatch { get; set; }
+
     public bool Attempted { get; set; }
 
     public List<ResourceRow> Children { get; set; } = [];
@@ -130,7 +135,27 @@ public class BoothMatchCandidate
 
     public string CoverUrl { get; set; } = string.Empty;
 
+    public List<string> Tags { get; set; } = [];
+
     public double Score { get; set; }
+}
+
+public class PendingMatch
+{
+    [JsonPropertyName("metaKey")]
+    public string MetaKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("containerKey")]
+    public string ContainerKey { get; set; } = string.Empty;
+
+    [JsonPropertyName("createdAt")]
+    public DateTime CreatedAt { get; set; }
+
+    [JsonPropertyName("candidates")]
+    public List<BoothMatchCandidate> Candidates { get; set; } = [];
 }
 
 public class ResourceMatchStatus
@@ -144,6 +169,8 @@ public class ResourceMatchStatus
     public int Matched { get; set; }
 
     public int Failed { get; set; }
+
+    public int Pending { get; set; }
 
     public string Current { get; set; } = string.Empty;
 
@@ -160,6 +187,8 @@ public sealed record ResourceMetaUpdate(
     string? CoverUrl);
 
 public sealed record ResourceMatchRequest(bool Force = false);
+
+public sealed record PendingMatchRequest(string Key, string BoothId);
 
 public sealed record ResourceKeyRequest(string Key);
 

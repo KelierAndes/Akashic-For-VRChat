@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Akashic.Core.Models;
 
@@ -58,6 +59,74 @@ public static partial class BoothHtml
             CoverUrl = WebUtility.HtmlDecode(Meta(html, "og:image"))
         };
     }
+
+    public static BoothMatchCandidate? ParseItemJson(string json, string id)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+
+            var title = WebUtility.HtmlDecode(Str(root, "name")).Trim();
+            if (title.Length == 0) return null;
+
+            var cover = string.Empty;
+            if (root.TryGetProperty("images", out var images) && images.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var image in images.EnumerateArray())
+                {
+                    cover = Str(image, "original");
+                    if (cover.Length == 0) cover = Str(image, "resized");
+                    if (cover.Length > 0) break;
+                }
+            }
+
+            var shop = string.Empty;
+            var shopUrl = string.Empty;
+            if (root.TryGetProperty("shop", out var shopNode) && shopNode.ValueKind == JsonValueKind.Object)
+            {
+                shop = Str(shopNode, "name");
+                shopUrl = Str(shopNode, "url");
+            }
+
+            var category = string.Empty;
+            if (root.TryGetProperty("category", out var categoryNode) &&
+                categoryNode.ValueKind == JsonValueKind.Object)
+                category = PackageCategory.FromBoothLabel(Str(categoryNode, "name"));
+
+            var tags = new List<string>();
+            if (root.TryGetProperty("tags", out var tagNodes) && tagNodes.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var tag in tagNodes.EnumerateArray())
+                {
+                    var name = Str(tag, "name").Trim();
+                    if (name.Length > 0) tags.Add(name);
+                }
+            }
+
+            return new BoothMatchCandidate
+            {
+                Id = id,
+                Title = title,
+                Shop = shop.Trim(),
+                ShopUrl = shopUrl,
+                Category = category,
+                CoverUrl = cover,
+                Tags = tags
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string Str(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() ?? string.Empty
+            : string.Empty;
 
     private static string CleanTitle(string raw)
     {

@@ -64,6 +64,7 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
   ];
 
   List<Map<String, dynamic>> _rows = [];
+  List<Map<String, dynamic>> _pending = [];
   List<dynamic> _folders = [];
   final Set<String> _open = {};
   String _filter = filters.first;
@@ -91,10 +92,12 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     try {
       final rows = await model.resourceRows(force: force);
       final folders = await host.libraryFolders();
+      final pending = await host.pendingMatches();
       if (!mounted) return;
       setState(() {
         _rows = rows.cast<Map<String, dynamic>>();
         _folders = folders;
+        _pending = pending.cast<Map<String, dynamic>>();
         _status = _summary;
       });
     } catch (error) {
@@ -110,7 +113,8 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
     final store = _rows
         .where((row) => '${row['matchSource']}' == 'AssetStore')
         .length;
-    return '共 ${_rows.length} 个包 · 未匹配 $unmatched · Booth $booth · Asset Store $store';
+    final pending = _pending.isEmpty ? '' : ' · 待确认 ${_pending.length}';
+    return '共 ${_rows.length} 个包 · 未匹配 $unmatched · Booth $booth · Asset Store $store$pending';
   }
 
   List<Map<String, dynamic>> get _shown {
@@ -161,6 +165,8 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
       _poll = null;
       setState(() => _matching = false);
       await _load(force: true);
+      if (!mounted) return;
+      if (_pending.isNotEmpty) _showPending();
     });
   }
 
@@ -179,9 +185,47 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
           final host = model.host;
           if (host == null) return;
           final rows = await host.saveResourceMeta(update);
+          final pending = await host.pendingMatches();
           if (!mounted) return;
+          model.invalidateResources();
           setState(() {
             _rows = rows.cast<Map<String, dynamic>>();
+            _pending = pending.cast<Map<String, dynamic>>();
+            _status = _summary;
+          });
+        },
+      ),
+    );
+  }
+
+  void _showPending() {
+    final model = AppScope.of(context);
+    final host = model.host;
+    if (host == null || _pending.isEmpty || model.modal != null) return;
+
+    model.showModal(
+      PendingMatchForm(
+        items: List.of(_pending),
+        onChoose: (entry, candidate) async {
+          final rows = await host.confirmPendingMatch(
+            '${entry['metaKey']}',
+            '${candidate['id']}',
+          );
+          final pending = await host.pendingMatches();
+          if (!mounted) return;
+          model.invalidateResources();
+          setState(() {
+            _rows = rows.cast<Map<String, dynamic>>();
+            _pending = pending.cast<Map<String, dynamic>>();
+            _status = _summary;
+          });
+        },
+        onSkip: (entry) async {
+          await host.dismissPendingMatch('${entry['metaKey']}');
+          final pending = await host.pendingMatches();
+          if (!mounted) return;
+          setState(() {
+            _pending = pending.cast<Map<String, dynamic>>();
             _status = _summary;
           });
         },
@@ -289,6 +333,14 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            if (_pending.isNotEmpty) ...[
+              NeuActionButton(
+                label: '待确认 ${_pending.length}',
+                icon: Icons.rule_rounded,
+                onTap: _showPending,
+              ),
+              const SizedBox(width: 10),
+            ],
             NeuActionButton(
               label: _matching ? '匹配中…' : '匹配 Booth',
               icon: Icons.auto_awesome_rounded,
@@ -477,7 +529,22 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                             ),
                           if (source.isEmpty && row['attempted'] == true)
                             const NeuPill('已尝试'),
-                          if (row['isManual'] == true) const NeuPill('已自定义'),
+                          if (_pending.any(
+                            (item) => '${item['metaKey']}' == '${row['metaKey']}',
+                          ))
+                            const NeuPill(
+                              '待确认',
+                              bg: Color(0xFFE8DCF4),
+                              fg: Color(0xFF5C3C80),
+                            ),
+                          if (row['manualMatch'] == true)
+                            const NeuPill(
+                              '手动匹配',
+                              bg: Color(0xFFD6E4F7),
+                              fg: Color(0xFF284E7D),
+                            )
+                          else if (row['isManual'] == true)
+                            const NeuPill('已自定义'),
                           for (final tag in tags) NeuPill('#$tag'),
                         ],
                       ),
@@ -626,6 +693,20 @@ class _UserPackagesTabState extends State<UserPackagesTab> {
                           '未关联',
                           bg: Color(0xFFEBD9B4),
                           fg: Color(0xFF7A5514),
+                        ),
+                      if (_pending.any(
+                        (item) => '${item['metaKey']}' == '${child['metaKey']}',
+                      ))
+                        const NeuPill(
+                          '待确认',
+                          bg: Color(0xFFE8DCF4),
+                          fg: Color(0xFF5C3C80),
+                        ),
+                      if (child['manualMatch'] == true)
+                        const NeuPill(
+                          '手动匹配',
+                          bg: Color(0xFFD6E4F7),
+                          fg: Color(0xFF284E7D),
                         ),
                     ],
                   ),
@@ -1166,6 +1247,212 @@ class _ResourceMetaFormState extends State<ResourceMetaForm> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class PendingMatchForm extends StatefulWidget {
+  const PendingMatchForm({
+    super.key,
+    required this.items,
+    required this.onChoose,
+    required this.onSkip,
+  });
+
+  final List<Map<String, dynamic>> items;
+  final Future<void> Function(
+    Map<String, dynamic> entry,
+    Map<String, dynamic> candidate,
+  ) onChoose;
+  final Future<void> Function(Map<String, dynamic> entry) onSkip;
+
+  @override
+  State<PendingMatchForm> createState() => _PendingMatchFormState();
+}
+
+class _PendingMatchFormState extends State<PendingMatchForm> {
+  late final List<Map<String, dynamic>> _items = [...widget.items];
+  bool _busy = false;
+  String _error = '';
+
+  Future<void> _choose(
+    Map<String, dynamic> entry,
+    Map<String, dynamic> candidate,
+  ) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+
+    try {
+      await widget.onChoose(entry, candidate);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '确认失败：$error';
+        });
+      }
+      return;
+    }
+
+    if (mounted) _remove(entry);
+  }
+
+  Future<void> _skip(Map<String, dynamic> entry) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+
+    try {
+      await widget.onSkip(entry);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '跳过失败：$error';
+        });
+      }
+      return;
+    }
+
+    if (mounted) _remove(entry);
+  }
+
+  void _remove(Map<String, dynamic> entry) {
+    setState(() {
+      _items.remove(entry);
+      _busy = false;
+    });
+
+    if (_items.isEmpty) AppScope.of(context).closeModal();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = NeuTheme.of(context);
+
+    return NeuModalScaffold(
+      title: '确认 Booth 商品',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '这些包没能自动确定对应商品。点选封面与标题最接近的一项；都不是的话，可以在资源列表里手动填源链接。',
+            style: TextStyle(fontSize: 12, color: t.inkTertiary),
+          ),
+          const SizedBox(height: 14),
+          for (final entry in _items) _entry(entry),
+          if (_error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Text(
+                _error,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF9B3B3B)),
+              ),
+            ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: NeuActionButton(
+              label: '稍后再说',
+              onTap: AppScope.of(context).closeModal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _entry(Map<String, dynamic> entry) {
+    final candidates = ((entry['candidates'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((item) => item.cast<String, dynamic>())
+        .toList();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: NeuCard(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${entry['name']}',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                NeuPill(
+                  '都不是',
+                  onTap: _busy ? null : () => _skip(entry),
+                  tooltip: '暂不关联这个包',
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final candidate in candidates) _candidate(entry, candidate),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _candidate(
+    Map<String, dynamic> entry,
+    Map<String, dynamic> candidate,
+  ) {
+    final t = NeuTheme.of(context);
+    final title = '${candidate['title']}'.trim();
+    final shop = '${candidate['shop']}'.trim();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _busy ? null : () => _choose(entry, candidate),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            NeuCover('${candidate['coverUrl']}', width: 84, height: 63),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title.isEmpty ? '（无标题）' : title,
+                    style: TextStyle(fontSize: 12.5, color: t.ink),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (shop.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      shop,
+                      style: TextStyle(fontSize: 11, color: t.inkTertiary),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.check_circle_outline_rounded,
+              size: 18,
+              color: t.inkTertiary,
+            ),
+          ],
+        ),
       ),
     );
   }

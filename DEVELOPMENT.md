@@ -263,22 +263,24 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * `ProductKey` 把 `X.zip` 与 `X-extracted` 折成同一个键，所以一个商品在列表里只有一行分组。`InJunk` 跳过 `__MACOSX`、`.DS_Store` 一类噪声目录。
 * zip 只读中央目录，不预解压：一次扫描就能列出内层 `.unitypackage`。只有点「解包」才会真的落盘并登记入库；`ExtractArchiveAsync` 逐条校验路径没逃出目标目录。
 * 版本号从文件名里剥：`Name_v1.2`、`Name [1.0.4]`、`Name_Ver1.06_`、`Name_1.1fix1` 都要认；`v`/`ver`/`version` 前缀可省略，剥完再 trim 一次分隔符，否则 `MiniSimplisticPens_1.1_` 这类会整串留下。
-* Booth 搜索接口是 `https://booth.pm/ja/search/<query>`（查询词放路径里，`?q=` 会 404）。结果卡片自带 `data-product-id` / `data-product-brand` / `data-product-category`、标题锚点与 `data-original` 封面；商品页只有 `og:title` / `og:image` 可靠，**分类别从 item 页取**——那个页面到处是侧栏与推荐的 browse 链接，第一条往往不是本商品的分类。
+* Booth 搜索接口是 `https://booth.pm/ja/search/<query>`（查询词放路径里，`?q=` 会 404）。结果卡片自带 `data-product-id` / `data-product-brand` / `data-product-category`、标题锚点与 `data-original` 封面；商品页只有 `og:title` / `og:image` 可靠，**分类别从 item 页取**——那个页面到处是侧栏与推荐的 browse 链接，第一条往往不是本商品的分类。要标题、分类、封面、店铺与标签时改读 `https://booth.pm/ja/items/<id>.json`：标签区和分类面包屑在 HTML 里都是 `js-item-*` 空容器（前端异步填），`tags` / `category` / `images` / `shop` 只有这份 JSON 有；JSON 取不到再退回 HTML 的 `og:` 解析。
 * 匹配顺序：名称里的商品 id（`items/123` 或裸的 5 位以上数字）优先按 id 取商品页；否则按名称搜索打分。前缀命中要求长度比 ≥ 0.7，否则「Magica Cloth 2」会被「Magica Cloth 2 Helper」抢走；后缀命中（`【工具】EreMorph`）与精确命中直接给高分。标题先剥掉 `【】「」()` 与 ` / `、` | `、` - ` 之后的分句再比对，否则带副标题的正品会被判远。
+* **`_` 前段是第二种查询**：包名把商品名、适配角色名与版本号拼在一起时（`school elegan_shinano_v1.7`），整串搜索永远对不上，于是先按整串搜，再取第一个 `_` 之前的前段（`school elegan`）搜一遍。前段查询走更严的门槛（0.8，且不做「唯一结果直接采信」与 `#标签` 推断）；分数不过关时，只有**多词或长度 ≥ 8 的前段**才采信搜索结果的**第一张卡片**——日文商品名常是英文的片假名写法（`school elegan` → 「スクールエレガン」），词面打分注定为 0，能对上靠的是 Booth 自己的相关度排序。单词前段（`Shinano`）不享受这条，否则会绑到角色本体而不是适配商品。
+* **自动匹配给不出唯一结论、但搜索里有高可信候选时，不猜，转人工确认**：候选要满足「标题包含包名关键词」——原文包含、去符号后包含、罗马字转假名后包含（`shinano` ↔ しなの／シナノ），或关键词是标题词首缩写（`AvatarBasicTool` ↔ `ABT`，驼峰也算词边界）。按命中词数、分数排序取前 3，连同 id/标题/店铺/封面写进 `pending_matches` 表；资源页在匹配结束后自动弹窗，列出封面与标题让用户点选，工具栏「待确认 N」可随时重开。确认写入的元数据标 `manualMatch`（界面「手动匹配」），跳过则保留 `attemptedAt` 不再自动重搜；被待确认的容器不再展开子包逐个匹配（同一商品的子包没有独立身份）。
 * 本地包名与商品标题常常语言不同（`LuraVideoPlayer_SDK3_2019` → 「ワールド用音楽再生プレイヤーセット【SDK2／SDK3】」），词面永远对不上，所以**搜索只返回一个商品时直接采信它**，不再要求分数。这条不会误伤 Asset Store 的包：那些名字在 Booth 上要么搜不到，要么返回 7–35 张卡片（`TowelCloud2`、`VRM` 这类泛词甚至 60 张）。
 * **R-18 商品的搜索要带年龄确认**：Booth 的「はい」按钮做的事就是写 `adult=t` 这个 Cookie（有效期 1 天），搜索 URL 还要带 `?adult=include`。只带其中一个都会返回 0 张卡片——页面标题里明明写着「2 件あります」，列表却被年龄确认挡住。搜索请求单独拼这个 Cookie，不写进持久化的会话。
 * 包名里的系列缩写可能只出现在商品标题的 `#标签` 里（`DMCustom_PCS` 对应 Penetration Contact System 的 `#PCS`）。命中多个结果时，若**只有一个**结果的 `#标签` 包含包名分词，就采信它；不要退回普通分词匹配，否则「Magica Cloth 2」会被同名的「Magica Cloth 2 Helper」抢走。
 * 匹配是**手动触发**的长任务：本地包多时每条要一次网络请求，所以放在后台跑、状态端点轮询进度；每命中一条立刻落盘，任务中途被打断也不会丢已有结果。命中的分类会回写 Booth 已购缓存，Booth 页和资源页的分类筛选才能离线用。
 * 匹配默认**增量**：失败也写 `attemptedAt`，下一次只处理从没试过的包（界面上标「已尝试」）；要重试历史失败项走 `force`（资源页匹配按钮旁的圆形箭头）。不加这条的话，40 个永远搜不到的 Asset Store 包每次都要把网络请求挨个发一遍。
-* 「恢复自动分类」是删掉这条元数据，而不是写一份空值——删掉后下一次取行会重新走「Booth 已购缓存 → Asset Store → 标题关键词」的自动推断。手动填的分类/标签/封面只算自定义信息，不会把包标成已匹配。
+* 「恢复自动分类」是删掉这条元数据，而不是写一份空值——删掉后下一次取行会重新走「Booth 已购缓存 → Asset Store → 标题关键词」的自动推断。手动填的分类/标签/封面本身只算自定义信息，不会把包标成已匹配（源链接例外，见下）。
 * 列表一类的重复读取在 `AppModel` 里缓存：注册表包、库文件、每个工程的导入台账、资源行各一份，页面打开直接用缓存渲染；「刷新」按钮才带 `force`，其中注册表刷新还会让侧车清掉内存缓存（`/api/packages?refresh=true`）。项目详情页的缩略图也从资源行的 `coverUrl` 里取，不再单独发一次请求。
-* 没有匹配到 Booth / Asset Store 的包留在「用户软件包」的「未匹配」筛选里；用户可以自己填源链接、封面、分类与标签，这些只算自定义信息，**不算匹配**，不会把它挪出未匹配列表。
+* 没有匹配到 Booth / Asset Store 的包留在「用户软件包」的「未匹配」筛选里。手动填 **Booth 商品链接**（`booth.pm/.../items/<id>`）时，侧车会用 item JSON 自动补标题、封面、标签、店铺与分类，并把这条元数据记为 `manualMatch`（界面「手动匹配」），行因此算已匹配、会离开未匹配列表；换一个 Booth 链接也会按新商品重取。非 Booth 链接或 JSON 取不到时只保存链接本身，不冒充匹配结果。
 * 分类走 Booth 自己的标签优先（`3D衣装`→服饰、`3D環境・ワールド`→场景…），没有标签时按标题关键词猜；关键词表里「道具/工具」排在「场景」前面，否则「ワールド用ギミック」会被归进场景。
 * 项目详情页的分类筛选读 `GET /api/resources/categories`（只返回元数据里的名称→分类，不触发库扫描），前端把行名按同一套规则规范化后查表。VPM 注册表包没有资源分类，显示「—」，筛「未分类」时归到那一侧。
 
 ### 数据层（SQLite）
 
-* 列表数据的唯一读取源是 `%LOCALAPPDATA%\Akashic\akashic.db`（Microsoft.Data.Sqlite，WAL）。工程、已安装包、VPM 清单、资源行、资源元数据、Booth、Asset Store、VRChat、库文件扫描结果、安装台账都在里面；`settings.json` 仍然只管配置，`cache/*.json` 只在配置同步时由数据库导出。
+* 列表数据的唯一读取源是 `%LOCALAPPDATA%\Akashic\akashic.db`（Microsoft.Data.Sqlite，WAL）。工程、已安装包、VPM 清单、资源行、资源元数据、待确认候选（`pending_matches`）、Booth、Asset Store、VRChat、库文件扫描结果、安装台账都在里面；`settings.json` 仍然只管配置，`cache/*.json` 只在配置同步时由数据库导出。`pending_matches` 只留本机：它是「还没决定」的中间状态，不该跟到另一台机器。
 * 表里的 `payload` 列保留完整模型 JSON，便于新旧字段兼容；索引列（名称、来源、分类、mtime）只用于排序和筛选。资源筛选可以走 `GET /api/resources?origin=&category=&q=`，由 SQL 完成。
 * 第一次启动会把旧版 JSON 缓存一次性导入，并在 `meta` 表记 `legacy.imported`。同步拉取后调用 `ImportSnapshots()` 覆盖对应表；同步上传前调用 `ExportSnapshots()` 生成旧格式 JSON，保证 2.1.0 及更早版本仍能还原。
 * 工程列表用文件签名（`ProjectVersion.txt`、`manifest.json`、`vpm-manifest.json` 的 mtime+长度与目录 mtime）判断是否要重扫；未变化的工程直接读数据库里的记录。库里没有的工程路径会同时从 `settings.json` 和数据库清掉。

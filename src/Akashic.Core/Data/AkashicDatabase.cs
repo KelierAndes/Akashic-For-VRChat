@@ -182,6 +182,11 @@ public sealed partial class AkashicDatabase
             payload TEXT NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS pending_matches (
+            meta_key TEXT PRIMARY KEY COLLATE NOCASE,
+            payload TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS resources (
             key TEXT PRIMARY KEY,
             meta_key TEXT COLLATE NOCASE,

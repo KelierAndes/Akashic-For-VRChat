@@ -410,6 +410,48 @@ public sealed partial class AkashicDatabase
         command.ExecuteNonQuery();
     }
 
+    public Dictionary<string, PendingMatch> LoadPendingMatches()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT meta_key, payload FROM pending_matches";
+        using var reader = command.ExecuteReader();
+
+        var entries = new Dictionary<string, PendingMatch>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            var entry = Deserialize<PendingMatch>(reader.GetString(1));
+            if (entry is not null) entries[reader.GetString(0)] = entry;
+        }
+
+        return entries;
+    }
+
+    public void ReplacePendingMatches(IReadOnlyDictionary<string, PendingMatch> entries)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+
+        using (var delete = connection.CreateCommand())
+        {
+            delete.Transaction = transaction;
+            delete.CommandText = "DELETE FROM pending_matches";
+            delete.ExecuteNonQuery();
+        }
+
+        foreach (var (key, entry) in entries)
+        {
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = "INSERT INTO pending_matches(meta_key, payload) VALUES($key, $payload)";
+            insert.Parameters.AddWithValue("$key", key);
+            insert.Parameters.AddWithValue("$payload", Serialize(entry));
+            insert.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
     public void ReplaceResourceMeta(IReadOnlyDictionary<string, ResourceMetaEntry> entries)
     {
         using var connection = Open();

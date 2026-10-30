@@ -15,7 +15,13 @@ public interface IResourceCatalogService
 
     void ReloadMeta();
 
+    List<PendingMatch> GetPendingMatches();
+
     Task<List<ResourceRow>> SaveMetaAsync(ResourceMetaUpdate update, CancellationToken ct = default);
+
+    Task<List<ResourceRow>> ConfirmPendingMatchAsync(PendingMatchRequest request, CancellationToken ct = default);
+
+    Task<List<ResourceRow>> DismissPendingMatchAsync(string key, CancellationToken ct = default);
 
     Task<List<ResourceRow>> ResetMetaAsync(string key, CancellationToken ct = default);
 }
@@ -23,6 +29,8 @@ public interface IResourceCatalogService
 public sealed partial class ResourceCatalogService : IResourceCatalogService
 {
     private const double AcceptScore = 0.62;
+    private const double SegmentAcceptScore = 0.8;
+    private const int MaxSuggestions = 3;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -40,6 +48,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
     private readonly object _saveGate = new();
 
     private ResourceMetaCache? _meta;
+    private Dictionary<string, PendingMatch>? _pending;
     private ResourceMatchStatus _status = new();
     private CancellationTokenSource? _running;
 
@@ -74,6 +83,22 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             _meta = new ResourceMetaCache { SavedAt = DateTime.Now, Entries = entries };
             return _meta;
         }
+    }
+
+    private Dictionary<string, PendingMatch> Pending
+    {
+        get
+        {
+            if (_pending is not null) return _pending;
+
+            _pending = _db.LoadPendingMatches();
+            return _pending;
+        }
+    }
+
+    public List<PendingMatch> GetPendingMatches()
+    {
+        lock (_gate) return Pending.Values.OrderByDescending(item => item.CreatedAt).ToList();
     }
 
     public async Task<List<ResourceRow>> GetRowsAsync(CancellationToken ct = default)
@@ -160,6 +185,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
                 child.MatchSource = row.MatchSource;
                 child.BoothId = row.BoothId;
                 child.BoothShop = row.BoothShop;
+                child.ManualMatch = row.ManualMatch;
                 child.Attempted = true;
             }
 
@@ -200,6 +226,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             row.MatchSource = matched.MatchSource;
             row.BoothId = matched.BoothId;
             row.BoothShop = matched.BoothShop;
+            row.ManualMatch = matched.ManualMatch;
             row.Attempted = true;
         }
 
@@ -236,13 +263,16 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         var key = row.MetaKey;
         if (key.Length == 0) return null;
 
+        var names = NameVariants(row.Name.Length > 0
+            ? row.Name
+            : Path.GetFileNameWithoutExtension(row.FilePath));
+
         foreach (var purchase in purchases)
         {
-            var label = PackageCategory.Normalize(
-                Path.GetFileNameWithoutExtension(purchase.FormLabel));
-            var title = PackageCategory.Normalize(purchase.DisplayTitle);
+            var label = Path.GetFileNameWithoutExtension(purchase.FormLabel);
+            var title = purchase.DisplayTitle;
 
-            if (!NameMatches(key, label) && !NameMatches(key, title)) continue;
+            if (!AnyNameMatches(names, label) && !AnyNameMatches(names, title)) continue;
 
             return new ResourceMetaEntry
             {
@@ -260,7 +290,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
         foreach (var asset in accountItems)
         {
-            if (!NameMatches(key, PackageCategory.Normalize(asset.Name))) continue;
+            if (!AnyNameMatches(names, asset.Name)) continue;
 
             return new ResourceMetaEntry
             {
@@ -297,6 +327,25 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
                candidate.Contains(key, StringComparison.Ordinal);
     }
 
+    private static List<string> NameVariants(string name)
+    {
+        var variants = new List<string>();
+
+        void Add(string? raw)
+        {
+            var normalized = PackageCategory.Normalize(raw);
+            if (normalized.Length > 0 && !variants.Contains(normalized, StringComparer.Ordinal))
+                variants.Add(normalized);
+        }
+
+        Add(name);
+        Add(PackageCategory.LeadingSegment(name));
+        return variants;
+    }
+
+    private static bool AnyNameMatches(IReadOnlyList<string> variants, string? candidate) =>
+        variants.Any(variant => NameMatches(variant, PackageCategory.Normalize(candidate)));
+
     private static void Apply(ResourceRow row, ResourceMetaEntry? entry)
     {
         row.Category = entry is { Category.Length: > 0 }
@@ -311,6 +360,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         row.BoothId = entry.BoothId;
         row.BoothShop = entry.BoothShop;
         row.IsManual = entry.IsEdited;
+        row.ManualMatch = entry.ManualMatch;
         row.Attempted = entry.AttemptedAt is not null;
 
         row.MatchSource = entry.BoothId.Length > 0 ? "Booth"
@@ -364,6 +414,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
                 Scanned = _status.Scanned,
                 Matched = _status.Matched,
                 Failed = _status.Failed,
+                Pending = _status.Pending,
                 Current = _status.Current,
                 Message = _status.Message,
                 Cancelled = _status.Cancelled
@@ -393,10 +444,13 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
             rows = await GetRowsAsync(ct);
 
+            var pendingContainers = PendingContainerKeys();
+
             var leaves = rows
                 .SelectMany(row => row.IsContainer ? (row.Matched ? [] : row.Children) : [row])
                 .Where(row => row.IsMatchable)
                 .Where(row => !IsDependencyPackage(row))
+                .Where(row => row.ContainerPath.Length == 0 || !pendingContainers.Contains(row.ContainerPath))
                 .Where(row => force || (!row.Matched && !row.Attempted))
                 .ToList();
 
@@ -413,9 +467,10 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
             lock (_gate)
             {
-                _status.Message = _status.Failed > 0
-                    ? $"已匹配 {_status.Matched} 项 · {_status.Failed} 项没有找到对应商品"
-                    : $"已匹配 {_status.Matched} 项";
+                var parts = new List<string> { $"已匹配 {_status.Matched} 项" };
+                if (_status.Pending > 0) parts.Add($"{_status.Pending} 项待确认");
+                if (_status.Failed > 0) parts.Add($"{_status.Failed} 项没有找到对应商品");
+                _status.Message = string.Join(" · ", parts);
             }
         }
         catch (OperationCanceledException)
@@ -452,20 +507,32 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
             try
             {
-                var candidate = await ResolveAsync(row, ct);
+                var resolution = await ResolveAsync(row, ct);
 
-                if (candidate is null)
+                if (resolution.Candidate is not null)
                 {
-                    MarkAttempt(row.MetaKey);
-                    SaveMeta();
-                    lock (_gate) _status.Failed++;
-                }
-                else
-                {
-                    PutMeta(row.MetaKey, FromCandidate(candidate));
+                    PutMeta(row.MetaKey, FromCandidate(resolution.Candidate));
+                    if (RemovePending(row.MetaKey)) SavePending();
                     SaveMeta();
 
                     lock (_gate) _status.Matched++;
+                }
+                else if (resolution.Suggestions.Count > 0)
+                {
+                    PutPending(row.MetaKey, row.Name, row.IsContainer ? row.Key : string.Empty,
+                        resolution.Suggestions);
+                    MarkAttempt(row.MetaKey);
+                    SaveMeta();
+                    SavePending();
+
+                    lock (_gate) _status.Pending++;
+                }
+                else
+                {
+                    if (RemovePending(row.MetaKey)) SavePending();
+                    MarkAttempt(row.MetaKey);
+                    SaveMeta();
+                    lock (_gate) _status.Failed++;
                 }
             }
             catch (OperationCanceledException)
@@ -483,7 +550,9 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         }
     }
 
-    private async Task<BoothMatchCandidate?> ResolveAsync(ResourceRow row, CancellationToken ct)
+    private sealed record MatchResolution(BoothMatchCandidate? Candidate, List<BoothMatchCandidate> Suggestions);
+
+    private async Task<MatchResolution> ResolveAsync(ResourceRow row, CancellationToken ct)
     {
         var explicitId = ItemIdRegex().Match(row.Name);
         if (explicitId.Success)
@@ -492,22 +561,58 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             if (item is not null)
             {
                 item.Score = 1;
-                return item;
+                return new MatchResolution(item, []);
             }
         }
 
-        var query = row.Name.Replace('_', ' ').Trim();
-        if (query.Length < 3) return null;
+        var queries = new List<string>();
+        var full = row.Name.Replace('_', ' ').Trim();
+        if (full.Length >= 3) queries.Add(full);
 
-        var candidates = await _booth.SearchAsync(query, ct);
-        var picked = PickBest(candidates, row.Name);
-        if (picked is not null) return picked;
+        var head = PackageCategory.LeadingSegment(row.Name);
+        if (head is not null && !string.Equals(head, full, StringComparison.OrdinalIgnoreCase))
+            queries.Add(head);
 
-        var tagged = await _booth.SearchAsync(query, ct, "VRChat");
-        return PickBest(tagged, row.Name);
+        if (queries.Count == 0) return new MatchResolution(null, []);
+
+        var tokens = PackageCategory.QueryTokens(row.Name);
+        var pool = new Dictionary<string, BoothMatchCandidate>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var query in queries)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var strict = !string.Equals(query, full, StringComparison.OrdinalIgnoreCase);
+
+            var candidates = await _booth.SearchAsync(query, ct);
+            var picked = PickBest(candidates, query, strict);
+            if (picked is not null) return new MatchResolution(picked, []);
+
+            CollectSuggestions(candidates, query, tokens, pool);
+
+            var tagged = await _booth.SearchAsync(query, ct, "VRChat");
+            picked = PickBest(tagged, query, strict);
+            if (picked is not null) return new MatchResolution(picked, []);
+
+            CollectSuggestions(tagged, query, tokens, pool);
+        }
+
+        var suggestions = pool.Values
+            .Select(candidate => (
+                Candidate: candidate,
+                Hits: tokens.Count(token => PackageCategory.ContainsKeyword(candidate.Title, token))))
+            .OrderByDescending(item => item.Hits)
+            .ThenByDescending(item => item.Candidate.Score)
+            .ThenBy(item => item.Candidate.Title, StringComparer.OrdinalIgnoreCase)
+            .Take(MaxSuggestions)
+            .Select(item => item.Candidate)
+            .ToList();
+
+        return new MatchResolution(null, suggestions);
     }
 
-    private static BoothMatchCandidate? PickBest(IReadOnlyList<BoothMatchCandidate> candidates, string name)
+    private static BoothMatchCandidate? PickBest(IReadOnlyList<BoothMatchCandidate> candidates, string query,
+        bool strict)
     {
         if (candidates.Count == 0) return null;
 
@@ -515,8 +620,21 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
         foreach (var candidate in candidates)
         {
-            candidate.Score = PackageCategory.Score(name, candidate.Title, candidate.Shop);
+            candidate.Score = PackageCategory.Score(query, candidate.Title, candidate.Shop);
             if (best is null || candidate.Score > best.Score) best = candidate;
+        }
+
+        if (strict)
+        {
+            if (best is not null && best.Score >= SegmentAcceptScore) return best;
+
+            if (candidates.Count > 0 && PackageCategory.IsDistinctive(query))
+            {
+                candidates[0].Score = Math.Max(candidates[0].Score, 0.7);
+                return candidates[0];
+            }
+
+            return null;
         }
 
         if (best is not null && best.Score >= AcceptScore) return best;
@@ -534,7 +652,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             return only;
         }
 
-        var queryTokens = PackageCategory.QueryTokens(name);
+        var queryTokens = PackageCategory.QueryTokens(query);
         if (queryTokens.Count > 0)
         {
             var ranked = distinct
@@ -554,6 +672,28 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         }
 
         return null;
+    }
+
+    private static void CollectSuggestions(IEnumerable<BoothMatchCandidate> candidates, string query,
+        IReadOnlySet<string> tokens, Dictionary<string, BoothMatchCandidate> pool)
+    {
+        if (tokens.Count == 0) return;
+
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Id.Length == 0 || candidate.Title.Length == 0) continue;
+            if (!tokens.Any(token => PackageCategory.ContainsKeyword(candidate.Title, token))) continue;
+
+            candidate.Score = PackageCategory.Score(query, candidate.Title, candidate.Shop);
+
+            if (pool.TryGetValue(candidate.Id, out var existing))
+            {
+                if (candidate.Score > existing.Score) pool[candidate.Id] = candidate;
+                continue;
+            }
+
+            pool[candidate.Id] = candidate;
+        }
     }
 
     private static ResourceMetaEntry FromCandidate(BoothMatchCandidate candidate) => new()
@@ -591,6 +731,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             BoothTitle = existing.BoothTitle,
             BoothShop = existing.BoothShop,
             AssetStoreName = existing.AssetStoreName,
+            ManualMatch = existing.ManualMatch,
             MatchedAt = existing.MatchedAt,
             EditedAt = existing.EditedAt,
             AttemptedAt = DateTime.Now
@@ -604,23 +745,96 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
         var existing = GetMeta(key) ?? new ResourceMetaEntry();
 
+        var sourceUrl = string.IsNullOrWhiteSpace(update.SourceUrl)
+            ? existing.SourceUrl
+            : update.SourceUrl.Trim();
+
+        var boothId = BoothIdFromUrl(sourceUrl);
+        var boothChanged = boothId.Length > 0 && boothId != existing.BoothId;
+
+        BoothMatchCandidate? fetched = null;
+
+        if (boothChanged)
+        {
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                fetched = await _booth.GetItemAsync(boothId, timeout.Token);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+            }
+        }
+
         var entry = new ResourceMetaEntry
         {
-            Category = update.Category ?? existing.Category,
-            Tags = update.Tags ?? existing.Tags,
-            SourceUrl = update.SourceUrl ?? existing.SourceUrl,
-            CoverUrl = update.CoverUrl ?? existing.CoverUrl,
-            BoothId = existing.BoothId,
-            BoothTitle = existing.BoothTitle,
-            BoothShop = existing.BoothShop,
+            Category = Pick(update.Category, fetched?.Category, existing.Category),
+            Tags = boothChanged && fetched is { Tags.Count: > 0 }
+                ? fetched.Tags
+                : update.Tags is { Count: > 0 }
+                    ? update.Tags
+                    : fetched is { Tags.Count: > 0 }
+                        ? fetched.Tags
+                        : existing.Tags,
+            SourceUrl = sourceUrl,
+            CoverUrl = boothChanged && fetched is { CoverUrl.Length: > 0 }
+                ? fetched.CoverUrl
+                : Pick(update.CoverUrl, fetched?.CoverUrl, existing.CoverUrl),
+            BoothId = boothId.Length > 0 ? boothId : existing.BoothId,
+            BoothTitle = fetched?.Title ?? existing.BoothTitle,
+            BoothShop = fetched?.Shop ?? existing.BoothShop,
             AssetStoreName = existing.AssetStoreName,
-            MatchedAt = existing.MatchedAt,
-            AttemptedAt = existing.AttemptedAt,
+            ManualMatch = boothChanged || existing.ManualMatch,
+            MatchedAt = boothId.Length > 0 ? DateTime.Now : existing.MatchedAt,
+            AttemptedAt = existing.AttemptedAt ?? (boothId.Length > 0 ? DateTime.Now : null),
             EditedAt = DateTime.Now
         };
 
         PutMeta(key, entry);
+        if (RemovePending(key)) SavePending();
         SaveMeta();
+
+        return await GetRowsAsync(ct);
+    }
+
+    public async Task<List<ResourceRow>> ConfirmPendingMatchAsync(PendingMatchRequest request,
+        CancellationToken ct = default)
+    {
+        var key = PackageCategory.Normalize(request.Key);
+        PendingMatch? pending = null;
+
+        if (key.Length > 0) lock (_gate) Pending.TryGetValue(key, out pending);
+
+        if (pending is not null)
+        {
+            var candidate = pending.Candidates.FirstOrDefault(item =>
+                                 string.Equals(item.Id, request.BoothId, StringComparison.OrdinalIgnoreCase))
+                             ?? pending.Candidates.FirstOrDefault();
+
+            if (candidate is not null && candidate.Id.Length > 0)
+            {
+                var entry = FromCandidate(candidate);
+                entry.EditedAt = DateTime.Now;
+                entry.ManualMatch = true;
+                PutMeta(pending.MetaKey, entry);
+            }
+
+            if (RemovePending(pending.MetaKey)) SavePending();
+            SaveMeta();
+        }
+
+        return await GetRowsAsync(ct);
+    }
+
+    public async Task<List<ResourceRow>> DismissPendingMatchAsync(string key, CancellationToken ct = default)
+    {
+        var normalized = PackageCategory.Normalize(key);
+        if (normalized.Length > 0 && RemovePending(normalized)) SavePending();
 
         return await GetRowsAsync(ct);
     }
@@ -634,9 +848,27 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
             lock (_gate) Meta.Entries.Remove(normalized);
             _db.DeleteResourceMeta(normalized);
             SaveMeta();
+
+            if (RemovePending(normalized)) SavePending();
         }
 
         return await GetRowsAsync(ct);
+    }
+
+    private static string Pick(string? first, string? second, string? third)
+    {
+        if (!string.IsNullOrWhiteSpace(first)) return first.Trim();
+        if (!string.IsNullOrWhiteSpace(second)) return second.Trim();
+        return third ?? string.Empty;
+    }
+
+    private static string BoothIdFromUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return string.Empty;
+        if (!url.Contains("booth.pm", StringComparison.OrdinalIgnoreCase)) return string.Empty;
+
+        var match = BoothItemUrlRegex().Match(url);
+        return match.Success ? match.Groups[1].Value : string.Empty;
     }
 
     private ResourceMetaEntry? GetMeta(string key)
@@ -663,6 +895,53 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
         lock (_saveGate) _db.ReplaceResourceMeta(copy);
     }
 
+    private void PutPending(string key, string name, string containerKey,
+        IReadOnlyList<BoothMatchCandidate> candidates)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+
+        lock (_gate)
+        {
+            Pending[key] = new PendingMatch
+            {
+                MetaKey = key,
+                Name = name,
+                ContainerKey = containerKey,
+                CreatedAt = DateTime.Now,
+                Candidates = [.. candidates]
+            };
+        }
+    }
+
+    private bool RemovePending(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return false;
+        lock (_gate) return Pending.Remove(key);
+    }
+
+    private HashSet<string> PendingContainerKeys()
+    {
+        lock (_gate)
+        {
+            return Pending.Values
+                .Where(item => item.ContainerKey.Length > 0)
+                .Select(item => item.ContainerKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private void SavePending()
+    {
+        Dictionary<string, PendingMatch> copy;
+
+        lock (_gate)
+        {
+            copy = new Dictionary<string, PendingMatch>(Pending, StringComparer.OrdinalIgnoreCase);
+        }
+
+        lock (_saveGate) _db.ReplacePendingMatches(copy);
+    }
+
     private static string MetaKeyOf(ResourceRow row)
     {
         var key = PackageCategory.Normalize(row.Name);
@@ -673,4 +952,7 @@ public sealed partial class ResourceCatalogService : IResourceCatalogService
 
     [GeneratedRegex(@"(?:items/)?(\d{5,})")]
     private static partial Regex ItemIdRegex();
+
+    [GeneratedRegex(@"items/(\d{4,})")]
+    private static partial Regex BoothItemUrlRegex();
 }

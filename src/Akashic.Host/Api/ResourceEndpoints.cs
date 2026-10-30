@@ -34,6 +34,17 @@ public static class ResourceEndpoints
         group.MapGet("/resources/match/status", (IResourceCatalogService catalog) =>
             catalog.GetMatchStatus());
 
+        group.MapGet("/resources/pending", (IResourceCatalogService catalog) =>
+            catalog.GetPendingMatches());
+
+        group.MapPost("/resources/pending/confirm", async (PendingMatchRequest request,
+            IResourceCatalogService catalog, CancellationToken ct) =>
+            Results.Json(await catalog.ConfirmPendingMatchAsync(request, ct)));
+
+        group.MapPost("/resources/pending/dismiss", async (ResourceKeyRequest request,
+            IResourceCatalogService catalog, CancellationToken ct) =>
+            Results.Json(await catalog.DismissPendingMatchAsync(request.Key, ct)));
+
         group.MapPost("/resources/meta", async (ResourceMetaUpdate request,
             IResourceCatalogService catalog, CancellationToken ct) =>
             Results.Json(await catalog.SaveMetaAsync(request, ct)));
