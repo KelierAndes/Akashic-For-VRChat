@@ -283,6 +283,7 @@ gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashi
 * 列表数据的唯一读取源是 `%LOCALAPPDATA%\Akashic\akashic.db`（Microsoft.Data.Sqlite，WAL）。工程、已安装包、VPM 清单、资源行、资源元数据、待确认候选（`pending_matches`）、Booth、Asset Store、VRChat、库文件扫描结果、安装台账都在里面；`settings.json` 仍然只管配置，`cache/*.json` 只在配置同步时由数据库导出。`pending_matches` 只留本机：它是「还没决定」的中间状态，不该跟到另一台机器。
 * 表里的 `payload` 列保留完整模型 JSON，便于新旧字段兼容；索引列（名称、来源、分类、mtime）只用于排序和筛选。资源筛选可以走 `GET /api/resources?origin=&category=&q=`，由 SQL 完成。
 * 第一次启动会把旧版 JSON 缓存一次性导入，并在 `meta` 表记 `legacy.imported`。同步拉取后调用 `ImportSnapshots()` 覆盖对应表；同步上传前调用 `ExportSnapshots()` 生成旧格式 JSON，保证 2.1.0 及更早版本仍能还原。
+* 「手动匹配」这条状态**跟着 gist 走**：`manualMatch` 与 `boothId` 都在 `resource_meta.payload` 里，`ExportSnapshots` 整份写进 `cache/resource-meta.json`（同步清单第 5 项），换机 `ImportSnapshots` 后那行仍然是「已匹配 · 手动匹配」。这条不是推出来的——`ResourceCatalogMatchTests.ManualMatchSurvivesTheGistSnapshotRoundTrip` 走的是真往返：写手动匹配 → 导出快照 → 清空 `resource_meta` → 从快照导入 → **换一个新服务实例**读回。最后一步是重点：元数据缓存 `_meta` 挂在服务实例上，用同一个实例读会读到上一轮的状态，把「其实没落盘」伪装成通过；测试里的 `FakeLibrary` 也因此每次从初始 JSON 重建 `ResourceRow`，真实库是重新扫盘的，同一批对象会把上一轮的 `Matched` 漏给下一轮。
 * 工程列表用文件签名（`ProjectVersion.txt`、`manifest.json`、`vpm-manifest.json` 的 mtime+长度与目录 mtime）判断是否要重扫；未变化的工程直接读数据库里的记录。库里没有的工程路径会同时从 `settings.json` 和数据库清掉。
 * 库扫描结果按「文件大小 + mtime」缓存 `UnityPackageFileInfo` 与 zip 子项；第二次打开资源页不再打开每个 zip。缩略图也记录命中与未命中，避免每次重开都去拆同一个包找 `preview.png`。
 * 实测（本机 75 个资源、62 个包文件、14 个压缩包）：资源页热查询约 70 ms，工程列表约 40 ms；冷启动首次仍要扫描并解缩略图，约 4–7 秒。

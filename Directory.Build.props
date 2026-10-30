@@ -7,6 +7,6 @@
     <LangVersion>latest</LangVersion>
     <!-- The sidecar's informational version is what the About page shows, and the SDK appends
          the git sha to it, so this is the one place the product version lives on the C# side. -->
-    <Version>2.3.0</Version>
+    <Version>2.3.1</Version>
   </PropertyGroup>
 </Project>

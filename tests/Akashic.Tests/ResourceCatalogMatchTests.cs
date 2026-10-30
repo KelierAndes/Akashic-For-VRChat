@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Akashic.Core.Data;
 using Akashic.Core.Models;
 using Akashic.Core.Services;
@@ -139,6 +140,49 @@ public sealed class ResourceCatalogMatchTests
         Assert.Equal("https://booth.pm/en/items/7657840", row.SourceUrl);
     }
 
+    [Fact]
+    public async Task ManualMatchSurvivesTheGistSnapshotRoundTrip()
+    {
+        var booth = new FakeBooth
+        {
+            Items =
+            {
+                ["7657840"] = new BoothMatchCandidate
+                {
+                    Id = "7657840",
+                    Title = "もちふぃった～",
+                    Shop = "Nine Gates",
+                    Category = "服饰",
+                    CoverUrl = "https://example.test/cover.jpg",
+                    Tags = ["衣装"]
+                }
+            }
+        };
+
+        using var workspace = new Workspace(
+            new ResourceRow { Key = "pkg-someoutfit", Name = "SomeOutfit", FilePath = "pkg-someoutfit" },
+            booth);
+
+        await workspace.Catalog.SaveMetaAsync(new ResourceMetaUpdate(
+            "SomeOutfit", string.Empty, [], "https://booth.pm/en/items/7657840", string.Empty));
+
+        workspace.Database.ExportSnapshots();
+        var snapshot = Path.Combine(workspace.Database.DataDirectory, "cache", "resource-meta.json");
+        Assert.True(File.Exists(snapshot));
+
+        workspace.Database.ReplaceResourceMeta(new Dictionary<string, ResourceMetaEntry>());
+        Assert.False((await workspace.Reopen().GetRowsAsync()).Single().Matched);
+
+        workspace.Database.ImportSnapshots();
+
+        var restored = (await workspace.Reopen().GetRowsAsync()).Single();
+        Assert.True(restored.Matched);
+        Assert.True(restored.ManualMatch);
+        Assert.Equal("7657840", restored.BoothId);
+        Assert.Equal("服饰", restored.Category);
+        Assert.Equal("https://example.test/cover.jpg", restored.CoverUrl);
+    }
+
     private static BoothMatchCandidate Card(string id, string title) => new()
     {
         Id = id,
@@ -198,6 +242,14 @@ public sealed class ResourceCatalogMatchTests
 
         public ResourceCatalogService Catalog { get; }
 
+        /**
+         * A second service over the same database. The metadata cache lives in the instance,
+         * so reading through a fresh one is what "another machine after a gist restore" looks
+         * like; reusing Catalog would prove nothing about what actually reached disk.
+         */
+        public ResourceCatalogService Reopen() =>
+            new(Library, Booth, AssetStore, Icons, SettingsPath, Database);
+
         public async Task<ResourceMatchStatus> MatchAsync()
         {
             await Catalog.StartMatchAsync();
@@ -224,6 +276,11 @@ public sealed class ResourceCatalogMatchTests
 
     private sealed class FakeLibrary(ResourceRow row) : IUnityPackageLibraryService
     {
+        // The real library re-scans from disk, so every read starts from a pristine row.
+        // Handing back the same instance would let one GetRowsAsync leak its Matched/BoothId
+        // into the next, which is exactly the state a snapshot round trip has to disprove.
+        private readonly string _pristine = JsonSerializer.Serialize(row);
+
         public List<string> GetLibraryFolders() => [];
 
         public List<string> GetAddedFiles() => [];
@@ -241,7 +298,7 @@ public sealed class ResourceCatalogMatchTests
             Task.FromResult(new List<UnityPackageFileInfo>());
 
         public Task<List<ResourceRow>> ScanResourcesAsync(CancellationToken ct = default) =>
-            Task.FromResult(new List<ResourceRow> { row });
+            Task.FromResult(new List<ResourceRow> { JsonSerializer.Deserialize<ResourceRow>(_pristine)! });
 
         public Task<List<string>> ExtractArchiveAsync(string archivePath, IReadOnlyList<string>? entries = null,
             CancellationToken ct = default) => Task.FromResult(new List<string>());
