@@ -52,7 +52,7 @@ public sealed class GlbBuilder : IDisposable
             var assimpScene = LoadScene(node.Mesh.AssetPath);
             if (assimpScene is null) continue;
 
-            var meshes = FindMeshes(assimpScene, node.Mesh.SubMesh, node.Name, meshNodes <= 1);
+            var meshes = SelectMeshes(assimpScene, node.Mesh, node.Name, meshNodes <= 1);
             if (meshes.Count == 0)
             {
                 warnings.Add($"在 {Path.GetFileName(node.Mesh.AssetPath)} 里找不到 {node.Mesh.SubMesh}。");
@@ -229,7 +229,6 @@ public sealed class GlbBuilder : IDisposable
                 PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |
-                PostProcessSteps.RemoveRedundantMaterials |
                 PostProcessSteps.ValidateDataStructure);
         }
         catch (Exception)
@@ -238,6 +237,20 @@ public sealed class GlbBuilder : IDisposable
 
         _scenes[path] = scene;
         return scene;
+    }
+
+    private static List<Mesh> SelectMeshes(Scene scene, PreviewMesh mesh, string nodeName, bool allowAll)
+    {
+        if (mesh.MeshIndices.Count > 0)
+        {
+            return mesh.MeshIndices
+                .Where(index => index >= 0 && index < scene.Meshes.Count)
+                .Select(index => scene.Meshes[index])
+                .Where(candidate => candidate.VertexCount > 0)
+                .ToList();
+        }
+
+        return FindMeshes(scene, mesh.SubMesh, nodeName, allowAll);
     }
 
     private static List<Mesh> FindMeshes(Scene scene, string subMesh, string nodeName, bool allowAll)

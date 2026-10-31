@@ -13,6 +13,8 @@ public sealed class HlslDrawItem
 {
     public string Name { get; set; } = string.Empty;
 
+    public string NodeId { get; set; } = string.Empty;
+
     public byte[] Vertices { get; set; } = [];
 
     public uint[] Indices { get; set; } = [];
@@ -111,6 +113,7 @@ public static class HlslSceneBuilder
                 AddItem(result, new HlslDrawItem
                 {
                     Name = node.Name,
+                    NodeId = node.Id,
                     Vertices = vertices,
                     Indices = indices,
                     World = world,
@@ -134,7 +137,7 @@ public static class HlslSceneBuilder
                 continue;
             }
 
-            var meshes = FindMeshes(model, node.Mesh.SubMesh, node.Name, meshNodes <= 1);
+            var meshes = SelectMeshes(model, node.Mesh, node.Name, meshNodes <= 1);
             foreach (var mesh in meshes)
             {
                 var material = MaterialFor(node, mesh, model);
@@ -162,6 +165,7 @@ public static class HlslSceneBuilder
                 AddItem(result, new HlslDrawItem
                 {
                     Name = node.Name,
+                    NodeId = node.Id,
                     Vertices = geometry.Vertices,
                     Indices = geometry.Indices,
                     World = world,
@@ -302,13 +306,26 @@ public static class HlslSceneBuilder
                 PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |
-                PostProcessSteps.RemoveRedundantMaterials |
                 PostProcessSteps.ValidateDataStructure);
         }
         catch (Exception)
         {
             return null;
         }
+    }
+
+    private static List<Mesh> SelectMeshes(Scene scene, PreviewMesh mesh, string nodeName, bool allowAll)
+    {
+        if (mesh.MeshIndices.Count > 0)
+        {
+            return mesh.MeshIndices
+                .Where(index => index >= 0 && index < scene.MeshCount)
+                .Select(index => scene.Meshes[index])
+                .Where(candidate => candidate.VertexCount > 0)
+                .ToList();
+        }
+
+        return FindMeshes(scene, mesh.SubMesh, nodeName, allowAll);
     }
 
     private static List<Mesh> FindMeshes(Scene scene, string subMesh, string nodeName, bool allowAll)

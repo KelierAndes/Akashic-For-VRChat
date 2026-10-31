@@ -4,7 +4,7 @@ namespace Akashic.Core.Services.Preview.Shader;
 
 public static class ShaderEnvironment
 {
-    public const string Version = "shim-v8";
+    public const string Version = "shim-v9";
 
     private const string Prefix = "Akashic.Core.Services.Preview.Shader.Resources.";
 

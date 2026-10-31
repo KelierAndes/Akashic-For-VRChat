@@ -351,6 +351,51 @@ let materialByName = new Map();
 let selected = null;
 let ready = false;
 const applied = { liltoon: 0, toon: 0, unlit: 0, lit: 0 };
+const hiddenIds = new Set();
+
+function isHiddenObject(object) {
+  let node = object;
+  while (node && node !== model) {
+    if (node.name && hiddenIds.has(node.name)) return true;
+    node = node.parent;
+  }
+  return false;
+}
+
+function applyHidden() {
+  if (!model) return;
+  model.traverse((object) => {
+    if (object.userData.outline) {
+      object.visible = !isHiddenObject(object.userData.host) && viewMode === 'textured';
+      return;
+    }
+    object.visible = !isHiddenObject(object);
+  });
+  if (hlslOn) {
+    requestHlsl(false);
+    return;
+  }
+  renderer.render(scene, camera);
+  drawGizmo();
+}
+
+window.akashicSetHidden = (ids) => {
+  hiddenIds.clear();
+  if (Array.isArray(ids)) {
+    for (const id of ids) if (id) hiddenIds.add(String(id));
+  }
+  applyHidden();
+};
+
+window.akashicHidden = () => [...hiddenIds];
+
+window.akashicNames = () => {
+  const names = [];
+  model?.traverse((object) => {
+    if (object.isMesh) names.push(object.name + ' @ ' + (object.parent?.name || '-') + (object.visible ? '' : ' (hidden)'));
+  });
+  return names;
+};
 
 window.akashicSelect = (id) => {
   if (!model) return;
@@ -400,6 +445,7 @@ function pickNode(clientX, clientY) {
   raycaster.setFromCamera(ndc, camera);
 
   for (const hit of raycaster.intersectObject(model, true)) {
+    if (!hit.object.visible || hit.object.userData.outline || isHiddenObject(hit.object)) continue;
     let node = hit.object;
     while (node && !materialMeta.has(node.name)) node = node.parent;
     if (node && node.name) return node.name;
@@ -472,7 +518,7 @@ function applyGlbMode(mode) {
   if (!model) return;
   model.traverse((object) => {
     if (object.userData.outline) {
-      object.visible = mode === 'textured';
+      object.visible = mode === 'textured' && !isHiddenObject(object.userData.host);
       return;
     }
 
@@ -747,6 +793,7 @@ async function requestHlsl(showStatus) {
         lightBackground: backgroundLight,
         raw: true,
         keywords: hlslKeywords,
+        hidden: [...hiddenIds],
         colorSpace: hlslColorSpace,
         ...hlslOrbitParams(),
         fov: HLSL_FOV
@@ -844,6 +891,9 @@ async function boot() {
       for (const material of materials) {
         if (material.name) materialByName.set(material.name.toLowerCase(), material);
       }
+      if (node.active === false) {
+        for (const id of collectIds(node)) hiddenIds.add(id);
+      }
     }
 
     baseSummary = `${sceneData.name || 'Prefab'} · ${sceneData.nodeCount || 0} 节点 · ${sceneData.meshCount || 0} 网格`;
@@ -878,6 +928,7 @@ async function boot() {
       baseSummary += ` · lilToon ${applied.liltoon} / toon ${applied.toon} / lit ${applied.lit}`;
       viewModes.classList.add('on');
       applyGlbMode(viewMode);
+      applyHidden();
 
       if (sceneData.warnings && sceneData.warnings.length) {
         console.warn(sceneData.warnings.join('\n'));
@@ -1083,6 +1134,7 @@ function addOutline(mesh, source, meta) {
   outline.matrixAutoUpdate = false;
   outline.matrix.copy(mesh.matrix);
   outline.userData.outline = true;
+  outline.userData.host = mesh;
   mesh.parent?.add(outline);
 }
 
@@ -1096,6 +1148,16 @@ function flatten(nodes) {
   };
   walk(nodes);
   return result;
+}
+
+function collectIds(node) {
+  const ids = [];
+  const walk = (current) => {
+    if (current.id) ids.push(current.id);
+    for (const child of current.children || []) walk(child);
+  };
+  walk(node);
+  return ids;
 }
 
 function frameObject(object) {

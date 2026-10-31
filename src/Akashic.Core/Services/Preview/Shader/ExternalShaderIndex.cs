@@ -75,6 +75,7 @@ public sealed class ExternalShaderIndex
             {
                 var shaderPath = meta[..^".meta".Length];
                 if (!File.Exists(shaderPath)) continue;
+                if (IsPlaceholder(shaderPath)) continue;
 
                 var guid = ReadGuid(meta);
                 if (guid.Length == 0 || _map.ContainsKey(guid)) continue;
@@ -83,6 +84,23 @@ public sealed class ExternalShaderIndex
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+        }
+    }
+
+    private static bool IsPlaceholder(string shaderPath)
+    {
+        try
+        {
+            using var reader = new StreamReader(shaderPath);
+            var buffer = new char[4096];
+            var read = reader.Read(buffer, 0, buffer.Length);
+            var text = new string(buffer, 0, read);
+            return text.Contains("some script is broken", StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains("_DummyProperty", StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
         }
     }
 

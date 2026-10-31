@@ -88,6 +88,8 @@ public class PreviewMesh
     public long FileId { get; set; }
 
     public bool Skinned { get; set; }
+
+    public List<int> MeshIndices { get; set; } = [];
 }
 
 public class PreviewMaterial

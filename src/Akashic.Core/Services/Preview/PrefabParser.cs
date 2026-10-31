@@ -3,7 +3,10 @@ using System.Text.RegularExpressions;
 using Akashic.Core.Data;
 using Akashic.Core.Models;
 using Akashic.Core.Services.Preview.Shader;
+using Assimp;
 using YamlDotNet.RepresentationModel;
+using NumericsMatrix = System.Numerics.Matrix4x4;
+using NumericsQuaternion = System.Numerics.Quaternion;
 
 namespace Akashic.Core.Services.Preview;
 
@@ -15,7 +18,7 @@ public sealed partial class PrefabParser
         "m_GameObject", "m_Enabled", "m_EditorHideFlags", "m_Script", "m_Name", "m_EditorClassIdentifier"
     };
 
-    private const string MaterialCacheVersion = "material-v9";
+    private const string MaterialCacheVersion = "material-v10";
 
     private readonly UnityMetaIndex _index;
     private readonly string _root;
@@ -48,11 +51,40 @@ public sealed partial class PrefabParser
         var parsed = ParseFile(full, depth: 0, scene.Warnings);
         scene.Nodes = parsed;
 
+        FillCounts(scene);
+        return scene;
+    }
+
+    public PreviewScene ParseModel(string modelRelativePath)
+    {
+        var scene = new PreviewScene
+        {
+            PrefabPath = modelRelativePath.Replace('\\', '/'),
+            Name = Path.GetFileNameWithoutExtension(modelRelativePath)
+        };
+
+        var full = Path.Combine(_root, modelRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(full))
+        {
+            scene.Warnings.Add("找不到模型文件。");
+            return scene;
+        }
+
+        scene.Nodes = ParseModelNodes(full, "model", [], scene.Warnings);
+        FillCounts(scene);
+        return scene;
+    }
+
+    private static void FillCounts(PreviewScene scene)
+    {
         var flat = Flatten(scene.Nodes).ToList();
         scene.NodeCount = flat.Count;
         scene.MeshCount = flat.Count(node => node.Mesh is not null);
-        scene.MaterialCount = flat.Sum(node => node.Materials.Count);
-        return scene;
+        scene.MaterialCount = flat
+            .SelectMany(node => node.Materials)
+            .Select(material => material.Path.Length > 0 ? material.Path : material.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
     }
 
     private List<PreviewNode> ParseFile(string fullPath, int depth, List<string> warnings)
@@ -185,12 +217,15 @@ public sealed partial class PrefabParser
 
         var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
         if (extension is ".fbx" or ".obj" or ".gltf" or ".glb")
-            return BuildModelInstance(instance, sourcePath);
+            return BuildModelInstance(instance, sourcePath, warnings);
 
         var baseRoots = ParseFile(sourcePath, depth + 1, warnings);
         if (baseRoots.Count == 0) return null;
 
-        foreach (var root in baseRoots) PrefixIds(root, "pi:" + instance.FileId + "/");
+        var removed = ReadRemovedObjects(instance.Content);
+        if (removed.Count > 0) RemoveNodes(baseRoots, removed);
+
+        foreach (var root in baseRoots) PrefixIds(root, "pi_" + instance.FileId + "_");
 
         var map = new Dictionary<string, PreviewNode>(StringComparer.Ordinal);
         foreach (var node in baseRoots.SelectMany(root => Flatten([root])))
@@ -209,31 +244,285 @@ public sealed partial class PrefabParser
 
         var container = new PreviewNode
         {
-            Id = "pi:" + instance.FileId,
+            Id = "pi_" + instance.FileId,
             Name = Path.GetFileNameWithoutExtension(sourcePath)
         };
         container.Children.AddRange(baseRoots);
         return container;
     }
 
-    private static PreviewNode BuildModelInstance(RawBlock instance, string sourcePath)
+    private PreviewNode? BuildModelInstance(RawBlock instance, string sourcePath, List<string> warnings)
     {
-        var node = new PreviewNode
+        var overrides = ReadMaterialOverrides(instance.Content);
+        var container = new PreviewNode
         {
-            Id = "pi:" + instance.FileId,
+            Id = "pi_" + instance.FileId,
             Name = Path.GetFileNameWithoutExtension(sourcePath),
+            Children = ParseModelNodes(sourcePath, "pi_" + instance.FileId, overrides, warnings)
+        };
+
+        if (container.Children.Count == 0)
+        {
+            warnings.Add("在 " + Path.GetFileName(sourcePath) + " 里没有找到可渲染的网格。");
+            return null;
+        }
+
+        foreach (var modification in ReadModifications(instance.Content))
+            ApplyModification(container, modification);
+
+        return container;
+    }
+
+    private List<PreviewNode> ParseModelNodes(string assetPath, string idPrefix,
+        IReadOnlyList<ModelMaterialOverride> overrides, List<string> warnings)
+    {
+        var result = new List<PreviewNode>();
+        Assimp.Scene model;
+        try
+        {
+            using var assimp = new AssimpContext();
+            model = assimp.ImportFile(AssimpPaths.Openable(assetPath),
+                PostProcessSteps.Triangulate |
+                PostProcessSteps.GenerateNormals |
+                PostProcessSteps.JoinIdenticalVertices |
+                PostProcessSteps.ValidateDataStructure);
+        }
+        catch (Exception)
+        {
+            warnings.Add("模型读取失败：" + Path.GetFileName(assetPath));
+            return result;
+        }
+
+        var index = 0;
+        Walk(model.RootNode, NumericsMatrix.Identity);
+
+        void Walk(Node node, NumericsMatrix parentWorld)
+        {
+            var world = ToNumerics(node.Transform) * parentWorld;
+
+            if (node.MeshIndices.Count > 0)
+            {
+                var part = BuildModelPart(assetPath, idPrefix, index++, node, world, model, overrides);
+                if (part is not null) result.Add(part);
+            }
+
+            foreach (var child in node.Children) Walk(child, world);
+        }
+
+        if (result.Count == 0) warnings.Add("模型里没有可渲染的网格：" + Path.GetFileName(assetPath));
+        return result;
+    }
+
+    private PreviewNode? BuildModelPart(string assetPath, string idPrefix, int index, Node node,
+        NumericsMatrix world, Assimp.Scene model, IReadOnlyList<ModelMaterialOverride> overrides)
+    {
+        var indices = node.MeshIndices
+            .Where(meshIndex => meshIndex >= 0 && meshIndex < model.MeshCount)
+            .Where(meshIndex => model.Meshes[meshIndex].VertexCount > 0)
+            .ToList();
+        if (indices.Count == 0) return null;
+
+        var mirror = NumericsMatrix.CreateScale(-1, 1, 1);
+        var unity = mirror * NumericsMatrix.Transpose(world) * mirror;
+        if (!NumericsMatrix.Decompose(unity, out var scale, out var rotation, out var translation))
+        {
+            scale = System.Numerics.Vector3.One;
+            rotation = NumericsQuaternion.Identity;
+            translation = System.Numerics.Vector3.Zero;
+        }
+
+        var name = string.IsNullOrWhiteSpace(node.Name)
+            ? model.Meshes[indices[0]].Name
+            : node.Name;
+
+        var part = new PreviewNode
+        {
+            Id = idPrefix + "_" + index.ToString(CultureInfo.InvariantCulture),
+            Name = string.IsNullOrWhiteSpace(name) ? "Mesh " + index.ToString(CultureInfo.InvariantCulture) : name,
+            Position = [translation.X, translation.Y, translation.Z],
+            Rotation = [rotation.X, rotation.Y, rotation.Z, rotation.W],
+            Scale = [scale.X, scale.Y, scale.Z],
             Mesh = new PreviewMesh
             {
-                AssetPath = sourcePath,
+                AssetPath = assetPath,
                 FileId = 100100000,
-                SubMesh = string.Empty
+                SubMesh = node.Name ?? string.Empty,
+                MeshIndices = indices
             }
         };
 
-        foreach (var modification in ReadModifications(instance.Content))
-            ApplyModification(node, modification);
+        foreach (var meshIndex in indices)
+        {
+            var material = ResolveModelMaterial(assetPath, model, model.Meshes[meshIndex].MaterialIndex, overrides);
+            if (material is null) continue;
 
-        return node;
+            var duplicate = part.Materials.Any(existing =>
+                string.Equals(KeyOf(existing), KeyOf(material), StringComparison.OrdinalIgnoreCase));
+            if (!duplicate) part.Materials.Add(material);
+        }
+
+        return part;
+    }
+
+    private static string KeyOf(PreviewMaterial material) =>
+        material.Path.Length > 0 ? material.Path : material.Name;
+
+    private PreviewMaterial? ResolveModelMaterial(string assetPath, Assimp.Scene model, int materialIndex,
+        IReadOnlyList<ModelMaterialOverride> overrides)
+    {
+        var source = materialIndex >= 0 && materialIndex < model.MaterialCount ? model.Materials[materialIndex] : null;
+        var name = string.IsNullOrWhiteSpace(source?.Name) ? null : source.Name;
+
+        PreviewMaterial? baseMaterial = null;
+        var mapped = _index.ResolveModelMaterial(assetPath, name) ?? _index.FindMaterialByName(name);
+        if (mapped is not null) baseMaterial = LoadMaterial(mapped);
+        baseMaterial ??= SyntheticModelMaterial(assetPath, model, materialIndex, name);
+
+        if (overrides.Count == 0) return baseMaterial;
+
+        var distinct = overrides
+            .GroupBy(item => KeyOf(item.Material), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (distinct.Count == 1) return distinct[0].First().Material;
+
+        var baseName = baseMaterial.Name;
+        var matched = overrides.FirstOrDefault(item => MaterialNamesMatch(item.Material.Name, baseName));
+        return matched?.Material ?? baseMaterial;
+    }
+
+    private static bool MaterialNamesMatch(string? first, string? second)
+    {
+        var a = NormalizeMaterialName(first);
+        var b = NormalizeMaterialName(second);
+        if (a.Length == 0 || b.Length == 0) return false;
+        if (string.Equals(a, b, StringComparison.Ordinal)) return true;
+
+        var (longer, shorter) = a.Length > b.Length ? (a, b) : (b, a);
+        if (!longer.StartsWith(shorter, StringComparison.Ordinal)) return false;
+
+        var suffix = longer[shorter.Length..];
+        return suffix.All(char.IsDigit);
+    }
+
+    private static string NormalizeMaterialName(string? value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static PreviewMaterial SyntheticModelMaterial(string assetPath, Assimp.Scene model, int materialIndex,
+        string? name)
+    {
+        var source = materialIndex >= 0 && materialIndex < model.MaterialCount ? model.Materials[materialIndex] : null;
+        var diffuse = source is { HasColorDiffuse: true } ? source.ColorDiffuse : new Color4D(1, 1, 1, 1);
+        var blend = source is not null &&
+                    ((source.HasOpacity && source.Opacity < 0.999f) ||
+                     (source.HasTextureOpacity && !string.IsNullOrEmpty(source.TextureOpacity.FilePath)));
+
+        var material = new PreviewMaterial
+        {
+            Name = name ?? Path.GetFileNameWithoutExtension(assetPath) + " " + materialIndex.ToString(CultureInfo.InvariantCulture),
+            Path = assetPath + "#" + materialIndex.ToString(CultureInfo.InvariantCulture),
+            ShaderName = "Standard",
+            BuiltInShader = "Standard",
+            ShaderFamily = "Standard",
+            Kind = "lit",
+            BaseColor = [diffuse.R, diffuse.G, diffuse.B, diffuse.A],
+            DoubleSided = source?.IsTwoSided == true,
+            AlphaMode = blend ? "blend" : "opaque"
+        };
+
+        var directory = Path.GetDirectoryName(assetPath) ?? string.Empty;
+        material.BaseTexture = ResolveModelTexture(source?.TextureDiffuse.FilePath, directory);
+        material.NormalTexture = ResolveModelTexture(source?.TextureNormal.FilePath, directory);
+        material.EmissionTexture = ResolveModelTexture(source?.TextureEmissive.FilePath, directory);
+        if (material.EmissionTexture.Length > 0) material.UseEmission = true;
+
+        return material;
+    }
+
+    private static string ResolveModelTexture(string? path, string directory)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Contains('*', StringComparison.Ordinal)) return string.Empty;
+
+        var full = Path.IsPathRooted(path) ? path : Path.Combine(directory, path);
+        try
+        {
+            full = Path.GetFullPath(full);
+        }
+        catch (Exception)
+        {
+            return string.Empty;
+        }
+
+        var extension = Path.GetExtension(full).ToLowerInvariant();
+        return extension is ".png" or ".jpg" or ".jpeg" && File.Exists(full) ? full : string.Empty;
+    }
+
+    private static NumericsMatrix ToNumerics(Assimp.Matrix4x4 matrix) => new(
+        matrix.A1, matrix.A2, matrix.A3, matrix.A4,
+        matrix.B1, matrix.B2, matrix.B3, matrix.B4,
+        matrix.C1, matrix.C2, matrix.C3, matrix.C4,
+        matrix.D1, matrix.D2, matrix.D3, matrix.D4);
+
+    private List<ModelMaterialOverride> ReadMaterialOverrides(YamlMappingNode content)
+    {
+        var overrides = new List<ModelMaterialOverride>();
+        foreach (var item in ReadModificationSequence(content, "m_Modifications"))
+        {
+            if (item is not YamlMappingNode map) continue;
+
+            var property = GetScalar(map, "propertyPath");
+            if (property is null || !property.StartsWith("m_Materials.Array.data[", StringComparison.Ordinal))
+                continue;
+
+            var slotText = property["m_Materials.Array.data[".Length..].TrimEnd(']');
+            var slot = int.TryParse(slotText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedSlot)
+                ? parsedSlot
+                : 0;
+
+            var reference = GetRef(map, "objectReference");
+            if (!reference.IsExternal) continue;
+
+            var path = _index.Resolve(reference.Guid);
+            if (path is null) continue;
+
+            var material = LoadMaterial(path);
+            if (material is null) continue;
+            if (overrides.Any(existing => string.Equals(KeyOf(existing.Material), KeyOf(material), StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            overrides.Add(new ModelMaterialOverride(slot, material));
+        }
+
+        return overrides;
+    }
+
+    private static List<long> ReadRemovedObjects(YamlMappingNode content)
+    {
+        var removed = new List<long>();
+        foreach (var item in ReadModificationSequence(content, "m_RemovedGameObjects"))
+        {
+            var reference = ParseRef(item);
+            if (reference.FileId != 0) removed.Add(reference.FileId);
+        }
+
+        return removed;
+    }
+
+    private static void RemoveNodes(List<PreviewNode> roots, List<long> removed)
+    {
+        var ids = removed.ToHashSet();
+
+        bool Prune(PreviewNode node)
+        {
+            var hit = node.FileIds.Any(id =>
+                long.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) && ids.Contains(value));
+            if (hit) return true;
+
+            node.Children.RemoveAll(Prune);
+            return false;
+        }
+
+        roots.RemoveAll(Prune);
     }
 
     private static void PrefixIds(PreviewNode node, string prefix)
@@ -701,7 +990,30 @@ public sealed partial class PrefabParser
             string.Equals(guid, BuiltInExtraGuid, StringComparison.OrdinalIgnoreCase))
             return guid;
 
-        return _index.Resolve(guid) ?? ExternalShaderIndex.Shared.Resolve(guid) ?? guid;
+        var local = _index.Resolve(guid);
+        if (local is not null && !IsPlaceholderShader(local)) return local;
+
+        var external = ExternalShaderIndex.Shared.Resolve(guid);
+        if (external is not null && !IsPlaceholderShader(external)) return external;
+
+        return local ?? external ?? guid;
+    }
+
+    private static bool IsPlaceholderShader(string path)
+    {
+        try
+        {
+            using var reader = new StreamReader(path);
+            var buffer = new char[4096];
+            var read = reader.Read(buffer, 0, buffer.Length);
+            var text = new string(buffer, 0, read);
+            return text.Contains("some script is broken", StringComparison.OrdinalIgnoreCase) ||
+                   text.Contains("_DummyProperty", StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     private void ApplyShader(PreviewMaterial material)
@@ -1061,9 +1373,25 @@ public sealed partial class PrefabParser
         return refs;
     }
 
+    private static IEnumerable<YamlNode> ReadModificationSequence(YamlMappingNode content, string key)
+    {
+        if (TryGet(content, key, out var direct) && direct is YamlSequenceNode sequence)
+        {
+            foreach (var child in sequence.Children) yield return child;
+            yield break;
+        }
+
+        if (!TryGet(content, "m_Modification", out var wrapper) || wrapper is not YamlMappingNode map)
+            yield break;
+        if (!TryGet(map, key, out var nested) || nested is not YamlSequenceNode nestedSequence)
+            yield break;
+
+        foreach (var child in nestedSequence.Children) yield return child;
+    }
+
     private static IEnumerable<Modification> ReadModifications(YamlMappingNode content)
     {
-        foreach (var item in ReadSequence(content, "m_Modifications"))
+        foreach (var item in ReadModificationSequence(content, "m_Modifications"))
         {
             if (item is not YamlMappingNode map) continue;
 
@@ -1217,6 +1545,8 @@ public sealed partial class PrefabParser
     }
 
     private sealed record Modification(long TargetFileId, string PropertyPath, string Value);
+
+    private sealed record ModelMaterialOverride(int Slot, PreviewMaterial Material);
 
     private sealed class RawBlock
     {

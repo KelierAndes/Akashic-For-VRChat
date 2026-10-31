@@ -7,6 +7,8 @@ public sealed partial class UnityMetaIndex
     private readonly string _root;
     private readonly Dictionary<string, string> _guidToPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<long, string>> _subAssets = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Dictionary<string, string>> _modelMaterials = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, string>? _materialsByName;
 
     public UnityMetaIndex(string root)
     {
@@ -19,6 +21,89 @@ public sealed partial class UnityMetaIndex
         if (string.IsNullOrWhiteSpace(guid)) return null;
         if (!_guidToPath.TryGetValue(guid, out var relative)) return null;
         return Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    public string? ResolveModelMaterial(string modelPath, string? materialName)
+    {
+        if (string.IsNullOrWhiteSpace(materialName)) return null;
+
+        var metaPath = modelPath + ".meta";
+        if (!_modelMaterials.TryGetValue(metaPath, out var table))
+        {
+            table = ParseExternalMaterials(metaPath);
+            _modelMaterials[metaPath] = table;
+        }
+
+        return table.TryGetValue(materialName, out var guid) ? Resolve(guid) : null;
+    }
+
+    public string? FindMaterialByName(string? materialName)
+    {
+        var key = Normalize(materialName);
+        if (key.Length == 0) return null;
+
+        var index = _materialsByName ??= BuildMaterialIndex();
+        return index.TryGetValue(key, out var relative)
+            ? Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar))
+            : null;
+    }
+
+    private Dictionary<string, string> BuildMaterialIndex()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!Directory.Exists(_root)) return map;
+
+        try
+        {
+            var files = Directory.EnumerateFiles(_root, "*.mat", SearchOption.AllDirectories)
+                .OrderBy(path => path.Length)
+                .ThenBy(path => path, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var file in files)
+            {
+                if (map.Count >= 8192) break;
+                var key = Normalize(Path.GetFileNameWithoutExtension(file));
+                if (key.Length == 0) continue;
+                map.TryAdd(key, Path.GetRelativePath(_root, file).Replace('\\', '/'));
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return map;
+    }
+
+    private static string Normalize(string? value) => string.IsNullOrWhiteSpace(value)
+        ? string.Empty
+        : new string(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    private static Dictionary<string, string> ParseExternalMaterials(string metaPath)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(metaPath)) return result;
+
+        string text;
+        try
+        {
+            text = File.ReadAllText(metaPath);
+        }
+        catch (IOException)
+        {
+            return result;
+        }
+
+        foreach (Match match in ExternalMaterialRegex().Matches(text))
+        {
+            var name = CleanName(match.Groups[1].Value);
+            var guid = match.Groups[2].Value;
+            if (name.Length > 0) result.TryAdd(name, guid);
+        }
+
+        return result;
     }
 
     public string? ResolveSubAsset(string? guid, long fileId)
@@ -122,6 +207,10 @@ public sealed partial class UnityMetaIndex
 
     [GeneratedRegex(@"^guid:\s*([0-9a-fA-F]{32})\b")]
     private static partial Regex GuidRegex();
+
+    [GeneratedRegex(
+        @"(?m)^  - first:\s*\r?\n(?:[^\n]*\r?\n)*?[ \t]+name:\s*(.+?)\s*\r?\n[ \t]+second:\s*\{[^}]*?guid:\s*([0-9a-fA-F]{32})")]
+    private static partial Regex ExternalMaterialRegex();
 
     [GeneratedRegex(@"-\s*first:\s*\r?\n\s*(\d+):\s*(-?\d+)\s*\r?\n\s*second:\s*(.+?)\s*$",
         RegexOptions.Multiline)]

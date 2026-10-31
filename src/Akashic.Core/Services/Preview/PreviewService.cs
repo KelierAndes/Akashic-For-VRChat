@@ -172,37 +172,11 @@ public sealed partial class PreviewService : IPreviewService
                 {
                     Directory.CreateDirectory(directory);
 
-                    if (PackageContentCache.IsModelPath(relative))
-                    {
-                        scene = new PreviewScene
-                        {
-                            PrefabPath = relative,
-                            Name = Path.GetFileNameWithoutExtension(relative),
-                            Root = content.Root,
-                            NodeCount = 1,
-                            MeshCount = 1,
-                            Nodes =
-                            [
-                                new PreviewNode
-                                {
-                                    Id = "model",
-                                    Name = Path.GetFileNameWithoutExtension(relative),
-                                    Mesh = new PreviewMesh
-                                    {
-                                        AssetPath = full,
-                                        SubMesh = string.Empty
-                                    }
-                                }
-                            ]
-                        };
-                    }
-                    else
-                    {
-                        var index = new UnityMetaIndex(content.Root);
-                        var parser = new PrefabParser(content.Root, index, _db);
-                        scene = parser.Parse(relative);
-                        scene.Root = content.Root;
-                    }
+                    var parser = ParserFor(content.Root);
+                    scene = PackageContentCache.IsModelPath(relative)
+                        ? parser.ParseModel(relative)
+                        : parser.Parse(relative);
+                    scene.Root = content.Root;
 
                     var warnings = new List<string>();
                     var meshes = 0;
@@ -287,7 +261,7 @@ public sealed partial class PreviewService : IPreviewService
         }
     }
 
-    private const string BuildVersion = "build-v23";
+    private const string BuildVersion = "build-v26";
 
     public PreviewBuildArtifacts? GetArtifacts(string sessionId)
     {

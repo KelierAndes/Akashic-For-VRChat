@@ -48,6 +48,7 @@ class _PreviewPageState extends State<PreviewPage> {
   bool _pickerVisible = false;
   bool _flat = false;
   Map<String, dynamic>? _viewer;
+  final Set<String> _hidden = {};
   String _sessionId = '';
   late final HlslProbe _probe = HlslProbe(
     evaluate: (source) async =>
@@ -163,6 +164,7 @@ class _PreviewPageState extends State<PreviewPage> {
       _manualKeywords.clear();
       _colorSpace = 'gamma';
       _collapsed.clear();
+      _hidden.clear();
     });
 
     try {
@@ -178,6 +180,7 @@ class _PreviewPageState extends State<PreviewPage> {
         _viewerUrl = host.absolute('${result['viewerUrl']}');
         _sessionId = '${result['sessionId']}';
         _building = false;
+        _hidden.addAll(_initialHidden());
       });
     } catch (error) {
       if (!mounted) return;
@@ -246,6 +249,67 @@ class _PreviewPageState extends State<PreviewPage> {
     }
 
     return walk(((_scene?['nodes'] as List?) ?? const []));
+  }
+
+  Set<String> _initialHidden() {
+    final hidden = <String>{};
+
+    void walk(List nodes) {
+      for (final raw in nodes) {
+        final node = Map<String, dynamic>.from(raw as Map);
+        if (node['active'] == false) {
+          hidden.addAll(_subtreeIds(node));
+          continue;
+        }
+        walk(((node['children'] as List?) ?? const []));
+      }
+    }
+
+    walk(((_scene?['nodes'] as List?) ?? const []));
+    return hidden;
+  }
+
+  Set<String> _subtreeIds(Map<String, dynamic> node) {
+    final ids = <String>{};
+
+    void walk(Map<String, dynamic> current) {
+      final id = '${current['id']}';
+      if (id.isNotEmpty) ids.add(id);
+      for (final child in ((current['children'] as List?) ?? const [])) {
+        walk(Map<String, dynamic>.from(child as Map));
+      }
+    }
+
+    walk(node);
+    return ids;
+  }
+
+  void _toggleHidden(Map<String, dynamic> node) {
+    final id = '${node['id']}';
+    final ids = _subtreeIds(node);
+
+    setState(() {
+      if (_hidden.contains(id)) {
+        _hidden.removeAll(ids);
+      } else {
+        _hidden.addAll(ids);
+      }
+    });
+    _syncHidden();
+  }
+
+  void _showAll() {
+    setState(_hidden.clear);
+    _syncHidden();
+  }
+
+  void _syncHidden() {
+    final encoded = _hidden
+        .map((id) => "'${id.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'")
+        .join(',');
+    _web?.evaluateJavascript(
+      source: 'window.akashicSetHidden && window.akashicSetHidden([$encoded])',
+    );
   }
 
   Future<void> _toggleHlsl() => _probe.toggle();
@@ -778,14 +842,21 @@ class _PreviewPageState extends State<PreviewPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-            child: Text(
-              '层级',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: t.inkSecondary,
-              ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 12, 8),
+            child: Row(
+              children: [
+                Text(
+                  '层级',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: t.inkSecondary,
+                  ),
+                ),
+                const Spacer(),
+                if (_hidden.isNotEmpty)
+                  NeuPill('全部显示', onTap: _showAll),
+              ],
             ),
           ),
           Expanded(
@@ -822,6 +893,7 @@ class _PreviewPageState extends State<PreviewPage> {
     final selected = _selected?['id'] == node['id'];
     final mesh = node['mesh'] as Map?;
     final active = node['active'] != false;
+    final visible = active && !_hidden.contains(id);
 
     return InkWell(
       onTap: () => _select(node),
@@ -853,7 +925,7 @@ class _PreviewPageState extends State<PreviewPage> {
                   ? Icons.view_in_ar_rounded
                   : Icons.crop_square_rounded,
               size: 13,
-              color: active
+              color: visible
                   ? (mesh != null ? const Color(0xFF4F86D6) : t.inkTertiary)
                   : t.inkTertiary,
             ),
@@ -865,8 +937,23 @@ class _PreviewPageState extends State<PreviewPage> {
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12,
-                  color: active ? t.ink : t.inkTertiary,
+                  color: visible ? t.ink : t.inkTertiary,
                   fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _toggleHidden(node),
+              child: Padding(
+                padding: const EdgeInsets.all(3),
+                child: Icon(
+                  visible
+                      ? Icons.visibility_rounded
+                      : Icons.visibility_off_rounded,
+                  size: 14,
+                  color: visible ? t.inkTertiary : t.inkSecondary,
                 ),
               ),
             ),
@@ -956,6 +1043,7 @@ class _PreviewPageState extends State<PreviewPage> {
                       'window.akashicSetFlat && window.akashicSetFlat(true)',
                 );
               }
+              _syncHidden();
             },
           ),
         if (_loading || _building)

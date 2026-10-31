@@ -68,6 +68,8 @@ public sealed class HlslPreviewService : IDisposable
         if (scene.Items.Count == 0)
             throw new InvalidOperationException("这个内容里没有可渲染的网格——只有粒子系统、UI 或纯脚本组件时无法预览。");
 
+        if (options.Hidden.Count > 0) scene = WithoutHidden(scene, options.Hidden);
+
         return await RenderSceneAsync(scene, options, ct);
     }
 
@@ -279,6 +281,31 @@ public sealed class HlslPreviewService : IDisposable
                     "FOG_LINEAR", "FOG_EXP", "FOG_EXP2", "LIGHTMAP_ON", "SHADOWS_SCREEN", "_LIGHTPROBE_SH"
                 }
             }
+        };
+    }
+
+    private static HlslSceneData WithoutHidden(HlslSceneData source, List<string> hidden)
+    {
+        var set = new HashSet<string>(hidden, StringComparer.Ordinal);
+        var items = source.Items.Where(item => !set.Contains(item.NodeId)).ToList();
+        if (items.Count == source.Items.Count) return source;
+
+        return new HlslSceneData
+        {
+            SessionId = source.SessionId,
+            Root = source.Root,
+            Items = items,
+            Center = source.Center,
+            BoundsMin = source.BoundsMin,
+            BoundsMax = source.BoundsMax,
+            Radius = source.Radius,
+            Materials = items
+                .Select(item => item.Material)
+                .Where(material => material is not null)
+                .Select(material => material!)
+                .Distinct()
+                .ToList(),
+            Warnings = source.Warnings
         };
     }
 

@@ -54,6 +54,8 @@ public sealed class RenderOptions
 
     public List<string> Keywords { get; set; } = [];
 
+    public List<string> Hidden { get; set; } = [];
+
     public string ColorSpace { get; set; } = "gamma";
 }
 
@@ -157,6 +159,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private ID3D11Texture2D? _colorMsaa;
     private ID3D11Texture2D? _depthMsaa;
     private ID3D11Texture2D? _staging;
+    private bool _srgbTarget;
+    private bool _linear;
     private int _width;
     private int _height;
     private long _textureTotalBytes;
@@ -254,7 +258,9 @@ public sealed class D3D11PreviewRenderer : IDisposable
     {
         var width = Math.Clamp(options.Width, 128, 4096);
         var height = Math.Clamp(options.Height, 128, 4096);
-        EnsureTargets(width, height);
+        var linear = string.Equals(options.ColorSpace, "linear", StringComparison.OrdinalIgnoreCase);
+        _linear = linear;
+        EnsureTargets(width, height, linear);
 
         var mode = (options.Mode ?? "textured").ToLowerInvariant();
         var debug = mode is "clay" or "wireframe";
@@ -272,9 +278,12 @@ public sealed class D3D11PreviewRenderer : IDisposable
         }
 
         _context.OMSetRenderTargets(_colorView!, _depthView);
-        _context.ClearRenderTargetView(_colorView!, options.LightBackground
-            ? new Color4(0.93f, 0.94f, 0.96f, 1f)
-            : new Color4(0.075f, 0.082f, 0.094f, 1f));
+        var background = options.LightBackground ? (0.93f, 0.94f, 0.96f) : (0.075f, 0.082f, 0.094f);
+        var clearColor = linear
+            ? new Color4(MathF.Pow(background.Item1, 2.2f), MathF.Pow(background.Item2, 2.2f),
+                MathF.Pow(background.Item3, 2.2f), 1f)
+            : new Color4(background.Item1, background.Item2, background.Item3, 1f);
+        _context.ClearRenderTargetView(_colorView!, clearColor);
         var ticks = (float)(DateTime.UtcNow - _start).TotalSeconds;
         var aspect = (float)width / height;
 
@@ -296,7 +305,8 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _context.ClearDepthStencilView(_depthView!, DepthStencilClearFlags.Depth, 1f, 0);
         var drawCalls = DrawView(scene, camera, width, height, ticks);
         if (_colorMsaa is not null)
-            _context.ResolveSubresource(_color!, 0, _colorMsaa, 0, Format.B8G8R8A8_UNorm);
+            _context.ResolveSubresource(_color!, 0, _colorMsaa, 0,
+                _srgbTarget ? Format.B8G8R8A8_UNorm_SRgb : Format.B8G8R8A8_UNorm);
 
         _context.Flush();
         var frame = ReadBack(width, height, options.Raw);
@@ -497,7 +507,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
                 foreach (var pass in shader?.Passes ?? [])
                 {
                     if (pass.Outline && (debug ||
-                                         (source is not null && !source.UseOutline && source.OutlineWidth <= 0.0001f)))
+                                         (source is not null && (!source.UseOutline || source.OutlineWidth <= 0.0001f))))
                         continue;
 
                     var gpuPass = GetGpuPass(pass);
@@ -630,11 +640,12 @@ public sealed class D3D11PreviewRenderer : IDisposable
         return texture;
     }
 
-    private ID3D11ShaderResourceView LoadTexture(string path)
+    private ID3D11ShaderResourceView LoadTexture(string path, bool srgb)
     {
-        if (_textureCache.TryGetValue(path, out var cached))
+        var cacheKey = srgb ? path + "|srgb" : path + "|linear";
+        if (_textureCache.TryGetValue(cacheKey, out var cached))
         {
-            _textureUsed[path] = ++_textureClock;
+            _textureUsed[cacheKey] = ++_textureClock;
             return cached;
         }
 
@@ -646,14 +657,15 @@ public sealed class D3D11PreviewRenderer : IDisposable
             var image = ImageResult.FromStream(stream, StbImageSharp.ColorComponents.RedGreenBlueAlpha);
             var level0 = (long)image.Width * image.Height * 4;
 
+            var format = srgb ? Format.R8G8B8A8_UNorm_SRgb : Format.R8G8B8A8_UNorm;
             try
             {
-                view = UploadMipped(image);
+                view = UploadMipped(image, format);
                 bytes = level0 + level0 / 3;
             }
             catch (Exception ex) when (ex is InvalidOperationException)
             {
-                view = UploadSingleLevel(image);
+                view = UploadSingleLevel(image, format);
                 bytes = level0;
             }
         }
@@ -661,17 +673,17 @@ public sealed class D3D11PreviewRenderer : IDisposable
         {
             view = _whiteView;
             bytes = 0;
-            _decodeFailures.Add(path);
+            _decodeFailures.Add(cacheKey);
         }
 
-        _textureCache[path] = view;
-        _textureBytes[path] = bytes;
-        _textureUsed[path] = ++_textureClock;
+        _textureCache[cacheKey] = view;
+        _textureBytes[cacheKey] = bytes;
+        _textureUsed[cacheKey] = ++_textureClock;
         _textureTotalBytes += bytes;
         return view;
     }
 
-    private ID3D11ShaderResourceView UploadMipped(ImageResult image)
+    private ID3D11ShaderResourceView UploadMipped(ImageResult image, Format format)
     {
         var texture = _device.CreateTexture2D(new Texture2DDescription
         {
@@ -679,7 +691,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
             Height = (uint)image.Height,
             MipLevels = 0,
             ArraySize = 1,
-            Format = Format.R8G8B8A8_UNorm,
+            Format = format,
             SampleDescription = new SampleDescription(1, 0),
             BindFlags = BindFlags.ShaderResource | BindFlags.RenderTarget,
             Usage = ResourceUsage.Default,
@@ -702,7 +714,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         return view;
     }
 
-    private ID3D11ShaderResourceView UploadSingleLevel(ImageResult image)
+    private ID3D11ShaderResourceView UploadSingleLevel(ImageResult image, Format format)
     {
         using var texture = _device.CreateTexture2D(image.Data, Format.R8G8B8A8_UNorm,
             (uint)image.Width, (uint)image.Height, 1, 1, BindFlags.ShaderResource,
@@ -735,6 +747,18 @@ public sealed class D3D11PreviewRenderer : IDisposable
         }
     }
 
+    private static bool IsColorTexture(string name)
+    {
+        var lower = name.ToLowerInvariant();
+        string[] data =
+        [
+            "bump", "normal", "mask", "ramp", "lut", "dissolve", "noise", "parallax", "occlusion",
+            "metallic", "smoothness", "_ao", "shadowstrength", "shadowborder", "height", "thickness",
+            "vector", "position"
+        ];
+        return !data.Any(lower.Contains);
+    }
+
     private ID3D11ShaderResourceView ResolveTexture(string name, PreviewMaterial? material, out string used)
     {
         used = string.Empty;
@@ -756,8 +780,9 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
         if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
         {
-            used = path;
-            return LoadTexture(path);
+            var srgb = _linear && IsColorTexture(name);
+            used = srgb ? path + "|srgb" : path + "|linear";
+            return LoadTexture(path, srgb);
         }
 
         if (name.Contains("Bump", StringComparison.OrdinalIgnoreCase) ||
@@ -838,6 +863,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
     private static float[] Values(string name, CompiledShader shader, PreviewMaterial? material)
     {
+
         if (name.EndsWith("_ST", StringComparison.Ordinal))
         {
             var baseName = name[..^3];
@@ -1012,7 +1038,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         WriteMatrix(ref writer, Matrix4x4.Transpose(camera.Projection));
         WriteMatrix(ref writer, Matrix4x4.Transpose(world * camera.View * camera.Projection));
 
-        var toLight = Vector3.Normalize(new Vector3(0.32f, 0.62f, 0.72f));
+        var toLight = Vector3.Normalize(new Vector3(-0.3214f, 0.7660f, -0.5567f));
         WriteVector(ref writer, new Vector4(camera.Eye, 1));
         WriteVector(ref writer, new Vector4(toLight, 0));
         WriteVector(ref writer, new Vector4(1, 1, 1, 1));
@@ -1060,9 +1086,10 @@ public sealed class D3D11PreviewRenderer : IDisposable
         writer.Write(vector.X); writer.Write(vector.Y); writer.Write(vector.Z); writer.Write(vector.W);
     }
 
-    private void EnsureTargets(int width, int height)
+    private void EnsureTargets(int width, int height, bool linear)
     {
-        if (_width == width && _height == height && _color is not null) return;
+        var format = linear ? Format.B8G8R8A8_UNorm_SRgb : Format.B8G8R8A8_UNorm;
+        if (_width == width && _height == height && _srgbTarget == linear && _color is not null) return;
 
         _colorView?.Dispose();
         _depthView?.Dispose();
@@ -1074,11 +1101,11 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _colorMsaa = null;
         _depthMsaa = null;
 
-        _color = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.RenderTarget,
+        _color = CreateTarget(format, width, height, BindFlags.RenderTarget,
             ResourceUsage.Default, CpuAccessFlags.None, 1);
         if (_sampleCount > 1)
         {
-            _colorMsaa = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.RenderTarget,
+            _colorMsaa = CreateTarget(format, width, height, BindFlags.RenderTarget,
                 ResourceUsage.Default, CpuAccessFlags.None, _sampleCount);
             _depthMsaa = CreateTarget(Format.D24_UNorm_S8_UInt, width, height, BindFlags.DepthStencil,
                 ResourceUsage.Default, CpuAccessFlags.None, _sampleCount);
@@ -1093,11 +1120,12 @@ public sealed class D3D11PreviewRenderer : IDisposable
             _depthView = _device.CreateDepthStencilView(_depth, null);
         }
 
-        _staging = CreateTarget(Format.B8G8R8A8_UNorm, width, height, BindFlags.None,
+        _staging = CreateTarget(format, width, height, BindFlags.None,
             ResourceUsage.Staging, CpuAccessFlags.Read, 1);
 
         _width = width;
         _height = height;
+        _srgbTarget = linear;
     }
 
     private ID3D11Texture2D CreateTarget(Format format, int width, int height, BindFlags bind,
@@ -1296,21 +1324,20 @@ public sealed class D3D11PreviewRenderer : IDisposable
         3 => Blend.SourceColor,
         4 => Blend.InverseDestinationColor,
         5 => Blend.SourceAlpha,
-        6 => Blend.InverseSourceAlpha,
+        6 => Blend.InverseSourceColor,
         7 => Blend.DestinationAlpha,
         8 => Blend.InverseDestinationAlpha,
         9 => Blend.SourceAlphaSaturate,
-        10 => Blend.InverseSourceColor,
+        10 => Blend.InverseSourceAlpha,
         _ => Blend.One
     };
 
     private static Blend ToAlphaBlend(int value) => value switch
     {
+        2 => Blend.DestinationAlpha,
         3 => Blend.SourceAlpha,
-        4 => Blend.InverseSourceAlpha,
-        9 => Blend.DestinationAlpha,
-        10 => Blend.InverseDestinationAlpha,
-        11 => Blend.One,
+        4 => Blend.InverseDestinationAlpha,
+        6 => Blend.InverseSourceAlpha,
         _ => ToBlend(value)
     };
 
