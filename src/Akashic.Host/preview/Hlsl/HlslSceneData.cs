@@ -302,11 +302,12 @@ public static class HlslSceneBuilder
     {
         try
         {
-            return assimp.ImportFile(AssimpPaths.Openable(path),
-                PostProcessSteps.Triangulate |
+            var scene = assimp.ImportFile(AssimpPaths.Openable(path),
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |
                 PostProcessSteps.ValidateDataStructure);
+            if (scene is not null) Ngons.Triangulate(scene);
+            return scene;
         }
         catch (Exception)
         {

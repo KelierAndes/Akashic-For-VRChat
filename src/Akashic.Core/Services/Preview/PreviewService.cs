@@ -261,7 +261,7 @@ public sealed partial class PreviewService : IPreviewService
         }
     }
 
-    private const string BuildVersion = "build-v26";
+    private const string BuildVersion = "build-v30";
 
     public PreviewBuildArtifacts? GetArtifacts(string sessionId)
     {

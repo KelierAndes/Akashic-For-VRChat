@@ -135,8 +135,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
     private readonly ID3D11Buffer _engine;
-    private readonly ID3D11SamplerState _wrapSampler;
-    private readonly ID3D11SamplerState _clampSampler;
+    private readonly Dictionary<(int, int), ID3D11SamplerState> _samplers = new();
     private readonly int _maxAnisotropy;
     private readonly int _sampleCount;
     private readonly ID3D11Texture2D _defaultWhite;
@@ -184,27 +183,32 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _sampleCount = warp ? 1 : 4;
 
         _engine = CreateDynamicBuffer(880);
-        _wrapSampler = CreateSampler(TextureAddressMode.Wrap);
-        _clampSampler = CreateSampler(TextureAddressMode.Clamp);
 
         _defaultWhite = CreateTexture([255, 255, 255, 255], out _whiteView);
         _defaultNormal = CreateTexture([128, 128, 255, 255], out _normalView);
         _defaultBlack = CreateTexture([0, 0, 0, 255], out _blackView);
     }
 
-    private ID3D11SamplerState CreateSampler(TextureAddressMode address) =>
-        _device.CreateSamplerState(new SamplerDescription
+    private ID3D11SamplerState GetSampler(TextureAddressMode addressU, TextureAddressMode addressV)
+    {
+        var key = ((int)addressU, (int)addressV);
+        if (_samplers.TryGetValue(key, out var existing)) return existing;
+
+        var created = _device.CreateSamplerState(new SamplerDescription
         {
             Filter = _maxAnisotropy > 1 ? Filter.Anisotropic : Filter.MinMagMipLinear,
-            AddressU = address,
-            AddressV = address,
-            AddressW = address,
+            AddressU = addressU,
+            AddressV = addressV,
+            AddressW = TextureAddressMode.Clamp,
             MipLODBias = 0,
             MaxAnisotropy = (uint)_maxAnisotropy,
             ComparisonFunc = ComparisonFunction.Never,
             MinLOD = 0,
             MaxLOD = float.MaxValue
         });
+        _samplers[key] = created;
+        return created;
+    }
 
     public string Adapter { get; }
 
@@ -462,7 +466,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
                 foreach (var sampler in binding.Samplers)
                 {
-                    var state = sampler.Clamp ? _clampSampler : _wrapSampler;
+                    var state = GetSampler(sampler.AddressU, sampler.AddressV);
                     if (sampler.Stage) _context.VSSetSampler(sampler.Slot, state);
                     else _context.PSSetSampler(sampler.Slot, state);
                 }
@@ -524,7 +528,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
                         VsGlobals = BuildGlobals(pass.Vertex, shader!, source),
                         PsGlobals = BuildGlobals(pass.Pixel, shader!, source),
                         Textures = ResolveTextures(pass, source),
-                        Samplers = ResolveSamplers(pass),
+                        Samplers = ResolveSamplers(pass, source),
                         Raster = Raster(state),
                         Depth = Depth(state),
                         Blend = BlendState(state)
@@ -797,7 +801,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         return _whiteView;
     }
 
-    private List<SamplerBinding> ResolveSamplers(CompiledPass pass)
+    private List<SamplerBinding> ResolveSamplers(CompiledPass pass, PreviewMaterial? material)
     {
         var result = new List<SamplerBinding>();
         Add(pass.Vertex, true);
@@ -809,16 +813,39 @@ public sealed class D3D11PreviewRenderer : IDisposable
             foreach (var resource in reflection.Resources)
             {
                 if (!string.Equals(resource.Kind, "Sampler", StringComparison.OrdinalIgnoreCase)) continue;
+                var (addressU, addressV) = SamplerAddress(resource.Name, material);
                 result.Add(new SamplerBinding
                 {
                     Name = resource.Name,
                     Slot = resource.BindPoint,
                     Stage = stage,
-                    Clamp = resource.Name.Contains("clamp", StringComparison.OrdinalIgnoreCase)
+                    AddressU = addressU,
+                    AddressV = addressV
                 });
             }
         }
     }
+
+    private static (TextureAddressMode, TextureAddressMode) SamplerAddress(string samplerName, PreviewMaterial? material)
+    {
+        if (samplerName.Contains("clamp", StringComparison.OrdinalIgnoreCase))
+            return (TextureAddressMode.Clamp, TextureAddressMode.Clamp);
+        if (samplerName.Contains("mirror", StringComparison.OrdinalIgnoreCase))
+            return (TextureAddressMode.Mirror, TextureAddressMode.Mirror);
+
+        if (material is not null && material.TextureWrap.TryGetValue(samplerName, out var wrap) && wrap.Length >= 2)
+            return (FromUnityWrap(wrap[0]), FromUnityWrap(wrap[1]));
+
+        return (TextureAddressMode.Wrap, TextureAddressMode.Wrap);
+    }
+
+    private static TextureAddressMode FromUnityWrap(float mode) => mode switch
+    {
+        1 => TextureAddressMode.Clamp,
+        2 => TextureAddressMode.Mirror,
+        3 => TextureAddressMode.MirrorOnce,
+        _ => TextureAddressMode.Wrap
+    };
 
     private static uint BindPoint(ShaderReflection reflection, string name)
     {
@@ -1425,8 +1452,7 @@ public sealed class D3D11PreviewRenderer : IDisposable
         _depthMsaa?.Dispose();
         _staging?.Dispose();
         _engine.Dispose();
-        _wrapSampler.Dispose();
-        _clampSampler.Dispose();
+        foreach (var sampler in _samplers.Values) sampler.Dispose();
         _whiteView.Dispose();
         _normalView.Dispose();
         _blackView.Dispose();
@@ -1543,7 +1569,9 @@ public sealed class D3D11PreviewRenderer : IDisposable
 
         public bool Stage { get; set; }
 
-        public bool Clamp { get; set; }
+        public TextureAddressMode AddressU { get; set; }
+
+        public TextureAddressMode AddressV { get; set; }
     }
 
     private sealed class ResolvedState

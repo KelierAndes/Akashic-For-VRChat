@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace Akashic.Core.Services.Preview;
@@ -8,6 +9,7 @@ public sealed partial class UnityMetaIndex
     private readonly Dictionary<string, string> _guidToPath = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<long, string>> _subAssets = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Dictionary<string, string>> _modelMaterials = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, float[]> _textureWrap = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, string>? _materialsByName;
 
     public UnityMetaIndex(string root)
@@ -21,6 +23,45 @@ public sealed partial class UnityMetaIndex
         if (string.IsNullOrWhiteSpace(guid)) return null;
         if (!_guidToPath.TryGetValue(guid, out var relative)) return null;
         return Path.Combine(_root, relative.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    public float[] GetTextureWrap(string? texturePath)
+    {
+        if (string.IsNullOrWhiteSpace(texturePath)) return [0, 0];
+        if (_textureWrap.TryGetValue(texturePath, out var cached)) return cached;
+
+        var wrap = ReadTextureWrap(texturePath + ".meta");
+        _textureWrap[texturePath] = wrap;
+        return wrap;
+    }
+
+    private static float[] ReadTextureWrap(string metaPath)
+    {
+        var u = 0f;
+        var v = 0f;
+        try
+        {
+            if (!File.Exists(metaPath)) return [0, 0];
+            foreach (var line in File.ReadLines(metaPath))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("wrapU:", StringComparison.Ordinal))
+                {
+                    float.TryParse(trimmed.AsSpan(6).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out u);
+                }
+                else if (trimmed.StartsWith("wrapV:", StringComparison.Ordinal))
+                {
+                    float.TryParse(trimmed.AsSpan(6).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v);
+                    break;
+                }
+            }
+        }
+        catch (IOException)
+        {
+            return [0, 0];
+        }
+
+        return [u, v];
     }
 
     public string? ResolveModelMaterial(string modelPath, string? materialName)

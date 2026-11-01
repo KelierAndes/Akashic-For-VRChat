@@ -126,6 +126,8 @@ public class PreviewMaterial
 
     public Dictionary<string, float[]> TextureST { get; set; } = [];
 
+    public Dictionary<string, float[]> TextureWrap { get; set; } = [];
+
     public List<string> Keywords { get; set; } = [];
 
     public List<string> Slots { get; set; } = [];

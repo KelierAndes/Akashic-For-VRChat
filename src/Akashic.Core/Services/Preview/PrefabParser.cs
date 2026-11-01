@@ -18,7 +18,7 @@ public sealed partial class PrefabParser
         "m_GameObject", "m_Enabled", "m_EditorHideFlags", "m_Script", "m_Name", "m_EditorClassIdentifier"
     };
 
-    private const string MaterialCacheVersion = "material-v10";
+    private const string MaterialCacheVersion = "material-v12";
 
     private readonly UnityMetaIndex _index;
     private readonly string _root;
@@ -282,10 +282,12 @@ public sealed partial class PrefabParser
         {
             using var assimp = new AssimpContext();
             model = assimp.ImportFile(AssimpPaths.Openable(assetPath),
-                PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |
                 PostProcessSteps.ValidateDataStructure);
+            var ngons = Ngons.Triangulate(model);
+            if (ngons.UnresolvedPolygons > 0)
+                warnings.Add($"模型有 {ngons.UnresolvedPolygons} 个多边形无法三角化：" + Path.GetFileName(assetPath));
         }
         catch (Exception)
         {
@@ -367,6 +369,16 @@ public sealed partial class PrefabParser
     private static string KeyOf(PreviewMaterial material) =>
         material.Path.Length > 0 ? material.Path : material.Name;
 
+    private void ApplyModelTextureWrap(PreviewMaterial material)
+    {
+        if (material.BaseTexture.Length > 0)
+            material.TextureWrap["_MainTex"] = _index.GetTextureWrap(material.BaseTexture);
+        if (material.NormalTexture.Length > 0)
+            material.TextureWrap["_BumpMap"] = _index.GetTextureWrap(material.NormalTexture);
+        if (material.EmissionTexture.Length > 0)
+            material.TextureWrap["_EmissionMap"] = _index.GetTextureWrap(material.EmissionTexture);
+    }
+
     private PreviewMaterial? ResolveModelMaterial(string assetPath, Assimp.Scene model, int materialIndex,
         IReadOnlyList<ModelMaterialOverride> overrides)
     {
@@ -376,7 +388,11 @@ public sealed partial class PrefabParser
         PreviewMaterial? baseMaterial = null;
         var mapped = _index.ResolveModelMaterial(assetPath, name) ?? _index.FindMaterialByName(name);
         if (mapped is not null) baseMaterial = LoadMaterial(mapped);
-        baseMaterial ??= SyntheticModelMaterial(assetPath, model, materialIndex, name);
+        if (baseMaterial is null)
+        {
+            baseMaterial = SyntheticModelMaterial(assetPath, model, materialIndex, name);
+            ApplyModelTextureWrap(baseMaterial);
+        }
 
         if (overrides.Count == 0) return baseMaterial;
 
@@ -728,6 +744,8 @@ public sealed partial class PrefabParser
 
             material.Slots.Add(slot);
             material.Textures[slot] = _index.Resolve(texture.Guid) ?? texture.Guid ?? string.Empty;
+            material.TextureWrap[slot] = _index.GetTextureWrap(
+                _index.Resolve(texture.Guid));
 
             var scaleX = 1f;
             var scaleY = 1f;

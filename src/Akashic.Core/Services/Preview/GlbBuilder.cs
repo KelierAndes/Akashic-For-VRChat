@@ -140,7 +140,11 @@ public sealed class GlbBuilder : IDisposable
                 source.BaseColor.ElementAtOrDefault(3) is var a && a > 0 ? Math.Clamp(a, 0f, 1f) : 1f);
 
             var image = LoadImage(source.BaseTexture);
-            if (image is not null) material.WithBaseColor(image, color);
+            if (image is not null)
+            {
+                material.WithBaseColor(image, color);
+                ApplyBaseColorWrap(material, source);
+            }
             else material.WithBaseColor(color);
 
             if (source.Procedural && image is null &&
@@ -202,6 +206,25 @@ public sealed class GlbBuilder : IDisposable
         return material;
     }
 
+    private static void ApplyBaseColorWrap(MaterialBuilder material, PreviewMaterial source)
+    {
+        if (material.GetChannel("BaseColor")?.Texture is not { } texture) return;
+
+        var slot = source.Textures.FirstOrDefault(entry =>
+            string.Equals(entry.Value, source.BaseTexture, StringComparison.OrdinalIgnoreCase)).Key;
+        if (slot is null || !source.TextureWrap.TryGetValue(slot, out var wrap) || wrap.Length < 2) return;
+
+        texture.WrapS = ToGltfWrap(wrap[0]);
+        texture.WrapT = ToGltfWrap(wrap[1]);
+    }
+
+    private static SharpGLTF.Schema2.TextureWrapMode ToGltfWrap(float unityMode) => unityMode switch
+    {
+        1 => SharpGLTF.Schema2.TextureWrapMode.CLAMP_TO_EDGE,
+        2 => SharpGLTF.Schema2.TextureWrapMode.MIRRORED_REPEAT,
+        _ => SharpGLTF.Schema2.TextureWrapMode.REPEAT
+    };
+
     private static ImageBuilder? LoadImage(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return null;
@@ -226,10 +249,10 @@ public sealed class GlbBuilder : IDisposable
         try
         {
             scene = _assimp.ImportFile(AssimpPaths.Openable(path),
-                PostProcessSteps.Triangulate |
                 PostProcessSteps.GenerateNormals |
                 PostProcessSteps.JoinIdenticalVertices |
                 PostProcessSteps.ValidateDataStructure);
+            if (scene is not null) Ngons.Triangulate(scene);
         }
         catch (Exception)
         {
