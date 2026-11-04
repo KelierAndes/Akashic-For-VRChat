@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="t d">
+  <title id="t">Akashic for VRChat &amp; Unity</title>
+  <desc id="d">Hero banner: project name and bilingual tagline on the left; on the right an animated library panel — package boxes sliding into registry shelf slots and a search field with a blinking caret.</desc>
+
+  <defs>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0v48" fill="none" stroke="#16213E" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="360" rx="26" fill="#0B1020"/>
+  <rect width="1200" height="360" rx="26" fill="url(#grid)" opacity="0.55"/>
+
+  <!-- title block -->
+  <g transform="translate(64 52)">
+    <text font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="20" letter-spacing="3" fill="#8B7BE8">AKASHIC &#183; UNITY x VRCHAT</text>
+    <text y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="700" fill="#E8ECF8">Akashic</text>
+
+    <path d="M2 104 l14 -14 12 28 14 -28 12 28 14 -28 12 28 16 -14" fill="none" stroke="#8B7BE8" stroke-width="2.5" stroke-linecap="round" opacity="0.85"/>
+
+    <text y="152" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#C3CEE8">One window for projects, packages,</text>
+    <text y="184" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" fill="#C3CEE8">store purchases and cloud data.</text>
+    <text y="218" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#8FA0C8">&#38754;&#21521; VRChat &#21019;&#20316;&#32773;&#30340; Unity &#21253;&#31649;&#29702;&#26700;&#38754;&#36719;&#20214;</text>
+
+    <g transform="translate(0 240)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#9FB0D8">
+      <rect width="60" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">C#</text>
+      <g transform="translate(74 0)"><rect width="150" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">Windows</text></g>
+      <g transform="translate(238 0)"><rect width="150" height="34" rx="8" fill="none" stroke="#2A3A60"/><text x="16" y="23">Booth &#183; VCC</text></g>
+    </g>
+  </g>
+
+  <!-- library panel -->
+  <g transform="translate(676 40)">
+    <rect width="460" height="280" rx="18" fill="#070C1C" stroke="#223258" stroke-width="1.5"/>
+    <text x="24" y="36" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#5B6C93">LIBRARY</text>
+    <text x="330" y="36" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#8B7BE8">&#26412;&#22320; + &#20113;&#31471;</text>
+
+    <!-- shelf 1: packages, one box sliding right -->
+    <g transform="translate(24 56)">
+      <text y="34" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#8FA0C8">&#36719;&#20214;&#21253;</text>
+      <g transform="translate(72 0)">
+        <rect width="364" height="48" rx="10" fill="none" stroke="#1E2A4A"/>
+        <g fill="none" stroke="#4EF7C8" stroke-width="2">
+          <rect x="10" y="8" width="56" height="32" rx="6"/>
+          <rect x="98" y="8" width="56" height="32" rx="6"/>
+          <rect x="186" y="8" width="56" height="32" rx="6"/>
+          <rect x="274" y="8" width="56" height="32" rx="6"/>
+        </g>
+        <rect x="10" y="8" width="56" height="32" rx="6" fill="#4EF7C8">
+          <animateTransform attributeName="transform" type="translate" values="0 0;0 0;264 0;264 0" keyTimes="0;0.15;0.55;1" dur="3.2s" repeatCount="indefinite"/>
+        </rect>
+      </g>
+    </g>
+
+    <!-- shelf 2: assets, one box sliding left -->
+    <g transform="translate(24 120)">
+      <text y="34" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#8FA0C8">&#36164;&#20135;</text>
+      <g transform="translate(72 0)">
+        <rect width="364" height="48" rx="10" fill="none" stroke="#1E2A4A"/>
+        <g fill="none" stroke="#8B7BE8" stroke-width="2">
+          <rect x="10" y="8" width="56" height="32" rx="6"/>
+          <rect x="98" y="8" width="56" height="32" rx="6"/>
+          <rect x="186" y="8" width="56" height="32" rx="6"/>
+          <rect x="274" y="8" width="56" height="32" rx="6"/>
+        </g>
+        <rect x="274" y="8" width="56" height="32" rx="6" fill="#8B7BE8">
+          <animateTransform attributeName="transform" type="translate" values="0 0;0 0;-264 0;-264 0" keyTimes="0;0.15;0.55;1" dur="3.8s" repeatCount="indefinite"/>
+        </rect>
+      </g>
+    </g>
+
+    <!-- shelf 3: stores, two settled boxes -->
+    <g transform="translate(24 184)">
+      <text y="34" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="18" fill="#8FA0C8">&#21830;&#24215;</text>
+      <g transform="translate(72 0)">
+        <rect width="364" height="48" rx="10" fill="none" stroke="#1E2A4A"/>
+        <rect x="10" y="8" width="56" height="32" rx="6" fill="#4EF7C8" opacity="0.85"/>
+        <rect x="98" y="8" width="56" height="32" rx="6" fill="#8B7BE8" opacity="0.85"/>
+        <g fill="none" stroke="#2A3A60" stroke-width="2">
+          <rect x="186" y="8" width="56" height="32" rx="6"/>
+          <rect x="274" y="8" width="56" height="32" rx="6"/>
+        </g>
+      </g>
+    </g>
+
+    <!-- search field -->
+    <g transform="translate(24 240)">
+      <rect width="412" height="30" rx="8" fill="none" stroke="#1E2A4A"/>
+      <text x="14" y="21" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#5B6C93">&gt; lilToon_</text>
+      <rect x="118" y="7" width="9" height="16" fill="#4EF7C8">
+        <animate attributeName="opacity" values="1;1;0;0" keyTimes="0;0.5;0.5;1" dur="1.1s" repeatCount="indefinite"/>
+      </rect>
+    </g>
+  </g>
+</svg>
