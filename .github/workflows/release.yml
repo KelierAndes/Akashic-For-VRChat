@@ -1,0 +1,86 @@
+name: 自动发布
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'Merge pull request')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 末位版本号 +1 并提交
+        id: bump
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
+          $props = Get-Content Directory.Build.props -Raw
+          if ($props -notmatch '<Version>(\d+)\.(\d+)\.(\d+)</Version>') { throw 'Directory.Build.props 里找不到 <Version>' }
+          $ver = "$($matches[1]).$($matches[2]).$([int]$matches[3] + 1)"
+          Set-Content Directory.Build.props ($props -replace '<Version>\d+\.\d+\.\d+</Version>', "<Version>$ver</Version>") -NoNewline
+          $pub = Get-Content app/pubspec.yaml -Raw
+          Set-Content app/pubspec.yaml ($pub -replace '(?m)^version: \d+\.\d+\.\d+\+\d+', "version: $ver+1") -NoNewline
+          git add Directory.Build.props app/pubspec.yaml
+          git commit -m "版本：提到 v$ver（自动） [skip ci]"
+          git push origin HEAD:main
+          Add-Content $env:GITHUB_OUTPUT "version=$ver"
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: 构建
+        shell: pwsh
+        run: ./scripts/build-app.ps1
+
+      - name: 打包
+        shell: pwsh
+        run: ./scripts/stage-dist.ps1
+
+      - name: 签名
+        shell: pwsh
+        env:
+          SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'update-signing-key.pem'
+          [System.IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY)
+          try {
+            ./scripts/sign-release.ps1 -Zip dist/Akashic.zip -KeyPath $keyPath
+          } finally {
+            Remove-Item $keyPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: 打 tag 并发布 release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          git tag "v$env:VERSION"
+          git push origin "v$env:VERSION"
+          gh release create "v$env:VERSION" dist/Akashic.zip dist/Akashic.zip.sig dist/Akashic.zip.sha256 --title "Akashic for VRChat v$env:VERSION" --generate-notes

@@ -110,7 +110,13 @@ powershell -ExecutionPolicy Bypass -File scripts\stage-dist.ps1   # → dist\Aka
 
 `stage-dist.ps1` 会把整个 Release 目录搬到 `dist/Akashic`，**排除 `*.WebView2`**（那是运行时的 WebView2 用户数据目录，含登录态与缓存，不是构建产物），再按原来的 `Akashic/` 顶层结构压成 `dist/Akashic.zip`。`dist/` 在 `.gitignore` 里。
 
-发布流程：
+发布流程（2026-11-08 起自动化）：
+
+* **PR 合并进 main** → `release.yml` 自动把末位版本号 +1（`Directory.Build.props` 与 `app/pubspec.yaml` 同步改），以 `[skip ci]` 提交推送（防自触发循环，并发组串行防版本打架），构建、签名、给该提交打 tag，`gh release create --generate-notes` 发布。版本号不再人工维护；手动改 minor/major 后直接 push 只出 artifact，正式发布仍由 action 在其上末位 +1。
+* **直接 push main** → `build-main.yml` 只构建、打包、签名并上传三件套 artifact（Actions 页下载，保留 30 天），不发 release。
+* **手动兜底**：Actions 页「自动发布」workflow 可手动触发（同样末位 +1）。
+* **PR 检查**：`pr-check.yml` 对指向 main 的 PR 跑 `test-all.ps1` + `build-app.ps1`（windows-latest，.NET 8+10、Flutter 3.47.7 与本机一致）。
+* CI 签名私钥来自仓库 secret `UPDATE_SIGNING_KEY`（经用户同意上传，与本地私钥同一份）。本地手动链仍可用：
 
 ```powershell
 git tag -a v<版本> -m "Akashic for VRChat v<版本>"; git push origin v<版本>
