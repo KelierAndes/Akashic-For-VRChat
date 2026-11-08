@@ -18,8 +18,11 @@ $zipFull = (Resolve-Path $Zip).Path
 $sigPath = $zipFull + '.sig'
 $hashPath = $zipFull + '.sha256'
 
-& $openssl dgst -sha256 -sign $KeyPath -out $sigPath $zipFull
+$derPath = $zipFull + '.sig.der'
+& $openssl dgst -sha256 -sign $KeyPath -out $derPath $zipFull
 if ($LASTEXITCODE -ne 0) { throw ('openssl sign failed: ' + $LASTEXITCODE) }
+Set-Content -Path $sigPath -Value ([Convert]::ToBase64String([IO.File]::ReadAllBytes($derPath))) -Encoding ascii -NoNewline
+Remove-Item $derPath -Force
 
 $hash = (Get-FileHash -Path $zipFull -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -Path $hashPath -Value $hash -Encoding ascii -NoNewline

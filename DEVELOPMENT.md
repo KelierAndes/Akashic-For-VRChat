@@ -124,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File scripts\sign-release.ps1 dist\Akashic.z
 gh release create v<版本> dist\Akashic.zip dist\Akashic.zip.sha256 dist\Akashic.zip.sig --title "Akashic for VRChat v<版本>" --notes-file <notes.md>
 ```
 
-`sign-release.ps1` 用 openssl 对 zip 做 SHA256 + ECDSA P-256 签名，产出 `Akashic.zip.sha256` 与 `Akashic.zip.sig`；**三个文件都要作为 Release 资源上传**。私钥在 `E:\Akashic\backups\Akashic-UpdateSigning\update-signing-key.pem`（仓库外，绝不能提交），公钥已内置在 `UpdateService.PublicKey`。换密钥意味着老版本无法验证新包，只能靠用户手动下载覆盖。
+`sign-release.ps1` 用 openssl 对 zip 做 SHA256 + ECDSA P-256 签名，产出 `Akashic.zip.sha256`（hex 文本）与 `Akashic.zip.sig`（**Base64 文本**：客户端 `UpdateService` 先 `Convert.FromBase64String` 再按 DER 验签，写裸 DER 会让更新报 Base-64 格式错——v2.3.4 曾因此失败，2026-11-08 改脚本并替换资产修复）；**三个文件都要作为 Release 资源上传**。私钥在 `E:\Akashic\backups\Akashic-UpdateSigning\update-signing-key.pem`（仓库外，绝不能提交；CI 用同一份的仓库 secret `UPDATE_SIGNING_KEY`），公钥已内置在 `UpdateService.PublicKey`。换密钥意味着老版本无法验证新包，只能靠用户手动下载覆盖。
 
 ### 自动更新
 
