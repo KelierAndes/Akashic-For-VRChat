@@ -1,0 +1,46 @@
+name: 合并后构建
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-main
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+
+      - name: 构建
+        shell: pwsh
+        run: ./scripts/build-app.ps1
+
+      - name: 打包
+        shell: pwsh
+        run: ./scripts/stage-dist.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Akashic-windows-${{ github.sha }}
+          path: dist/Akashic.zip
+          retention-days: 30
+          if-no-files-found: error

@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-$root  = 'E:\Akashic\VPMManager'
+$root  = Split-Path -Parent $PSScriptRoot
 $src   = Join-Path $root 'app\build\windows\x64\runner\Release'
 $dst   = Join-Path $root 'dist\Akashic'
 $zip   = Join-Path $root 'dist\Akashic.zip'
