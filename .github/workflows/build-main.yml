@@ -38,9 +38,25 @@ jobs:
         shell: pwsh
         run: ./scripts/stage-dist.ps1
 
+      - name: 签名
+        shell: pwsh
+        env:
+          SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP 'update-signing-key.pem'
+          [System.IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY)
+          try {
+            ./scripts/sign-release.ps1 -Zip dist/Akashic.zip -KeyPath $keyPath
+          } finally {
+            Remove-Item $keyPath -Force -ErrorAction SilentlyContinue
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: Akashic-windows-${{ github.sha }}
-          path: dist/Akashic.zip
+          path: |
+            dist/Akashic.zip
+            dist/Akashic.zip.sig
+            dist/Akashic.zip.sha256
           retention-days: 30
           if-no-files-found: error
